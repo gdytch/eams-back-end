@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreOrganizationRequest;
 use App\Http\Requests\UpdateOrganizationRequest;
 use App\Http\Resources\OrganizationResource;
+use App\Models\AuditLog;
 use App\Models\Organization;
 use Illuminate\Http\Request;
 
@@ -28,6 +29,8 @@ class OrganizationController extends Controller
     {
         $organization = Organization::create($request->validated());
 
+        AuditLog::record('organization.created', $organization);
+
         return OrganizationResource::make($organization)->response()->setStatusCode(201);
     }
 
@@ -48,6 +51,8 @@ class OrganizationController extends Controller
     {
         $organization->update($request->validated());
 
+        AuditLog::record('organization.updated', $organization, $request->validated());
+
         return OrganizationResource::make($organization);
     }
 
@@ -57,6 +62,8 @@ class OrganizationController extends Controller
     public function destroy(Organization $organization)
     {
         $this->authorize('delete', $organization);
+
+        AuditLog::record('organization.deleted', $organization);
 
         $organization->delete();
 

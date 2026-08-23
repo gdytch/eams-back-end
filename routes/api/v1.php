@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AttendeeController;
+use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\EventController;
 use App\Http\Controllers\Api\V1\EventRegistrationController;
@@ -33,6 +34,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::scopeBindings()->group(function () {
         Route::apiResource('events.sessions', EventSessionController::class);
+
+        Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr']);
         Route::apiResource('events.registrations', EventRegistrationController::class)
             ->only(['index', 'store', 'show', 'destroy']);
 
@@ -42,4 +45,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('attendance/scan', [AttendanceController::class, 'scan']);
     Route::post('attendance/manual', [AttendanceController::class, 'manual']);
     Route::post('attendance/{attendanceRecord}/check-out', [AttendanceController::class, 'checkOut']);
+
+    Route::get('audit-logs', [AuditLogController::class, 'index']);
 });

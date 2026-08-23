@@ -8,6 +8,7 @@ use App\Http\Requests\StoreAttendeeRequest;
 use App\Http\Requests\UpdateAttendeeRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Models\Attendee;
+use App\Models\AuditLog;
 use Illuminate\Http\Request;
 
 class AttendeeController extends Controller
@@ -56,6 +57,8 @@ class AttendeeController extends Controller
 
         $attendee = Attendee::create($data);
 
+        AuditLog::record('attendee.created', $attendee);
+
         return AttendeeResource::make($attendee)->response()->setStatusCode(201);
     }
 
@@ -90,6 +93,8 @@ class AttendeeController extends Controller
     {
         $attendee->update($request->validated());
 
+        AuditLog::record('attendee.updated', $attendee, $request->validated());
+
         return AttendeeResource::make($attendee);
     }
 
@@ -99,6 +104,8 @@ class AttendeeController extends Controller
     public function destroy(Attendee $attendee)
     {
         $this->authorize('delete', $attendee);
+
+        AuditLog::record('attendee.deleted', $attendee);
 
         $attendee->delete();
 

@@ -8,6 +8,7 @@ use App\Http\Requests\ManualAttendanceRequest;
 use App\Http\Requests\ScanAttendanceRequest;
 use App\Http\Resources\AttendanceRecordResource;
 use App\Models\AttendanceRecord;
+use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
@@ -68,6 +69,8 @@ class AttendanceController extends Controller
 
         $attendanceRecord->update(['check_out_at' => now()]);
 
+        AuditLog::record('attendance.checked_out', $attendanceRecord);
+
         return AttendanceRecordResource::make($attendanceRecord);
     }
 
@@ -101,13 +104,15 @@ class AttendanceController extends Controller
         $canOverride = $request->boolean('override')
             && ($request->user()->isSuperAdmin() || $request->user()->isOrgAdmin());
 
-        if (now()->lessThan($session->checkInOpensAt()) && ! $canOverride) {
+        $isEarly = now()->lessThan($session->checkInOpensAt());
+
+        if ($isEarly && ! $canOverride) {
             throw ValidationException::withMessages([
                 'session_id' => 'Attendance for this session has not opened yet.',
             ]);
         }
 
-        return DB::transaction(function () use ($existing, $registration, $session, $method, $request) {
+        return DB::transaction(function () use ($existing, $registration, $session, $method, $request, $isEarly) {
             $attendance = $existing ?? new AttendanceRecord([
                 'event_registration_id' => $registration->id,
                 'event_session_id' => $session->id,
@@ -117,6 +122,12 @@ class AttendanceController extends Controller
             $attendance->method = $method;
             $attendance->recorded_by = $request->user()->id;
             $attendance->save();
+
+            AuditLog::record(
+                $isEarly ? 'attendance.checked_in_override' : 'attendance.checked_in',
+                $attendance,
+                ['method' => $method->value, 'session_id' => $session->id],
+            );
 
             return AttendanceRecordResource::make($attendance->load('eventRegistration.attendee'))
                 ->response()

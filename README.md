@@ -65,11 +65,13 @@ header.
 - `GET|POST /events`, `GET|PUT|DELETE /events/{event}`
 - `GET|POST /events/{event}/sessions`, `GET|PUT|DELETE /events/{event}/sessions/{session}`
 - `GET|POST /events/{event}/registrations`, `GET|DELETE /events/{event}/registrations/{registration}`
+- `GET /events/{event}/registrations/qr-export` — bulk QR-code PDF export (Org Admin+, optional `registration_ids[]` filter)
 - `POST /attendance/scan`, `POST /attendance/manual`, `POST /attendance/{attendanceRecord}/check-out`
 - `GET /events/{event}/sessions/{session}/attendance`
+- `GET /audit-logs` — Super Admin sees all, Org Admin sees their own organization only
 
 ## Scope
 
-This is Phase 1 of the system: core foundation (organizations, auth/roles, territories, attendees,
-events/sessions/registrations, QR + manual attendance). Offline sync, reports/dashboards, bulk
-QR-code PDF export, attendee ID cards, and the audit log are planned for later phases.
+Phase 1 (core foundation) and Phase 2 (audit log, bulk QR-code PDF export) are implemented.
+Offline sync, reports/dashboards, Excel/CSV export, and attendee ID cards are planned for later
+phases.

@@ -3,14 +3,18 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ExportEventRegistrationsQrRequest;
 use App\Http\Requests\StoreEventRegistrationRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventRegistrationResource;
 use App\Models\Attendee;
+use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class EventRegistrationController extends Controller
 {
@@ -73,6 +77,8 @@ class EventRegistrationController extends Controller
                 'registered_by' => $request->user()->id,
             ]);
 
+            AuditLog::record('event_registration.created', $registration, ['attendee_id' => $attendee->id]);
+
             return EventRegistrationResource::make($registration->load('attendee'))->response()->setStatusCode(201);
         });
     }
@@ -94,8 +100,40 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('delete', $registration);
 
+        AuditLog::record('event_registration.deleted', $registration, ['attendee_id' => $registration->attendee_id]);
+
         $registration->delete();
 
         return response()->noContent();
+    }
+
+    /**
+     * Generate a print-ready PDF of QR codes for all or selected attendees registered to the event.
+     */
+    public function exportQr(ExportEventRegistrationsQrRequest $request, Event $event)
+    {
+        $query = $event->registrations()->with('attendee');
+
+        if ($request->filled('registration_ids')) {
+            $query->whereIn('id', $request->validated('registration_ids'));
+        }
+
+        $registrations = $query->get();
+
+        $qrSvgs = $registrations->mapWithKeys(fn (EventRegistration $registration) => [
+            $registration->id => QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token),
+        ]);
+
+        $pdf = Pdf::loadView('pdf.bulk-qr-codes', [
+            'event' => $event,
+            'registrations' => $registrations,
+            'qrSvgs' => $qrSvgs,
+        ]);
+
+        AuditLog::record('event_registration.qr_pdf_exported', $event, [
+            'registration_ids' => $registrations->pluck('id')->all(),
+        ]);
+
+        return $pdf->download("event-{$event->id}-qr-codes.pdf");
     }
 }

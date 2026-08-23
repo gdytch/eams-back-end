@@ -8,6 +8,7 @@ use App\Http\Requests\SyncUserEventAccessRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Http\Resources\EventResource;
 use App\Http\Resources\UserResource;
+use App\Models\AuditLog;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -41,6 +42,8 @@ class UserController extends Controller
 
         $user = User::create($data);
 
+        AuditLog::record('user.created', $user, ['role' => $data['role']]);
+
         return UserResource::make($user)->response()->setStatusCode(201);
     }
 
@@ -67,6 +70,8 @@ class UserController extends Controller
 
         $user->update($data);
 
+        AuditLog::record('user.updated', $user, array_diff_key($data, ['password' => null]));
+
         return UserResource::make($user);
     }
 
@@ -76,6 +81,8 @@ class UserController extends Controller
     public function destroy(User $user)
     {
         $this->authorize('delete', $user);
+
+        AuditLog::record('user.deleted', $user);
 
         $user->delete();
 

@@ -1,0 +1,1415 @@
+openapi: 3.0.3
+info:
+  title: Event Attendance Management System (EAMS) API
+  description: >
+    API-only backend for the Event Attendance Management System. Multi-organization tenant
+    model: every resource except `User` (Super Admins have no organization) is scoped to the
+    caller's organization automatically — Super Admins see across all organizations, everyone
+    else only ever sees their own. Cross-organization access to a scoped resource returns
+    `404 Not Found` (not `403`), since the record is filtered out of the query entirely.
+  version: "1.0.0"
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local development (docker compose)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Organizations
+    description: Super Admin only.
+  - name: Users
+  - name: Territories
+    description: Unions and Missions.
+  - name: Attendees
+  - name: Events
+  - name: Event Sessions
+  - name: Event Registrations
+  - name: Attendance
+  - name: Audit Logs
+
+paths:
+  # ---------------------------------------------------------------- Auth
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in and obtain a bearer token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, description: "Sanctum personal access token — send as `Authorization: Bearer <token>` on every subsequent request." }
+                  user: { $ref: "#/components/schemas/User" }
+        "422":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current access token
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Logged out." }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated user's profile
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  # ---------------------------------------------------------------- Organizations
+  /organizations:
+    get:
+      tags: [Organizations]
+      summary: List organizations
+      description: Super Admin only.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200": { $ref: "#/components/responses/OrganizationList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Organizations]
+      summary: Create an organization
+      description: Super Admin only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code]
+              properties:
+                name: { type: string, maxLength: 255 }
+                code: { type: string, maxLength: 50, description: "Unique short code." }
+                logo_path: { type: string, nullable: true }
+                is_active: { type: boolean, default: true }
+      responses:
+        "201": { $ref: "#/components/responses/OrganizationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /organizations/{organization}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Organizations]
+      summary: Get an organization
+      responses:
+        "200": { $ref: "#/components/responses/OrganizationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Organizations]
+      summary: Update an organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 255 }
+                code: { type: string, maxLength: 50 }
+                logo_path: { type: string, nullable: true }
+                is_active: { type: boolean }
+      responses:
+        "200": { $ref: "#/components/responses/OrganizationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Organizations]
+      summary: Delete an organization
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Users
+  /users:
+    get:
+      tags: [Users]
+      summary: List users
+      description: Super Admin sees all users; everyone else sees only their own organization's users.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200": { $ref: "#/components/responses/UserList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [Users]
+      summary: Create a user
+      description: >
+        Super Admin or Org Admin only. `organization_id` is required when a Super Admin creates
+        a non-Super-Admin user; otherwise it defaults to the actor's own organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, role]
+              properties:
+                name: { type: string, maxLength: 255 }
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 8 }
+                role: { $ref: "#/components/schemas/UserRole" }
+                organization_id: { type: integer, nullable: true }
+      responses:
+        "201": { $ref: "#/components/responses/UserItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /users/{user}:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    get:
+      tags: [Users]
+      summary: Get a user
+      responses:
+        "200": { $ref: "#/components/responses/UserItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Users]
+      summary: Update a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 255 }
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 8 }
+                role: { $ref: "#/components/schemas/UserRole" }
+      responses:
+        "200": { $ref: "#/components/responses/UserItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Users]
+      summary: Delete a user
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /users/{user}/event-access:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    put:
+      tags: [Users]
+      summary: Replace a Checker's restricted event list
+      description: >
+        Syncs the `event_checker_access` pivot for this user. An empty `event_ids` array means
+        the Checker defaults back to full access to every event in their organization (this is
+        also the default for a brand-new Checker with no rows at all). Super Admins and Org
+        Admins always have full access regardless of this list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_ids]
+              properties:
+                event_ids:
+                  type: array
+                  items: { type: integer }
+      responses:
+        "200":
+          description: The events the user is now restricted to (empty = unrestricted).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  # ---------------------------------------------------------------- Unions
+  /unions:
+    get:
+      tags: [Territories]
+      summary: List unions
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200": { $ref: "#/components/responses/UnionList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [Territories]
+      summary: Create a union
+      description: "`organization_id` is required for Super Admins; otherwise defaults to the actor's organization."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                organization_id: { type: integer, nullable: true }
+                name: { type: string, maxLength: 255 }
+                code: { type: string, maxLength: 50, nullable: true }
+      responses:
+        "201": { $ref: "#/components/responses/UnionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /unions/{union}:
+    parameters:
+      - $ref: "#/components/parameters/UnionId"
+    get:
+      tags: [Territories]
+      summary: Get a union
+      responses:
+        "200": { $ref: "#/components/responses/UnionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Territories]
+      summary: Update a union
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 255 }
+                code: { type: string, maxLength: 50, nullable: true }
+      responses:
+        "200": { $ref: "#/components/responses/UnionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Territories]
+      summary: Delete a union
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Missions
+  /missions:
+    get:
+      tags: [Territories]
+      summary: List missions
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200": { $ref: "#/components/responses/MissionList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [Territories]
+      summary: Create a mission
+      description: "`union_id` must belong to the resolved organization. `organization_id` is required for Super Admins."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [union_id, name]
+              properties:
+                organization_id: { type: integer, nullable: true }
+                union_id: { type: integer }
+                name: { type: string, maxLength: 255 }
+                code: { type: string, maxLength: 50, nullable: true }
+      responses:
+        "201": { $ref: "#/components/responses/MissionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /missions/{mission}:
+    parameters:
+      - $ref: "#/components/parameters/MissionId"
+    get:
+      tags: [Territories]
+      summary: Get a mission
+      responses:
+        "200": { $ref: "#/components/responses/MissionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Territories]
+      summary: Update a mission
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                union_id: { type: integer }
+                name: { type: string, maxLength: 255 }
+                code: { type: string, maxLength: 50, nullable: true }
+      responses:
+        "200": { $ref: "#/components/responses/MissionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Territories]
+      summary: Delete a mission
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Attendees
+  /attendees:
+    get:
+      tags: [Attendees]
+      summary: List / search attendees
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: search
+          in: query
+          description: Matches against first, middle, and last name (partial, case-insensitive).
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [Attendees]
+      summary: Create an attendee (master record)
+      description: >
+        Runs duplicate detection first (normalized first/middle/last name match, scoped to the
+        organization). If matches are found and `override_duplicate` is not `true`, returns
+        `409` with the candidate list instead of creating the record.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, last_name]
+              properties:
+                organization_id: { type: integer, nullable: true, description: "Required for Super Admins." }
+                union_id: { type: integer, nullable: true }
+                mission_id: { type: integer, nullable: true }
+                first_name: { type: string, maxLength: 100 }
+                middle_name: { type: string, maxLength: 100, nullable: true }
+                last_name: { type: string, maxLength: 100 }
+                profile_photo_path: { type: string, nullable: true }
+                override_duplicate: { type: boolean, default: false }
+      responses:
+        "201": { $ref: "#/components/responses/AttendeeItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/DuplicateAttendees" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /attendees/check-duplicates:
+    get:
+      tags: [Attendees]
+      summary: Check for potential duplicate attendees by name (does not create anything)
+      parameters:
+        - name: first_name
+          in: query
+          required: true
+          schema: { type: string, maxLength: 100 }
+        - name: middle_name
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: last_name
+          in: query
+          required: true
+          schema: { type: string, maxLength: 100 }
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /attendees/{attendee}:
+    parameters:
+      - $ref: "#/components/parameters/AttendeeId"
+    get:
+      tags: [Attendees]
+      summary: Get an attendee
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Attendees]
+      summary: Update an attendee
+      description: Does not re-run duplicate detection.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                union_id: { type: integer, nullable: true }
+                mission_id: { type: integer, nullable: true }
+                first_name: { type: string, maxLength: 100 }
+                middle_name: { type: string, maxLength: 100, nullable: true }
+                last_name: { type: string, maxLength: 100 }
+                profile_photo_path: { type: string, nullable: true }
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Attendees]
+      summary: Delete an attendee
+      description: Org Admin+ only.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Events
+  /events:
+    get:
+      tags: [Events]
+      summary: List events
+      description: >
+        Checkers only see events they have access to: every event in their organization by
+        default, or a restricted subset if `event_checker_access` rows exist for them (see
+        `PUT /users/{user}/event-access`).
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200": { $ref: "#/components/responses/EventList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [Events]
+      summary: Create an event
+      description: Org Admin+ only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, start_date, end_date]
+              properties:
+                organization_id: { type: integer, nullable: true, description: "Required for Super Admins." }
+                name: { type: string, maxLength: 255 }
+                description: { type: string, nullable: true }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date, description: "Must be on/after start_date." }
+                venue: { type: string, maxLength: 255, nullable: true }
+                status: { $ref: "#/components/schemas/EventStatus" }
+                requires_check_out: { type: boolean, default: false }
+                check_in_window_minutes:
+                  type: integer
+                  default: 30
+                  description: How many minutes before a session's start time check-in opens.
+      responses:
+        "201": { $ref: "#/components/responses/EventItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Events]
+      summary: Get an event
+      responses:
+        "200": { $ref: "#/components/responses/EventItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Events]
+      summary: Update an event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 255 }
+                description: { type: string, nullable: true }
+                start_date: { type: string, format: date }
+                end_date: { type: string, format: date }
+                venue: { type: string, maxLength: 255, nullable: true }
+                status: { $ref: "#/components/schemas/EventStatus" }
+                requires_check_out: { type: boolean }
+                check_in_window_minutes: { type: integer }
+      responses:
+        "200": { $ref: "#/components/responses/EventItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Events]
+      summary: Delete an event
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Event Sessions
+  /events/{event}/sessions:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Event Sessions]
+      summary: List an event's sessions
+      description: Ordered by session_date then start_time.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/EventSession" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Event Sessions]
+      summary: Create a session for an event
+      description: Org Admin+ only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, session_date, start_time, end_time]
+              properties:
+                name: { type: string, maxLength: 255 }
+                description: { type: string, nullable: true }
+                session_date: { type: string, format: date }
+                start_time: { type: string, example: "08:00", description: "H:i format." }
+                end_time: { type: string, example: "12:00", description: "H:i format, must be after start_time." }
+      responses:
+        "201": { $ref: "#/components/responses/EventSessionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/sessions/{session}:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [Event Sessions]
+      summary: Get a session
+      responses:
+        "200": { $ref: "#/components/responses/EventSessionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Event Sessions]
+      summary: Update a session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 255 }
+                description: { type: string, nullable: true }
+                session_date: { type: string, format: date }
+                start_time: { type: string, example: "08:00" }
+                end_time: { type: string, example: "12:00" }
+      responses:
+        "200": { $ref: "#/components/responses/EventSessionItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Event Sessions]
+      summary: Delete a session
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/sessions/{session}/attendance:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [Attendance]
+      summary: List attendance records for a session
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AttendanceRecord" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Event Registrations
+  /events/{event}/registrations:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Event Registrations]
+      summary: List an event's registrations
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: search
+          in: query
+          description: Matches against the registered attendee's first/last name.
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/EventRegistrationList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Event Registrations]
+      summary: Register an attendee for the event
+      description: >
+        One call does either: (a) register an existing attendee — pass `attendee_id`; or
+        (b) create a brand-new attendee (scoped to this event's organization) and register them
+        in the same request — pass `first_name`/`last_name` (+ optional `middle_name`,
+        `union_id`, `mission_id`). New-attendee creation runs the same duplicate-detection check
+        as `POST /attendees` and returns `409` unless `override_duplicate` is `true`. A unique,
+        non-guessable `qr_token` is generated for the new registration either way.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                attendee_id: { type: integer, nullable: true, description: "Existing attendee. Mutually exclusive with first_name/last_name." }
+                first_name: { type: string, maxLength: 100, nullable: true }
+                middle_name: { type: string, maxLength: 100, nullable: true }
+                last_name: { type: string, maxLength: 100, nullable: true }
+                union_id: { type: integer, nullable: true }
+                mission_id: { type: integer, nullable: true }
+                override_duplicate: { type: boolean, default: false }
+      responses:
+        "201": { $ref: "#/components/responses/EventRegistrationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/DuplicateAttendees" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/registrations/qr-export:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Event Registrations]
+      summary: Bulk-export QR codes as a PDF
+      description: >
+        Org Admin+ only. Generates a print-ready PDF with one QR code per registered attendee.
+        Defaults to every registration on the event; pass `registration_ids[]` to export a
+        subset. This action is recorded in the audit log.
+      parameters:
+        - name: registration_ids[]
+          in: query
+          schema:
+            type: array
+            items: { type: integer }
+      responses:
+        "200":
+          description: PDF file stream
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/registrations/{registration}:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - $ref: "#/components/parameters/RegistrationId"
+    get:
+      tags: [Event Registrations]
+      summary: Get a registration
+      description: Includes the `qr_token` — treat the response as sensitive.
+      responses:
+        "200": { $ref: "#/components/responses/EventRegistrationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Event Registrations]
+      summary: Unregister an attendee from the event
+      description: Org Admin+ only. Also deletes any attendance records for this registration (cascade).
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ---------------------------------------------------------------- Attendance
+  /attendance/scan:
+    post:
+      tags: [Attendance]
+      summary: Record attendance from a QR scan
+      description: >
+        Resolves the registration by `qr_token` scoped to `event_id`, then applies the same
+        window/duplicate rules as manual attendance (see below).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, session_id, qr_token]
+              properties:
+                event_id: { type: integer }
+                session_id: { type: integer }
+                qr_token: { type: string }
+                override:
+                  type: boolean
+                  default: false
+                  description: "Org Admin+ only: bypass the check-in window for a past/future session correction. Ignored (and the early-window error still thrown) for Checkers."
+      responses:
+        "201": { $ref: "#/components/responses/AttendanceRecordItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/AttendanceValidationFailed" }
+
+  /attendance/manual:
+    post:
+      tags: [Attendance]
+      summary: Record attendance manually (fallback when QR scanning is unavailable)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_id, session_id, event_registration_id]
+              properties:
+                event_id: { type: integer }
+                session_id: { type: integer }
+                event_registration_id: { type: integer }
+                override:
+                  type: boolean
+                  default: false
+                  description: "Org Admin+ only: bypass the check-in window."
+      responses:
+        "201": { $ref: "#/components/responses/AttendanceRecordItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/AttendanceValidationFailed" }
+
+  /attendance/{attendanceRecord}/check-out:
+    parameters:
+      - $ref: "#/components/parameters/AttendanceRecordId"
+    post:
+      tags: [Attendance]
+      summary: Record a check-out
+      description: Only allowed when the event's `requires_check_out` flag is true.
+      responses:
+        "200": { $ref: "#/components/responses/AttendanceRecordItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Event does not require check-out
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
+  # ---------------------------------------------------------------- Audit Logs
+  /audit-logs:
+    get:
+      tags: [Audit Logs]
+      summary: List audit log entries
+      description: >
+        Super Admin sees every entry across all organizations; Org Admin sees only their own
+        organization's entries; Checkers are forbidden. Append-only — there is no write endpoint,
+        entries are created internally whenever a tracked action happens (see `action` values
+        below).
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: action
+          in: query
+          description: >
+            Exact match. Known values: `attendee.created`, `attendee.updated`, `attendee.deleted`,
+            `event_registration.created`, `event_registration.deleted`,
+            `event_registration.qr_pdf_exported`, `attendance.checked_in`,
+            `attendance.checked_in_override`, `attendance.checked_out`, `user.created`,
+            `user.updated`, `user.deleted`, `organization.created`, `organization.updated`,
+            `organization.deleted`.
+          schema: { type: string }
+        - name: auditable_type
+          in: query
+          description: 'Fully-qualified model class, e.g. `App\Models\Attendee`.'
+          schema: { type: string }
+        - name: user_id
+          in: query
+          schema: { type: integer }
+        - name: from
+          in: query
+          description: Inclusive lower bound on created_at.
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          description: Inclusive upper bound on created_at.
+          schema: { type: string, format: date }
+      responses:
+        "200": { $ref: "#/components/responses/AuditLogList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Laravel Sanctum personal access token, obtained from `POST /auth/login`.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    OrganizationId: { name: organization, in: path, required: true, schema: { type: integer } }
+    UserId: { name: user, in: path, required: true, schema: { type: integer } }
+    UnionId: { name: union, in: path, required: true, schema: { type: integer } }
+    MissionId: { name: mission, in: path, required: true, schema: { type: integer } }
+    AttendeeId: { name: attendee, in: path, required: true, schema: { type: integer } }
+    EventId: { name: event, in: path, required: true, schema: { type: integer } }
+    SessionId: { name: session, in: path, required: true, schema: { type: integer } }
+    RegistrationId: { name: registration, in: path, required: true, schema: { type: integer } }
+    AttendanceRecordId: { name: attendanceRecord, in: path, required: true, schema: { type: integer } }
+
+  schemas:
+    UserRole:
+      type: string
+      enum: [super_admin, org_admin, checker]
+
+    EventStatus:
+      type: string
+      enum: [draft, published, completed, cancelled]
+
+    AttendanceMethod:
+      type: string
+      enum: [qr, manual]
+
+    Organization:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        code: { type: string }
+        logo_path: { type: string, nullable: true }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: "#/components/schemas/UserRole" }
+        organization_id: { type: integer, nullable: true, description: "Always null for super_admin." }
+        organization:
+          allOf: [{ $ref: "#/components/schemas/Organization" }]
+          description: Only present when explicitly eager-loaded server-side.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Union:
+      type: object
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer }
+        name: { type: string }
+        code: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Mission:
+      type: object
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer }
+        union_id: { type: integer }
+        name: { type: string }
+        code: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Attendee:
+      type: object
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer }
+        union_id: { type: integer, nullable: true }
+        mission_id: { type: integer, nullable: true }
+        first_name: { type: string }
+        middle_name: { type: string, nullable: true }
+        last_name: { type: string }
+        full_name: { type: string, description: "Derived: first + middle + last, trimmed." }
+        profile_photo_path: { type: string, nullable: true }
+        union: { $ref: "#/components/schemas/Union" }
+        mission: { $ref: "#/components/schemas/Mission" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    Event:
+      type: object
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        venue: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/EventStatus" }
+        requires_check_out: { type: boolean }
+        check_in_window_minutes: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    EventSession:
+      type: object
+      properties:
+        id: { type: integer }
+        event_id: { type: integer }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        session_date: { type: string, format: date }
+        start_time: { type: string, example: "08:00:00" }
+        end_time: { type: string, example: "12:00:00" }
+        check_in_opens_at:
+          type: string
+          format: date-time
+          description: "Derived: session start minus the event's check_in_window_minutes."
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    EventRegistration:
+      type: object
+      properties:
+        id: { type: integer }
+        event_id: { type: integer }
+        attendee_id: { type: integer }
+        qr_token:
+          type: string
+          description: Opaque, random, non-guessable. Unique per registration, never reused. Treat as sensitive.
+        registered_by: { type: integer, nullable: true, description: "User id." }
+        registered_at: { type: string, format: date-time }
+        attendee: { $ref: "#/components/schemas/Attendee" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AttendanceRecord:
+      type: object
+      properties:
+        id: { type: integer }
+        event_registration_id: { type: integer }
+        event_session_id: { type: integer }
+        check_in_at: { type: string, format: date-time, nullable: true }
+        check_out_at: { type: string, format: date-time, nullable: true }
+        method: { $ref: "#/components/schemas/AttendanceMethod" }
+        recorded_by: { type: integer, nullable: true, description: "User id." }
+        event_registration: { $ref: "#/components/schemas/EventRegistration" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AuditLog:
+      type: object
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer, nullable: true }
+        user:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            name: { type: string }
+        action: { type: string, example: "attendee.created" }
+        auditable_type: { type: string, nullable: true, example: "App\\Models\\Attendee" }
+        auditable_id: { type: integer, nullable: true }
+        changes:
+          type: object
+          nullable: true
+          additionalProperties: true
+        ip_address: { type: string, nullable: true }
+        user_agent: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    PaginationLinks:
+      type: object
+      properties:
+        first: { type: string, format: uri, nullable: true }
+        last: { type: string, format: uri, nullable: true }
+        prev: { type: string, format: uri, nullable: true }
+        next: { type: string, format: uri, nullable: true }
+
+    PaginationMeta:
+      type: object
+      properties:
+        current_page: { type: integer }
+        from: { type: integer, nullable: true }
+        last_page: { type: integer }
+        path: { type: string }
+        per_page: { type: integer }
+        to: { type: integer, nullable: true }
+        total: { type: integer }
+
+    ValidationError:
+      type: object
+      properties:
+        message: { type: string }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+
+  responses:
+    Unauthenticated:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { message: "Unauthenticated." }
+
+    Forbidden:
+      description: Authenticated, but not allowed to perform this action
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { message: "This action is unauthorized." }
+
+    NotFound:
+      description: >
+        Not found — either the record truly doesn't exist, or (for organization-scoped
+        resources) it belongs to a different organization than the caller's.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+    ValidationFailed:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ValidationError" }
+
+    AttendanceValidationFailed:
+      description: >
+        Validation failed. Notable business-rule messages (under the relevant field key):
+        `"Already Checked In."`, `"Attendance for this session has not opened yet."`,
+        `"This QR code is not registered for this event."`
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ValidationError" }
+
+    DuplicateAttendees:
+      description: "Potential duplicate attendees found; resubmit with `override_duplicate: true` to proceed anyway."
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              duplicates:
+                type: array
+                items: { $ref: "#/components/schemas/Attendee" }
+
+    OrganizationItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/Organization" }
+
+    OrganizationList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Organization" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    UserItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/User" }
+
+    UserList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    UnionItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/Union" }
+
+    UnionList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Union" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    MissionItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/Mission" }
+
+    MissionList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Mission" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    AttendeeItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/Attendee" }
+
+    AttendeeList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Attendee" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    EventItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/Event" }
+
+    EventList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    EventSessionItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/EventSession" }
+
+    EventRegistrationItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/EventRegistration" }
+
+    EventRegistrationList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/EventRegistration" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    AttendanceRecordItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/AttendanceRecord" }
+
+    AuditLogList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditLog" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }

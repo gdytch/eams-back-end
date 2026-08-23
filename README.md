@@ -23,11 +23,11 @@ docker compose exec app php artisan migrate --seed
 
 The API is then available at `http://localhost:8000/api/v1`. The seeder creates:
 
-| Role | Email | Password |
-| --- | --- | --- |
-| Super Admin | `superadmin@example.com` | `password` |
-| Org Admin | `admin@example.com` | `password` |
-| Attendance Checker | `checker@example.com` | `password` |
+| Role               | Email                    | Password   |
+| ------------------ | ------------------------ | ---------- |
+| Super Admin        | `superadmin@example.com` | `password` |
+| Org Admin          | `admin@example.com`      | `password` |
+| Attendance Checker | `checker@example.com`    | `password` |
 
 Run the test suite with:
 
@@ -73,4 +73,3 @@ header.
 This is Phase 1 of the system: core foundation (organizations, auth/roles, territories, attendees,
 events/sessions/registrations, QR + manual attendance). Offline sync, reports/dashboards, bulk
 QR-code PDF export, attendee ID cards, and the audit log are planned for later phases.
-

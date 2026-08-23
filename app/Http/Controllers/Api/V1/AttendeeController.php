@@ -105,4 +105,3 @@ class AttendeeController extends Controller
         return response()->noContent();
     }
 }
-

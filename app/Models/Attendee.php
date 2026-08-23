@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToOrganization;
+use Database\Factories\AttendeeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['organization_id', 'union_id', 'mission_id', 'first_name', 'middle_name', 'last_name', 'profile_photo_path', 'created_by'])]
 class Attendee extends Model
 {
-    /** @use HasFactory<\Database\Factories\AttendeeFactory> */
+    /** @use HasFactory<AttendeeFactory> */
     use BelongsToOrganization, HasFactory;
 
     protected static function booted(): void

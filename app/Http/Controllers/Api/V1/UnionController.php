@@ -62,4 +62,3 @@ class UnionController extends Controller
         return response()->noContent();
     }
 }
-

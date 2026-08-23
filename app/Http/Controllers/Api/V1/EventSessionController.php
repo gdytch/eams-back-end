@@ -65,4 +65,3 @@ class EventSessionController extends Controller
         return response()->noContent();
     }
 }
-

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Database\Factories\EventSessionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,7 +13,7 @@ use Illuminate\Support\Carbon;
 #[Fillable(['event_id', 'name', 'description', 'session_date', 'start_time', 'end_time'])]
 class EventSession extends Model
 {
-    /** @use HasFactory<\Database\Factories\EventSessionFactory> */
+    /** @use HasFactory<EventSessionFactory> */
     use HasFactory;
 
     protected function casts(): array

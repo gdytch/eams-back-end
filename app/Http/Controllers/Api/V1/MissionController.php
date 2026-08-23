@@ -62,4 +62,3 @@ class MissionController extends Controller
         return response()->noContent();
     }
 }
-

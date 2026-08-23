@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Database\Factories\EventRegistrationFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -12,7 +13,7 @@ use Illuminate\Support\Str;
 #[Fillable(['event_id', 'attendee_id', 'qr_token', 'registered_by', 'registered_at'])]
 class EventRegistration extends Model
 {
-    /** @use HasFactory<\Database\Factories\EventRegistrationFactory> */
+    /** @use HasFactory<EventRegistrationFactory> */
     use HasFactory;
 
     protected function casts(): array

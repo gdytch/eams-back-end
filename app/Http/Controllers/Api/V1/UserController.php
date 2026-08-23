@@ -92,4 +92,3 @@ class UserController extends Controller
         return EventResource::collection($user->accessibleEvents()->get());
     }
 }
-

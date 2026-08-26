@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
-#[Fillable(['event_id', 'attendee_id', 'qr_token', 'registered_by', 'registered_at'])]
+#[Fillable(['event_id', 'attendee_id', 'qr_token', 'id_card_path', 'id_card_generated_at', 'registered_by', 'registered_at'])]
 class EventRegistration extends Model
 {
     /** @use HasFactory<EventRegistrationFactory> */
@@ -20,6 +20,7 @@ class EventRegistration extends Model
     {
         return [
             'registered_at' => 'datetime',
+            'id_card_generated_at' => 'datetime',
         ];
     }
 

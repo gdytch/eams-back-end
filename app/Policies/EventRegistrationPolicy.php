@@ -25,6 +25,12 @@ class EventRegistrationPolicy
             && $user->hasAccessToEvent($event);
     }
 
+    public function update(User $user, EventRegistration $eventRegistration): bool
+    {
+        return $user->isSuperAdmin()
+            || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id);
+    }
+
     public function delete(User $user, EventRegistration $eventRegistration): bool
     {
         return $user->isSuperAdmin()

@@ -20,6 +20,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('auth/me', [AuthController::class, 'me']);
 
     Route::apiResource('organizations', OrganizationController::class);
+    Route::post('organizations/{organization}/id-card-background', [OrganizationController::class, 'uploadIdCardBackground']);
+    Route::delete('organizations/{organization}/id-card-background', [OrganizationController::class, 'removeIdCardBackground']);
 
     Route::put('users/{user}/event-access', [UserController::class, 'syncEventAccess']);
     Route::apiResource('users', UserController::class);
@@ -38,6 +40,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr']);
         Route::apiResource('events.registrations', EventRegistrationController::class)
             ->only(['index', 'store', 'show', 'destroy']);
+        Route::get('events/{event}/registrations/{registration}/id-card', [EventRegistrationController::class, 'downloadIdCard']);
+        Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventRegistrationController::class, 'regenerateIdCard']);
 
         Route::get('events/{event}/sessions/{session}/attendance', [AttendanceController::class, 'forSession']);
     });

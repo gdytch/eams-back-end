@@ -50,6 +50,10 @@ docker compose exec app php artisan test --compact
 - **Attendance Records** are created by scanning a registration's QR code or via manual fallback,
   scoped to a specific session, with a configurable per-event check-in window (default 30 minutes
   before session start) and duplicate check-in protection.
+- **Attendee ID Cards** are generated automatically (queued job) as a 3x4in PDF whenever an
+  attendee registers for an event: QR code centered, attendee name below, on the organization's
+  custom background image if one has been uploaded. Stored at
+  `storage/app/private/{event_id}/{attendee_id}.pdf`.
 
 ## API Overview (v1)
 
@@ -66,12 +70,18 @@ header.
 - `GET|POST /events/{event}/sessions`, `GET|PUT|DELETE /events/{event}/sessions/{session}`
 - `GET|POST /events/{event}/registrations`, `GET|DELETE /events/{event}/registrations/{registration}`
 - `GET /events/{event}/registrations/qr-export` — bulk QR-code PDF export (Org Admin+, optional `registration_ids[]` filter)
+- `GET /events/{event}/registrations/{registration}/id-card` — download the attendee's ID card PDF (`202` while still generating)
+- `POST /events/{event}/registrations/{registration}/id-card/regenerate` — re-queue ID card generation (Org Admin+)
+- `POST /organizations/{organization}/id-card-background`, `DELETE /organizations/{organization}/id-card-background` — manage the org's ID card background image (Super Admin, or the org's own Org Admin)
 - `POST /attendance/scan`, `POST /attendance/manual`, `POST /attendance/{attendanceRecord}/check-out`
 - `GET /events/{event}/sessions/{session}/attendance`
 - `GET /audit-logs` — Super Admin sees all, Org Admin sees their own organization only
 
+A queue worker must be running for ID card generation to process outside of tests (test env uses
+the `sync` queue driver): `php artisan queue:work`.
+
 ## Scope
 
-Phase 1 (core foundation) and Phase 2 (audit log, bulk QR-code PDF export) are implemented.
-Offline sync, reports/dashboards, Excel/CSV export, and attendee ID cards are planned for later
-phases.
+Phase 1 (core foundation), Phase 2 (audit log, bulk QR-code PDF export), and attendee ID card
+generation are implemented. Offline sync, reports/dashboards, and Excel/CSV export are planned for
+later phases.

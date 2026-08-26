@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['name', 'code', 'logo_path', 'is_active'])]
+#[Fillable(['name', 'code', 'logo_path', 'id_card_background_path', 'is_active'])]
 class Organization extends Model
 {
     /** @use HasFactory<OrganizationFactory> */

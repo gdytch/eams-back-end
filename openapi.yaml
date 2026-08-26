@@ -175,6 +175,41 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /organizations/{organization}/id-card-background:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [Organizations]
+      summary: Upload (or replace) the attendee-ID-card background image
+      description: Super Admin, or the org's own Org Admin. Replaces any existing background.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [background]
+              properties:
+                background:
+                  type: string
+                  format: binary
+                  description: "image/jpeg, image/png, or image/webp, max 5MB."
+      responses:
+        "200": { $ref: "#/components/responses/OrganizationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Organizations]
+      summary: Remove the attendee-ID-card background image
+      description: Super Admin, or the org's own Org Admin. Cards will fall back to a plain background.
+      responses:
+        "200": { $ref: "#/components/responses/OrganizationItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   # ---------------------------------------------------------------- Users
   /users:
     get:
@@ -860,6 +895,54 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /events/{event}/registrations/{registration}/id-card:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - $ref: "#/components/parameters/RegistrationId"
+    get:
+      tags: [Event Registrations]
+      summary: Download the attendee's identification card PDF
+      description: >
+        A `GenerateAttendeeIdCardJob` is automatically queued whenever a registration is created
+        (`POST /events/{event}/registrations`); this endpoint downloads the result. 3in x 4in
+        PDF: QR code centered, attendee name below, on the organization's uploaded background
+        image if one is set (see `POST /organizations/{organization}/id-card-background`).
+      responses:
+        "200":
+          description: PDF file stream
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "202":
+          description: Still generating — retry shortly.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/registrations/{registration}/id-card/regenerate:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - $ref: "#/components/parameters/RegistrationId"
+    post:
+      tags: [Event Registrations]
+      summary: Re-queue identification card generation
+      description: Org Admin+ only. Useful after changing the organization's background image.
+      responses:
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Identification card generation has been queued." }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   # ---------------------------------------------------------------- Attendance
   /attendance/scan:
     post:
@@ -1039,6 +1122,11 @@ components:
         name: { type: string }
         code: { type: string }
         logo_path: { type: string, nullable: true }
+        id_card_background_url:
+          type: string
+          format: uri
+          nullable: true
+          description: Public URL of the uploaded attendee-ID-card background image, if any.
         is_active: { type: boolean }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -1146,6 +1234,10 @@ components:
         qr_token:
           type: string
           description: Opaque, random, non-guessable. Unique per registration, never reused. Treat as sensitive.
+        id_card_ready:
+          type: boolean
+          description: Whether GenerateAttendeeIdCardJob has finished; false means GET .../id-card returns 202.
+        id_card_generated_at: { type: string, format: date-time, nullable: true }
         registered_by:
           { type: integer, nullable: true, description: "User id." }
         registered_at: { type: string, format: date-time }

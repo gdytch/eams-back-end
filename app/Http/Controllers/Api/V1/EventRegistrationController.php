@@ -7,6 +7,7 @@ use App\Http\Requests\ExportEventRegistrationsQrRequest;
 use App\Http\Requests\StoreEventRegistrationRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventRegistrationResource;
+use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
@@ -14,6 +15,7 @@ use App\Models\EventRegistration;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class EventRegistrationController extends Controller
@@ -79,6 +81,8 @@ class EventRegistrationController extends Controller
 
             AuditLog::record('event_registration.created', $registration, ['attendee_id' => $attendee->id]);
 
+            GenerateAttendeeIdCardJob::dispatch($registration);
+
             return EventRegistrationResource::make($registration->load('attendee'))->response()->setStatusCode(201);
         });
     }
@@ -121,8 +125,8 @@ class EventRegistrationController extends Controller
         $registrations = $query->get();
 
         // dompdf cannot render inline <svg> elements, so embed the QR as a base64 data URI <img> instead.
-        $qrImages = $registrations->mapWithKeys(fn(EventRegistration $registration) => [
-            $registration->id => 'data:image/svg+xml;base64,' . base64_encode(
+        $qrImages = $registrations->mapWithKeys(fn (EventRegistration $registration) => [
+            $registration->id => 'data:image/svg+xml;base64,'.base64_encode(
                 QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token)
             ),
         ]);
@@ -138,5 +142,38 @@ class EventRegistrationController extends Controller
         ]);
 
         return $pdf->download("event-{$event->id}-qr-codes.pdf");
+    }
+
+    /**
+     * Download the attendee's generated identification card PDF.
+     */
+    public function downloadIdCard(Event $event, EventRegistration $registration)
+    {
+        $this->authorize('view', $registration);
+
+        if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
+            return response()->json([
+                'message' => 'The identification card is still being generated. Try again shortly.',
+            ], 202);
+        }
+
+        return Storage::disk('local')->download(
+            $registration->id_card_path,
+            "{$registration->attendee->first_name}-{$registration->attendee->last_name}-id-card.pdf"
+        );
+    }
+
+    /**
+     * Re-queue identification card generation (e.g. after the organization's background image changes).
+     */
+    public function regenerateIdCard(Event $event, EventRegistration $registration)
+    {
+        $this->authorize('update', $registration);
+
+        GenerateAttendeeIdCardJob::dispatch($registration);
+
+        return response()->json([
+            'message' => 'Identification card generation has been queued.',
+        ], 202);
     }
 }

@@ -24,17 +24,16 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $this->registration->loadMissing(['attendee', 'event.organization']);
+        $this->registration->loadMissing(['attendee', 'event']);
 
         $attendee = $this->registration->attendee;
         $event = $this->registration->event;
-        $organization = $event->organization;
 
         $qrImage = 'data:image/svg+xml;base64,'.base64_encode(
             QrCode::format('svg')->size(300)->margin(0)->generate($this->registration->qr_token)
         );
 
-        $backgroundImage = $this->encodedBackgroundImage($organization->id_card_background_path);
+        $backgroundImage = $this->encodedBackgroundImage($event->id_card_background_path);
 
         $pdf = Pdf::loadView('pdf.attendee-id-card', [
             'qrImage' => $qrImage,

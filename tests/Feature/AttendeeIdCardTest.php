@@ -124,15 +124,16 @@ class AttendeeIdCardTest extends TestCase
 
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->post(
-            "/api/v1/organizations/{$org->id}/id-card-background",
+            "/api/v1/events/{$event->id}/id-card-background",
             ['background' => UploadedFile::fake()->image('background.png')]
         );
 
         $response->assertOk();
         $this->assertNotNull($response->json('data.id_card_background_url'));
-        Storage::disk('public')->assertExists($org->fresh()->id_card_background_path);
+        Storage::disk('public')->assertExists($event->fresh()->id_card_background_path);
     }
 
     public function test_checker_cannot_upload_an_id_card_background(): void
@@ -141,25 +142,26 @@ class AttendeeIdCardTest extends TestCase
 
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->post(
-            "/api/v1/organizations/{$org->id}/id-card-background",
+            "/api/v1/events/{$event->id}/id-card-background",
             ['background' => UploadedFile::fake()->image('background.png')]
         );
 
         $response->assertForbidden();
     }
 
-    public function test_id_card_uses_the_organizations_background_when_present(): void
+    public function test_id_card_uses_the_events_background_when_present(): void
     {
         Storage::fake('local');
         Storage::fake('public');
 
         $org = Organization::factory()->create();
-        $path = UploadedFile::fake()->image('background.png')->store("organizations/{$org->id}", 'public');
-        $org->update(['id_card_background_path' => $path]);
-
         $event = Event::factory()->for($org)->create();
+        $path = UploadedFile::fake()->image('background.png')->store("events/{$event->id}", 'public');
+        $event->update(['id_card_background_path' => $path]);
+
         $registration = EventRegistration::factory()
             ->for($event)
             ->for(Attendee::factory()->for($org))

@@ -30,6 +30,8 @@ class AttendeeController extends Controller
             });
         }
 
+        $query->with(['union', 'mission'])->orderBy('last_name')->orderBy('first_name');
+
         return AttendeeResource::collection($query->paginate());
     }
 

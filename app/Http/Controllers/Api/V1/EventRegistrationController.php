@@ -25,7 +25,7 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('view', $event);
 
-        $query = $event->registrations()->with('attendee');
+        $query = $event->registrations()->with(['attendee.union', 'attendee.mission']);
 
         if ($search = trim((string) $request->string('search'))) {
             $query->whereHas('attendee', function ($q) use ($search) {
@@ -120,14 +120,17 @@ class EventRegistrationController extends Controller
 
         $registrations = $query->get();
 
-        $qrSvgs = $registrations->mapWithKeys(fn (EventRegistration $registration) => [
-            $registration->id => QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token),
+        // dompdf cannot render inline <svg> elements, so embed the QR as a base64 data URI <img> instead.
+        $qrImages = $registrations->mapWithKeys(fn(EventRegistration $registration) => [
+            $registration->id => 'data:image/svg+xml;base64,' . base64_encode(
+                QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token)
+            ),
         ]);
 
         $pdf = Pdf::loadView('pdf.bulk-qr-codes', [
             'event' => $event,
             'registrations' => $registrations,
-            'qrSvgs' => $qrSvgs,
+            'qrImages' => $qrImages,
         ]);
 
         AuditLog::record('event_registration.qr_pdf_exported', $event, [

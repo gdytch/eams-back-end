@@ -54,7 +54,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  token: { type: string, description: "Sanctum personal access token — send as `Authorization: Bearer <token>` on every subsequent request." }
+                  token:
+                    {
+                      type: string,
+                      description: "Sanctum personal access token — send as `Authorization: Bearer <token>` on every subsequent request.",
+                    }
                   user: { $ref: "#/components/schemas/User" }
         "422":
           description: Invalid credentials
@@ -117,7 +121,12 @@ paths:
               required: [name, code]
               properties:
                 name: { type: string, maxLength: 255 }
-                code: { type: string, maxLength: 50, description: "Unique short code." }
+                code:
+                  {
+                    type: string,
+                    maxLength: 50,
+                    description: "Unique short code.",
+                  }
                 logo_path: { type: string, nullable: true }
                 is_active: { type: boolean, default: true }
       responses:
@@ -448,7 +457,12 @@ paths:
               type: object
               required: [first_name, last_name]
               properties:
-                organization_id: { type: integer, nullable: true, description: "Required for Super Admins." }
+                organization_id:
+                  {
+                    type: integer,
+                    nullable: true,
+                    description: "Required for Super Admins.",
+                  }
                 union_id: { type: integer, nullable: true }
                 mission_id: { type: integer, nullable: true }
                 first_name: { type: string, maxLength: 100 }
@@ -553,11 +567,21 @@ paths:
               type: object
               required: [name, start_date, end_date]
               properties:
-                organization_id: { type: integer, nullable: true, description: "Required for Super Admins." }
+                organization_id:
+                  {
+                    type: integer,
+                    nullable: true,
+                    description: "Required for Super Admins.",
+                  }
                 name: { type: string, maxLength: 255 }
                 description: { type: string, nullable: true }
                 start_date: { type: string, format: date }
-                end_date: { type: string, format: date, description: "Must be on/after start_date." }
+                end_date:
+                  {
+                    type: string,
+                    format: date,
+                    description: "Must be on/after start_date.",
+                  }
                 venue: { type: string, maxLength: 255, nullable: true }
                 status: { $ref: "#/components/schemas/EventStatus" }
                 requires_check_out: { type: boolean, default: false }
@@ -652,8 +676,14 @@ paths:
                 name: { type: string, maxLength: 255 }
                 description: { type: string, nullable: true }
                 session_date: { type: string, format: date }
-                start_time: { type: string, example: "08:00", description: "H:i format." }
-                end_time: { type: string, example: "12:00", description: "H:i format, must be after start_time." }
+                start_time:
+                  { type: string, example: "08:00", description: "H:i format." }
+                end_time:
+                  {
+                    type: string,
+                    example: "12:00",
+                    description: "H:i format, must be after start_time.",
+                  }
       responses:
         "201": { $ref: "#/components/responses/EventSessionItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -760,7 +790,12 @@ paths:
             schema:
               type: object
               properties:
-                attendee_id: { type: integer, nullable: true, description: "Existing attendee. Mutually exclusive with first_name/last_name." }
+                attendee_id:
+                  {
+                    type: integer,
+                    nullable: true,
+                    description: "Existing attendee. Mutually exclusive with first_name/last_name.",
+                  }
                 first_name: { type: string, maxLength: 100, nullable: true }
                 middle_name: { type: string, maxLength: 100, nullable: true }
                 last_name: { type: string, maxLength: 100, nullable: true }
@@ -951,15 +986,38 @@ components:
       name: page
       in: query
       schema: { type: integer, minimum: 1, default: 1 }
-    OrganizationId: { name: organization, in: path, required: true, schema: { type: integer } }
+    OrganizationId:
+      {
+        name: organization,
+        in: path,
+        required: true,
+        schema: { type: integer },
+      }
     UserId: { name: user, in: path, required: true, schema: { type: integer } }
-    UnionId: { name: union, in: path, required: true, schema: { type: integer } }
-    MissionId: { name: mission, in: path, required: true, schema: { type: integer } }
-    AttendeeId: { name: attendee, in: path, required: true, schema: { type: integer } }
-    EventId: { name: event, in: path, required: true, schema: { type: integer } }
-    SessionId: { name: session, in: path, required: true, schema: { type: integer } }
-    RegistrationId: { name: registration, in: path, required: true, schema: { type: integer } }
-    AttendanceRecordId: { name: attendanceRecord, in: path, required: true, schema: { type: integer } }
+    UnionId:
+      { name: union, in: path, required: true, schema: { type: integer } }
+    MissionId:
+      { name: mission, in: path, required: true, schema: { type: integer } }
+    AttendeeId:
+      { name: attendee, in: path, required: true, schema: { type: integer } }
+    EventId:
+      { name: event, in: path, required: true, schema: { type: integer } }
+    SessionId:
+      { name: session, in: path, required: true, schema: { type: integer } }
+    RegistrationId:
+      {
+        name: registration,
+        in: path,
+        required: true,
+        schema: { type: integer },
+      }
+    AttendanceRecordId:
+      {
+        name: attendanceRecord,
+        in: path,
+        required: true,
+        schema: { type: integer },
+      }
 
   schemas:
     UserRole:
@@ -992,7 +1050,12 @@ components:
         name: { type: string }
         email: { type: string, format: email }
         role: { $ref: "#/components/schemas/UserRole" }
-        organization_id: { type: integer, nullable: true, description: "Always null for super_admin." }
+        organization_id:
+          {
+            type: integer,
+            nullable: true,
+            description: "Always null for super_admin.",
+          }
         organization:
           allOf: [{ $ref: "#/components/schemas/Organization" }]
           description: Only present when explicitly eager-loaded server-side.
@@ -1030,7 +1093,11 @@ components:
         first_name: { type: string }
         middle_name: { type: string, nullable: true }
         last_name: { type: string }
-        full_name: { type: string, description: "Derived: first + middle + last, trimmed." }
+        full_name:
+          {
+            type: string,
+            description: "Derived: first + middle + last, trimmed.",
+          }
         profile_photo_path: { type: string, nullable: true }
         union: { $ref: "#/components/schemas/Union" }
         mission: { $ref: "#/components/schemas/Mission" }
@@ -1079,7 +1146,8 @@ components:
         qr_token:
           type: string
           description: Opaque, random, non-guessable. Unique per registration, never reused. Treat as sensitive.
-        registered_by: { type: integer, nullable: true, description: "User id." }
+        registered_by:
+          { type: integer, nullable: true, description: "User id." }
         registered_at: { type: string, format: date-time }
         attendee: { $ref: "#/components/schemas/Attendee" }
         created_at: { type: string, format: date-time }
@@ -1111,7 +1179,8 @@ components:
             id: { type: integer }
             name: { type: string }
         action: { type: string, example: "attendee.created" }
-        auditable_type: { type: string, nullable: true, example: "App\\Models\\Attendee" }
+        auditable_type:
+          { type: string, nullable: true, example: "App\\Models\\Attendee" }
         auditable_id: { type: integer, nullable: true }
         changes:
           type: object

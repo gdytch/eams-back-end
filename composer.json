@@ -11,6 +11,7 @@
         "laravel/framework": "^13.17",
         "laravel/sanctum": "*",
         "laravel/tinker": "^3.0",
+        "maatwebsite/excel": "^4.0",
         "simplesoftwareio/simple-qrcode": "^4.2"
     },
     "require-dev": {

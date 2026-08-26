@@ -29,7 +29,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $attendee = $this->registration->attendee;
         $event = $this->registration->event;
 
-        $qrImage = 'data:image/svg+xml;base64,'.base64_encode(
+        $qrImage = 'data:image/svg+xml;base64,' . base64_encode(
             QrCode::format('svg')->size(300)->margin(0)->generate($this->registration->qr_token)
         );
 
@@ -64,6 +64,6 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
 
         $mimeType = Storage::disk('public')->mimeType($path);
 
-        return "data:{$mimeType};base64,".base64_encode(Storage::disk('public')->get($path));
+        return "data:{$mimeType};base64," . base64_encode(Storage::disk('public')->get($path));
     }
 }

@@ -17,7 +17,7 @@ class UploadEventIdCardBackgroundRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'background' => ['required', 'image', 'mimes:jpeg,png,webp', 'max:5120'],
+            'background' => ['required', 'image', 'mimes:jpeg,png,webp', 'max:10240'],
         ];
     }
 }

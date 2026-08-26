@@ -930,7 +930,7 @@ paths:
                 background:
                   type: string
                   format: binary
-                  description: "image/jpeg, image/png, or image/webp, max 5MB."
+                  description: "image/jpeg, image/png, or image/webp, max 10MB."
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }

@@ -27,7 +27,7 @@ class EventController extends Controller
             $userId = $request->user()->id;
 
             $query->where(function ($q) use ($userId) {
-                $q->whereHas('checkers', fn ($q) => $q->whereKey($userId))
+                $q->whereHas('checkers', fn($q) => $q->whereKey($userId))
                     ->orWhereDoesntHave('checkers');
             });
         }

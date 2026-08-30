@@ -30,7 +30,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $attendee = $this->registration->attendee;
         $event = $this->registration->event;
 
-        $qrImage = 'data:image/svg+xml;base64,' . base64_encode(
+        $qrImage = 'data:image/svg+xml;base64,'.base64_encode(
             QrCode::format('svg')->size(300)->margin(0)->generate($this->registration->qr_token)
         );
 
@@ -40,7 +40,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
             'qrImage' => $qrImage,
             'backgroundImage' => $backgroundImage,
             'attendeeName' => trim("{$attendee->first_name} {$attendee->last_name}"),
-        ])->setPaper('A4')->setOption('dpi', 300);
+        ])->setPaper([0, 0, 216, 288]); // 3in x 4in, in points (72pt per inch)
 
         $path = "{$event->id}/{$attendee->id}.pdf";
 
@@ -72,7 +72,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
 
         $mimeType = Storage::disk('public')->mimeType($path);
 
-        return "data:{$mimeType};base64," . base64_encode(Storage::disk('public')->get($path));
+        return "data:{$mimeType};base64,".base64_encode(Storage::disk('public')->get($path));
     }
 
     /**
@@ -87,7 +87,20 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $pdfFilename = pathinfo($pdfPath, PATHINFO_FILENAME);
 
         // Output pattern: {filename}-page-0.png, {filename}-page-1.png, etc.
-        $outputPattern = "{$pdfDirectory}/{$pdfFilename}-page-%d.png";
+        $imagesDir = "{$pdfDirectory}/images";
+        $outputPattern = "{$imagesDir}/{$pdfFilename}-page-%d.png";
+
+        // Ensure the images directory exists
+        if (! is_dir($imagesDir)) {
+            mkdir($imagesDir, 0755, true);
+        }
+
+        // Clean up old images from previous generations
+        $page = 0;
+        while (file_exists(sprintf($outputPattern, $page))) {
+            unlink(sprintf($outputPattern, $page));
+            $page++;
+        }
 
         $process = new Process([
             'convert',
@@ -110,7 +123,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $page = 0;
 
         while (file_exists(sprintf($outputPattern, $page))) {
-            $imagePath = "{$pdfPath}/" . basename(sprintf($outputPattern, $page));
+            $imagePath = "{$pdfPath}/".basename(sprintf($outputPattern, $page));
             // Normalize to storage path (relative to storage/app)
             $imagePath = str_replace(Storage::disk('local')->path(''), '', sprintf($outputPattern, $page));
             $imagePaths[] = $imagePath;

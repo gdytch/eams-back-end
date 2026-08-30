@@ -19,10 +19,12 @@ class EventRegistrationFactory extends Factory
      */
     public function definition(): array
     {
+        $event = Event::factory()->create();
+        $attendee = Attendee::factory()->create();
         return [
-            'event_id' => Event::factory(),
-            'attendee_id' => Attendee::factory(),
-            'qr_token' => EventRegistration::generateUniqueQrToken(),
+            'event_id' => $event->id,
+            'attendee_id' => $attendee->id,
+            'qr_token' => EventRegistration::generateUniqueQrToken($event->id, $attendee->id),
             'registered_at' => now(),
         ];
     }

@@ -81,7 +81,7 @@ class AttendanceController extends Controller
     {
         $this->authorize('view', $session);
 
-        $records = AttendanceRecord::whereHas('eventRegistration', fn ($q) => $q->where('event_id', $event->id))
+        $records = AttendanceRecord::whereHas('eventRegistration', fn($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
             ->with('eventRegistration.attendee')
             ->get();
@@ -129,7 +129,7 @@ class AttendanceController extends Controller
                 ['method' => $method->value, 'session_id' => $session->id],
             );
 
-            return AttendanceRecordResource::make($attendance->load('eventRegistration.attendee'))
+            return AttendanceRecordResource::make($attendance->load(['eventRegistration.attendee.union', 'eventRegistration.attendee.mission']))
                 ->response()
                 ->setStatusCode(201);
         });

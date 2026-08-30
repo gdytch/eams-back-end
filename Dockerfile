@@ -18,7 +18,9 @@ RUN apt-get update && apt-get install -y \
     curl \
     libonig-dev \
     libxml2-dev \
-    libzip-dev
+    libzip-dev \
+    imagemagick \
+    ghostscript
 
 # Clear cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*

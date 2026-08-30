@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
-#[Fillable(['event_id', 'attendee_id', 'qr_token', 'id_card_path', 'id_card_generated_at', 'registered_by', 'registered_at'])]
+#[Fillable(['event_id', 'attendee_id', 'qr_token', 'id_card_path', 'id_card_images_path', 'id_card_generated_at', 'registered_by', 'registered_at'])]
 class EventRegistration extends Model
 {
     /** @use HasFactory<EventRegistrationFactory> */
@@ -27,7 +27,7 @@ class EventRegistration extends Model
     protected static function booted(): void
     {
         static::creating(function (self $registration) {
-            $registration->qr_token ??= static::generateUniqueQrToken();
+            $registration->qr_token ??= static::generateUniqueQrToken($registration->event_id, $registration->attendee_id);
             $registration->registered_at ??= now();
         });
     }
@@ -35,13 +35,15 @@ class EventRegistration extends Model
     /**
      * An opaque, non-guessable token; never derived from the attendee ID and never reused.
      */
-    public static function generateUniqueQrToken(): string
+    public static function generateUniqueQrToken(?int $eventId = null, ?int $attendeeId = null): string
     {
+        $event_id = $eventId ?? Event::query()->count() + 1;
+        $attendee_id = $attendeeId ?? Attendee::query()->count() + 1;
         do {
-            $token = Str::random(48);
+            $token = "{$event_id}{$attendee_id}" . Str::random(20);
         } while (static::withoutGlobalScopes()->where('qr_token', $token)->exists());
 
-        return $token;
+        return config('app.CLIENT_URL') . '/attendee/' . $token;
     }
 
     public function event(): BelongsTo

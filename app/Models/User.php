@@ -10,11 +10,12 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'organization_id', 'role'])]
+#[Fillable(['name', 'email', 'password', 'organization_id', 'role', 'first_name', 'middle_name', 'last_name', 'photo_paths'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
 {
@@ -32,6 +33,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'photo_paths' => 'array',
         ];
     }
 
@@ -43,6 +45,11 @@ class User extends Authenticatable
     public function accessibleEvents(): BelongsToMany
     {
         return $this->belongsToMany(Event::class, 'event_checker_access');
+    }
+
+    public function attendee(): HasOne
+    {
+        return $this->hasOne(Attendee::class);
     }
 
     public function isSuperAdmin(): bool
@@ -58,6 +65,11 @@ class User extends Authenticatable
     public function isChecker(): bool
     {
         return $this->role === UserRole::Checker;
+    }
+
+    public function isAttendee(): bool
+    {
+        return $this->role === UserRole::Attendee;
     }
 
     /**

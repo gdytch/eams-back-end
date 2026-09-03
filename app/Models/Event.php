@@ -11,8 +11,9 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Str;
 
-#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'created_by'])]
+#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'banner_paths', 'created_by', 'invite_token'])]
 class Event extends Model
 {
     /** @use HasFactory<EventFactory> */
@@ -24,6 +25,25 @@ class Event extends Model
         'check_in_window_minutes' => 30,
     ];
 
+    protected static function booted(): void
+    {
+        static::creating(function (self $event) {
+            $event->invite_token ??= static::generateUniqueInviteToken();
+        });
+    }
+
+    /**
+     * Generate a unique, non-guessable invite token for the event.
+     */
+    public static function generateUniqueInviteToken(): string
+    {
+        do {
+            $token = Str::random(40);
+        } while (static::withoutGlobalScopes()->where('invite_token', $token)->exists());
+
+        return $token;
+    }
+
     protected function casts(): array
     {
         return [
@@ -32,6 +52,7 @@ class Event extends Model
             'status' => EventStatus::class,
             'requires_check_out' => 'boolean',
             'check_in_window_minutes' => 'integer',
+            'banner_paths' => 'array',
         ];
     }
 

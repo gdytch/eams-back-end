@@ -6,10 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CheckAttendeeDuplicatesRequest;
 use App\Http\Requests\StoreAttendeeRequest;
 use App\Http\Requests\UpdateAttendeeRequest;
+use App\Http\Requests\UploadAttendeePhotoRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
+use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class AttendeeController extends Controller
 {
@@ -112,5 +115,47 @@ class AttendeeController extends Controller
         $attendee->delete();
 
         return response()->noContent();
+    }
+
+    /**
+     * Upload (or replace) the attendee's profile photo.
+     */
+    public function uploadPhoto(UploadAttendeePhotoRequest $request, Attendee $attendee)
+    {
+        $service = new ImageUploadService;
+        $input = $request->file('photo') ?? $request->input('photo');
+
+        $paths = $service->process(
+            $input,
+            preset: 'profile_photo',
+            directory: "attendees/{$attendee->id}",
+            prefix: 'photo',
+        );
+
+        $attendee->update(['photo_paths' => $paths]);
+
+        AuditLog::record('attendee.photo_updated', $attendee);
+
+        return AttendeeResource::make($attendee);
+    }
+
+    /**
+     * Remove the attendee's profile photo.
+     */
+    public function removePhoto(Attendee $attendee)
+    {
+        $this->authorize('update', $attendee);
+
+        if ($attendee->photo_paths) {
+            foreach ($attendee->photo_paths as $path) {
+                Storage::disk('public')->delete($path);
+            }
+        }
+
+        $attendee->update(['photo_paths' => null]);
+
+        AuditLog::record('attendee.photo_removed', $attendee);
+
+        return AttendeeResource::make($attendee);
     }
 }

@@ -33,7 +33,6 @@ class StoreAttendeeRequest extends FormRequest
             'first_name' => ['required', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
-            'profile_photo_path' => ['nullable', 'string'],
             'override_duplicate' => ['sometimes', 'boolean'],
         ];
     }

@@ -10,7 +10,7 @@ class AttendanceRecordPolicy
 {
     public function viewAny(User $user): bool
     {
-        return true;
+        return $user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker();
     }
 
     public function view(User $user, AttendanceRecord $attendanceRecord): bool

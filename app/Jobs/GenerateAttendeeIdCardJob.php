@@ -86,9 +86,9 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $pdfDirectory = dirname($pdfFullPath);
         $pdfFilename = pathinfo($pdfPath, PATHINFO_FILENAME);
 
-        // Output pattern: {filename}-page-0.png, {filename}-page-1.png, etc.
+        // Output pattern: {filename}-page-0.jpg, {filename}-page-1.jpg, etc.
         $imagesDir = "{$pdfDirectory}/images";
-        $outputPattern = "{$imagesDir}/{$pdfFilename}-page-%d.png";
+        $outputPattern = "{$imagesDir}/{$pdfFilename}-page-%d.jpg";
 
         // Ensure the images directory exists
         if (! is_dir($imagesDir)) {
@@ -105,9 +105,11 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $process = new Process([
             'convert',
             '-density',
-            '300',
+            '600',
             '-quality',
-            '85',
+            '90',
+            '-format',
+            'jpg',
             $pdfFullPath,
             $outputPattern,
         ]);

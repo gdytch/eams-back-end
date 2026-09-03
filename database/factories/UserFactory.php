@@ -68,4 +68,12 @@ class UserFactory extends Factory
             'role' => UserRole::Checker,
         ]);
     }
+
+    public function attendee(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'organization_id' => null,
+            'role' => UserRole::Attendee,
+        ]);
+    }
 }

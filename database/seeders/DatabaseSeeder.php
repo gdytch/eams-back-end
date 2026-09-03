@@ -39,8 +39,12 @@ class DatabaseSeeder extends Seeder
             'email' => 'checker@example.com',
         ]);
 
-        $union = Union::factory()->for($organization)->create(['name' => 'Sample Union']);
-        $mission = Mission::factory()->for($organization)->for($union)->create(['name' => 'Sample Mission']);
+        $union = Union::factory()->for($organization)->create(['name' => 'South Philippine Union Mission', 'code' => 'SEPUM']);
+        $missions = [
+            Mission::factory()->for($organization)->for($union)->create(['name' => 'Davao Mission', 'code' => 'DM']),
+            Mission::factory()->for($organization)->for($union)->create(['name' => 'Northern Davao Mission', 'code' => 'NDM']),
+            Mission::factory()->for($organization)->for($union)->create(['name' => 'Southern Mindanao Mission', 'code' => 'SMM']),
+        ];
 
         $event = Event::factory()->for($organization)->create([
             'name' => 'Annual Convention 2027',
@@ -62,12 +66,16 @@ class DatabaseSeeder extends Seeder
         ]);
 
         Attendee::factory()
-            ->for($organization)
-            ->for($union)
-            ->for($mission)
-            ->count(5)
+            ->recycle($organization)
+            ->count(100)
             ->create(['created_by' => $checker->id])
-            ->each(function (Attendee $attendee) use ($event, $checker) {
+            ->each(function (Attendee $attendee, int $index) use ($missions, $union, $event, $checker) {
+                $mission = $missions[$index % count($missions)];
+                $attendee->update([
+                    'union_id' => $union->id,
+                    'mission_id' => $mission->id,
+                ]);
+
                 EventRegistration::factory()->for($event)->for($attendee)->create([
                     'registered_by' => $checker->id,
                 ]);

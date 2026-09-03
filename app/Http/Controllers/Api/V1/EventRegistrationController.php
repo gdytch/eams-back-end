@@ -12,6 +12,7 @@ use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
+use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -116,6 +117,8 @@ class EventRegistrationController extends Controller
      */
     public function exportQr(ExportEventRegistrationsQrRequest $request, Event $event)
     {
+        $this->authorize('manageIdCards', $event);
+
         $query = $event->registrations()->with('attendee');
 
         if ($request->filled('registration_ids')) {
@@ -149,7 +152,7 @@ class EventRegistrationController extends Controller
      */
     public function downloadIdCard(Event $event, EventRegistration $registration)
     {
-        $this->authorize('view', $registration);
+        $this->authorize('manageIdCards', $registration);
 
         if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
             return response()->json([
@@ -168,12 +171,112 @@ class EventRegistrationController extends Controller
      */
     public function regenerateIdCard(Event $event, EventRegistration $registration)
     {
-        $this->authorize('update', $registration);
+        $this->authorize('manageIdCards', $registration);
 
         GenerateAttendeeIdCardJob::dispatch($registration);
 
         return response()->json([
             'message' => 'Identification card generation has been queued.',
         ], 202);
+    }
+
+    /**
+     * Bulk download identification cards for specified registration IDs.
+     * Merges all requested ID card PDFs into a single document.
+     */
+    public function bulkDownloadIdCards(Request $request, Event $event)
+    {
+        $this->authorize('manageIdCards', $event);
+
+        $registrationIds = $request->input('registration_ids', []);
+
+        if (empty($registrationIds)) {
+            return response()->json([
+                'message' => 'At least one registration ID is required.',
+            ], 400);
+        }
+
+        $registrations = $event->registrations()
+            ->whereIn('id', $registrationIds)
+            ->with('attendee')
+            ->get();
+
+        if ($registrations->isEmpty()) {
+            return response()->json([
+                'message' => 'No registrations found with the provided IDs.',
+            ], 404);
+        }
+
+        // Collect valid ID card paths (filter out missing or not yet generated cards)
+        $pdfPaths = $registrations
+            ->filter(
+                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
+                    Storage::disk('local')->exists($reg->id_card_path)
+            )
+            ->pluck('id_card_path')
+            ->all();
+
+        if (empty($pdfPaths)) {
+            return response()->json([
+                'message' => 'None of the requested ID cards are ready for download. Please try again shortly.',
+            ], 202);
+        }
+
+        $mergeService = new PdfMergeService;
+        $mergedPdf = $mergeService->merge($pdfPaths, 'local');
+
+        AuditLog::record('event_registration.bulk_id_cards_downloaded', $event, [
+            'registration_ids' => $registrations->pluck('id')->all(),
+            'count' => count($pdfPaths),
+        ]);
+
+        return response($mergedPdf)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', "attachment; filename=\"event-{$event->id}-id-cards.pdf\"");
+    }
+
+    /**
+     * Download all identification cards for all registered attendees in the event.
+     * Merges all ID card PDFs into a single document.
+     */
+    public function downloadAllIdCards(Event $event)
+    {
+        $this->authorize('manageIdCards', $event);
+
+        $registrations = $event->registrations()
+            ->with('attendee')
+            ->get();
+
+        if ($registrations->isEmpty()) {
+            return response()->json([
+                'message' => 'No registrations found for this event.',
+            ], 404);
+        }
+
+        // Collect valid ID card paths (filter out missing or not yet generated cards)
+        $pdfPaths = $registrations
+            ->filter(
+                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
+                    Storage::disk('local')->exists($reg->id_card_path)
+            )
+            ->pluck('id_card_path')
+            ->all();
+
+        if (empty($pdfPaths)) {
+            return response()->json([
+                'message' => 'ID cards are still being generated. Try again shortly.',
+            ], 202);
+        }
+
+        $mergeService = new PdfMergeService;
+        $mergedPdf = $mergeService->merge($pdfPaths, 'local');
+
+        AuditLog::record('event_registration.all_id_cards_downloaded', $event, [
+            'count' => count($pdfPaths),
+        ]);
+
+        return response($mergedPdf)
+            ->header('Content-Type', 'application/pdf')
+            ->header('Content-Disposition', "attachment; filename=\"event-{$event->id}-all-id-cards.pdf\"");
     }
 }

@@ -11,6 +11,9 @@ services:
       - .:/var/www
     networks:
       - ams_network
+    depends_on:
+      db:
+        condition: service_healthy
   # Queue Worker
   queue-worker:
     build:
@@ -24,8 +27,10 @@ services:
     volumes:
       - .:/var/www
     depends_on:
-      - db
-      - app
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
     networks:
       - ams_network
   # Web Server (Nginx)
@@ -34,7 +39,7 @@ services:
     container_name: ams_webserver
     restart: unless-stopped
     ports:
-      - "8000:80"
+      - "1348:80"
     volumes:
       - .:/var/www
       - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
@@ -47,7 +52,7 @@ services:
     container_name: ams_db
     restart: unless-stopped
     ports:
-      - "3306:3306"
+      - "3308:3306"
     environment:
       MYSQL_DATABASE: laravel
       MYSQL_ROOT_PASSWORD: secret_root_password
@@ -57,12 +62,21 @@ services:
       - dbdata:/var/lib/mysql
     networks:
       - ams_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-psecret_root_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-  # Database Management (phpMyAdmin)
+  # Database Management (phpMyAdmin) - dev only, run with --profile dev
   phpmyadmin:
     image: phpmyadmin/phpmyadmin
     container_name: ams_phpmyadmin
     restart: unless-stopped
+    # profiles:
+    #   - dev
+    #   - local
+    #   - development
     ports:
       - "8080:80"
     environment:

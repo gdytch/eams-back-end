@@ -12,11 +12,18 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['organization_id', 'union_id', 'mission_id', 'first_name', 'middle_name', 'last_name', 'profile_photo_path', 'created_by'])]
+#[Fillable(['organization_id', 'union_id', 'mission_id', 'first_name', 'middle_name', 'last_name', 'photo_paths', 'created_by', 'user_id'])]
 class Attendee extends Model
 {
     /** @use HasFactory<AttendeeFactory> */
     use BelongsToOrganization, HasFactory;
+
+    protected function casts(): array
+    {
+        return [
+            'photo_paths' => 'array',
+        ];
+    }
 
     protected static function booted(): void
     {
@@ -59,6 +66,11 @@ class Attendee extends Model
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function registrations(): HasMany

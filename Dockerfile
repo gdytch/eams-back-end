@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     libjpeg62-turbo-dev \
     libfreetype6-dev \
+    libwebp-dev \
     locales \
     zip \
     jpegoptim optipng pngquant gifsicle \
@@ -25,12 +26,13 @@ RUN apt-get update && apt-get install -y \
 # Clear cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
-RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+# Install PHP extensions with WebP support
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp && \
+    docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
 
-# Configure PHP for 10MB upload limit
-RUN echo 'upload_max_filesize = 10M' >> /usr/local/etc/php/conf.d/uploads.ini && \
-    echo 'post_max_size = 10M' >> /usr/local/etc/php/conf.d/uploads.ini
+# Configure PHP for 14MB upload limit (accommodates base64-encoded ~10MB images)
+RUN echo 'upload_max_filesize = 14M' >> /usr/local/etc/php/conf.d/uploads.ini && \
+    echo 'post_max_size = 14M' >> /usr/local/etc/php/conf.d/uploads.ini
 
 # Get latest Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer

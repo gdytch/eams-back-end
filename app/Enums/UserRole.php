@@ -7,4 +7,5 @@ enum UserRole: string
     case SuperAdmin = 'super_admin';
     case OrgAdmin = 'org_admin';
     case Checker = 'checker';
+    case Attendee = 'attendee';
 }

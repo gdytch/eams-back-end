@@ -6,13 +6,16 @@ use App\Enums\AttendanceMethod;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ManualAttendanceRequest;
 use App\Http\Requests\ScanAttendanceRequest;
+use App\Http\Requests\SyncAttendanceBatchRequest;
 use App\Http\Resources\AttendanceRecordResource;
 use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -81,7 +84,7 @@ class AttendanceController extends Controller
     {
         $this->authorize('view', $session);
 
-        $records = AttendanceRecord::whereHas('eventRegistration', fn($q) => $q->where('event_id', $event->id))
+        $records = AttendanceRecord::whereHas('eventRegistration', fn ($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
             ->with('eventRegistration.attendee')
             ->get();
@@ -89,8 +92,111 @@ class AttendanceController extends Controller
         return AttendanceRecordResource::collection($records);
     }
 
-    private function recordAttendance(Request $request, EventRegistration $registration, EventSession $session, AttendanceMethod $method)
+    /**
+     * Process a batch of attendance scans with per-item error handling.
+     */
+    public function syncBatch(SyncAttendanceBatchRequest $request)
     {
+        $scans = $request->validated('scans');
+        $results = [];
+
+        foreach ($scans as $scan) {
+            $result = [
+                'client_ref' => $scan['client_ref'],
+                'status' => 'error',
+                'message' => '',
+                'attendance_record_id' => null,
+            ];
+
+            try {
+                $event = Event::findOrFail($scan['event_id']);
+                $session = EventSession::where('event_id', $event->id)->findOrFail($scan['session_id']);
+
+                // Check authorization for this event.
+                if (! $request->user()->can('create', [AttendanceRecord::class, $event])) {
+                    $result['message'] = 'Unauthorized to record attendance for this event.';
+                    $results[] = $result;
+
+                    continue;
+                }
+
+                // Resolve the registration.
+                $registration = null;
+
+                if (! empty($scan['qr_token'])) {
+                    $registration = EventRegistration::where('event_id', $event->id)
+                        ->where('qr_token', $scan['qr_token'])
+                        ->first();
+
+                    if ($registration === null) {
+                        $result['message'] = 'This QR code is not registered for this event.';
+                        $results[] = $result;
+
+                        continue;
+                    }
+                } else {
+                    $registration = EventRegistration::where('event_id', $event->id)
+                        ->findOrFail($scan['event_registration_id']);
+                }
+
+                $method = AttendanceMethod::from($scan['method']);
+                $scannedAt = ! empty($scan['scanned_at']) ? Carbon::parse($scan['scanned_at']) : null;
+
+                // Process the attendance in its own transaction.
+                $attendance = DB::transaction(function () use ($registration, $session, $method, $request, $scannedAt, $scan) {
+                    return $this->recordAttendance(
+                        $request,
+                        $registration,
+                        $session,
+                        $method,
+                        $scannedAt,
+                        true,
+                        $scan['override'] ?? false
+                    );
+                });
+
+                $result['status'] = 'created';
+                $result['message'] = 'Attendance recorded successfully.';
+                $result['attendance_record_id'] = $attendance->id;
+            } catch (ValidationException $e) {
+                // Handle validation exceptions (already checked in, session not open, etc).
+                $messages = $e->errors();
+                $allMessages = collect($messages)->flatten()->toArray();
+                $firstMessage = reset($allMessages) ?: 'Validation error.';
+
+                // Determine if it's a duplicate.
+                if (stripos((string) $firstMessage, 'Already Checked In') !== false) {
+                    $result['status'] = 'duplicate';
+                } else {
+                    $result['status'] = 'error';
+                }
+
+                $result['message'] = $firstMessage;
+            } catch (ModelNotFoundException $e) {
+                $result['status'] = 'error';
+                $result['message'] = 'Registration not found for this event.';
+            } catch (\Exception $e) {
+                $result['status'] = 'error';
+                $result['message'] = $e->getMessage() ?: 'An unexpected error occurred.';
+            }
+
+            $results[] = $result;
+        }
+
+        AuditLog::record('attendance.batch_sync', null, ['scan_count' => count($scans)]);
+
+        return response()->json(['results' => $results], 200);
+    }
+
+    private function recordAttendance(
+        Request $request,
+        EventRegistration $registration,
+        EventSession $session,
+        AttendanceMethod $method,
+        ?Carbon $scannedAt = null,
+        bool $isBatchSync = false,
+        bool $overrideFlag = false
+    ) {
         $existing = AttendanceRecord::where('event_registration_id', $registration->id)
             ->where('event_session_id', $session->id)
             ->first();
@@ -101,7 +207,7 @@ class AttendanceController extends Controller
             ]);
         }
 
-        $canOverride = $request->boolean('override')
+        $canOverride = ($overrideFlag || $request->boolean('override'))
             && ($request->user()->isSuperAdmin() || $request->user()->isOrgAdmin());
 
         $isEarly = now()->lessThan($session->checkInOpensAt());
@@ -112,13 +218,13 @@ class AttendanceController extends Controller
             ]);
         }
 
-        return DB::transaction(function () use ($existing, $registration, $session, $method, $request, $isEarly) {
+        return DB::transaction(function () use ($existing, $registration, $session, $method, $request, $isEarly, $scannedAt, $isBatchSync) {
             $attendance = $existing ?? new AttendanceRecord([
                 'event_registration_id' => $registration->id,
                 'event_session_id' => $session->id,
             ]);
 
-            $attendance->check_in_at = now();
+            $attendance->check_in_at = $scannedAt ?? now();
             $attendance->method = $method;
             $attendance->recorded_by = $request->user()->id;
             $attendance->save();
@@ -128,6 +234,10 @@ class AttendanceController extends Controller
                 $attendance,
                 ['method' => $method->value, 'session_id' => $session->id],
             );
+
+            if ($isBatchSync) {
+                return $attendance;
+            }
 
             return AttendanceRecordResource::make($attendance->load(['eventRegistration.attendee.union', 'eventRegistration.attendee.mission']))
                 ->response()

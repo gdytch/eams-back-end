@@ -9,7 +9,7 @@ class AttendeePolicy
 {
     public function viewAny(User $user): bool
     {
-        return true;
+        return $user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker();
     }
 
     public function view(User $user, Attendee $attendee): bool
@@ -19,7 +19,7 @@ class AttendeePolicy
 
     public function create(User $user): bool
     {
-        return true;
+        return $user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker();
     }
 
     public function update(User $user, Attendee $attendee): bool

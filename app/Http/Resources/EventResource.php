@@ -29,8 +29,14 @@ class EventResource extends JsonResource
             'id_card_background_url' => $this->id_card_background_path
                 ? Storage::disk('public')->url($this->id_card_background_path)
                 : null,
+            'banner_urls' => $this->banner_paths
+                ? collect($this->banner_paths)->mapWithKeys(fn ($path, $key) => [
+                    $key => Storage::disk('public')->url($path),
+                ])->toArray()
+                : null,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
+            'invite_token' => $this->invite_token,
         ];
     }
 }

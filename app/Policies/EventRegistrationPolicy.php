@@ -8,9 +8,9 @@ use App\Models\User;
 
 class EventRegistrationPolicy
 {
-    public function viewAny(User $user): bool
+    public function viewAny(User $user, Event $event): bool
     {
-        return true;
+        return $user->hasAccessToEvent($event);
     }
 
     public function view(User $user, EventRegistration $eventRegistration): bool
@@ -32,6 +32,12 @@ class EventRegistrationPolicy
     }
 
     public function delete(User $user, EventRegistration $eventRegistration): bool
+    {
+        return $user->isSuperAdmin()
+            || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id);
+    }
+
+    public function manageIdCards(User $user, EventRegistration $eventRegistration): bool
     {
         return $user->isSuperAdmin()
             || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id);

@@ -27,6 +27,7 @@ tags:
   - name: Event Sessions
   - name: Event Registrations
   - name: Attendance
+  - name: Reports
   - name: Audit Logs
 
 paths:
@@ -95,6 +96,70 @@ paths:
                 properties:
                   user: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
+
+  /attendee/dashboard:
+    get:
+      tags: [Auth]
+      summary: Get the authenticated attendee's dashboard
+      description: >
+        **Access Policy:** Attendee users only (self-scoped; all user roles with attendee profile can access).
+
+        Returns self-scoped dashboard data including profile, account info, upcoming events (sorted by start date,
+        soonest first) with next session details and QR token, past events (sorted by end date, most recent first)
+        with attendance summaries, spotlight cards for next upcoming event and latest past event, and comprehensive
+        statistics including attendance rate percentage. Returns an empty profile if the user has no linked Attendee
+        master record yet.
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeDashboardItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /dashboard:
+    get:
+      tags: [Reports]
+      summary: Get the authenticated staff user's home dashboard (single entry point, shape varies by role)
+      description: >
+        **Access Policy:** Any authenticated staff user (`super_admin`, `org_admin`, `checker`).
+        Attendee accounts get `403 Forbidden` — use `GET /attendee/dashboard` instead.
+
+        This is the one-stop "home screen" endpoint the frontend should call right after login;
+        the response body shape depends on the caller's `role` (see `discriminator`), so no prior
+        knowledge of the user's role or organization id is required:
+
+        - **`super_admin`** → [`SuperAdminHomeDashboard`](#/components/schemas/SuperAdminHomeDashboard):
+          cross-organization totals, a top-5 organizations leaderboard (by registrations),
+          the next 5 upcoming events platform-wide, a 5-event check-in rate trend, and the
+          latest 10 audit log entries system-wide.
+        - **`org_admin`** → [`OrgAdminHomeDashboard`](#/components/schemas/OrgAdminHomeDashboard):
+          totals scoped to the caller's organization, today's scheduled sessions with live
+          check-in/check-out progress, upcoming events, a 5-event check-in rate trend,
+          registration breakdowns by union/mission, and the latest 10 audit log entries for
+          the organization.
+        - **`checker`** → [`CheckerHomeDashboard`](#/components/schemas/CheckerHomeDashboard):
+          operational, scanning-focused view — whether the checker is restricted to specific
+          events (`event_checker_access`) or has full org access, today's sessions to scan,
+          upcoming events, and the checker's own scan activity (today/all-time counts plus the
+          last 10 scans they personally recorded).
+
+        All three variants share a common `role`, `user`, and `generated_at` envelope.
+      responses:
+        "200":
+          description: OK — shape depends on `role`.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - { $ref: "#/components/schemas/SuperAdminHomeDashboard" }
+                  - { $ref: "#/components/schemas/OrgAdminHomeDashboard" }
+                  - { $ref: "#/components/schemas/CheckerHomeDashboard" }
+                discriminator:
+                  propertyName: role
+                  mapping:
+                    super_admin: "#/components/schemas/SuperAdminHomeDashboard"
+                    org_admin: "#/components/schemas/OrgAdminHomeDashboard"
+                    checker: "#/components/schemas/CheckerHomeDashboard"
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
 
   # ---------------------------------------------------------------- Organizations
   /organizations:
@@ -248,6 +313,53 @@ paths:
       summary: Delete a user
       responses:
         "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /users/{user}/photo:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags: [Users]
+      summary: Upload a user's profile photo
+      description: >
+        Creates 4 WebP images (sm/md/lg/original) from the uploaded PNG/JPEG.
+        Org Admin+ can upload photos for any user in their organization; users can upload their own.
+        Supports both multipart file uploads and base64 input (with or without data-URI prefix).
+        Decoded size must not exceed 10MB.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG image file
+          application/json:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  description: "Base64-encoded PNG/JPEG, optionally prefixed with data-URI (e.g., 'data:image/png;base64,...')"
+      responses:
+        "200": { $ref: "#/components/responses/UserItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Users]
+      summary: Remove a user's profile photo
+      description: Deletes all 4 image sizes. Org Admin+ can remove for their organization users; users can remove their own.
+      responses:
+        "200": { $ref: "#/components/responses/UserItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -468,7 +580,6 @@ paths:
                 first_name: { type: string, maxLength: 100 }
                 middle_name: { type: string, maxLength: 100, nullable: true }
                 last_name: { type: string, maxLength: 100 }
-                profile_photo_path: { type: string, nullable: true }
                 override_duplicate: { type: boolean, default: false }
       responses:
         "201": { $ref: "#/components/responses/AttendeeItem" }
@@ -508,6 +619,53 @@ paths:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /attendees/{attendee}/photo:
+    parameters:
+      - $ref: "#/components/parameters/AttendeeId"
+    post:
+      tags: [Attendees]
+      summary: Upload an attendee's photo
+      description: >
+        Creates 4 WebP images (sm/md/lg/original) from the uploaded PNG/JPEG. Org Admin+ only.
+        Supports both multipart file uploads and base64 input (with or without data-URI prefix).
+        Decoded size must not exceed 10MB.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG image file
+          application/json:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  description: "Base64-encoded PNG/JPEG, optionally prefixed with data-URI (e.g., 'data:image/png;base64,...')"
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Attendees]
+      summary: Remove an attendee's photo
+      description: Deletes all 4 image sizes. Org Admin+ only.
+      responses:
+        "200": { $ref: "#/components/responses/AttendeeItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
     put:
       tags: [Attendees]
       summary: Update an attendee
@@ -524,7 +682,6 @@ paths:
                 first_name: { type: string, maxLength: 100 }
                 middle_name: { type: string, maxLength: 100, nullable: true }
                 last_name: { type: string, maxLength: 100 }
-                profile_photo_path: { type: string, nullable: true }
       responses:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -635,6 +792,52 @@ paths:
       summary: Delete an event
       responses:
         "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/banner:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [Events]
+      summary: Upload an event's banner image
+      description: >
+        Creates 4 WebP images (sm/md/lg/original) from the uploaded PNG/JPEG. Org Admin+ only.
+        Supports both multipart file uploads and base64 input (with or without data-URI prefix).
+        Decoded size must not exceed 10MB.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [banner]
+              properties:
+                banner:
+                  type: string
+                  format: binary
+                  description: PNG or JPEG image file
+          application/json:
+            schema:
+              type: object
+              required: [banner]
+              properties:
+                banner:
+                  type: string
+                  description: "Base64-encoded PNG/JPEG, optionally prefixed with data-URI (e.g., 'data:image/png;base64,...')"
+      responses:
+        "200": { $ref: "#/components/responses/EventItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Events]
+      summary: Remove an event's banner image
+      description: Deletes all 4 image sizes. Org Admin+ only.
+      responses:
+        "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -836,6 +1039,71 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/registrations/id-cards/bulk-download:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Event Registrations]
+      summary: Bulk download identification cards for specified registrations
+      description: >
+        Download identification cards for specific attendees and merge them into a single PDF.
+        Pass `registration_ids[]` as query parameters to specify which registrations to include.
+        Only ready (already generated) ID cards are included; missing or pending cards are skipped.
+        All PDFs are merged into a single document. This action is recorded in the audit log.
+      parameters:
+        - name: registration_ids[]
+          in: query
+          required: true
+          schema:
+            type: array
+            items: { type: integer }
+            minItems: 1
+          description: Array of registration IDs to download
+      responses:
+        "200":
+          description: Merged PDF file stream containing all requested identification cards
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "202":
+          description: No ID cards are ready for download yet. Try again shortly.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "400":
+          description: No registration IDs provided
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/registrations/id-cards/download-all:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Event Registrations]
+      summary: Download all identification cards for the event
+      description: >
+        Download identification cards for all attendees registered to the event and merge them
+        into a single PDF. Only ready (already generated) ID cards are included; missing or
+        pending cards are skipped. This action is recorded in the audit log.
+      responses:
+        "200":
+          description: Merged PDF file stream containing all identification cards for the event
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "202":
+          description: No ID cards are ready for download yet. Try again shortly.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/registrations/{registration}:
     parameters:
@@ -1061,6 +1329,161 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
 
+  # ---------------------------------------------------------------- Reports
+  /events/{event}/reports/attendance-summary:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Reports]
+      summary: Get attendance summary for an event
+      description: >
+        Aggregated counts per session and overall totals: registered, checked-in, checked-out,
+        and no-show. Org Admin+ only.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/EventAttendanceSummary" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/reports/attendance-summary/export:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Reports]
+      summary: Export event attendance report
+      description: >
+        Export attendance data in Excel (xlsx) or PDF format. Pass `?format=pdf` or
+        `?format=xlsx` (default: xlsx). Org Admin+ only.
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [xlsx, pdf]
+            default: xlsx
+      responses:
+        "200":
+          description: File stream (Excel or PDF depending on format parameter)
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /organizations/{organization}/reports/dashboard:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Reports]
+      summary: Get organization dashboard with metrics and trends
+      description: >
+        **Access Policy:** Organization Admin or Super Admin only. Checkers are forbidden (403).
+        Org Admins can only access their own organization's dashboard; cross-organization attempts return 404.
+        Super Admin can access any organization's dashboard.
+
+        Comprehensive organization dashboard: event counts by status, attendee and registration totals,
+        latest event quick stats (registered, checked-in, checked-out, no-show, rates),
+        next upcoming event spotlight, attendance rate trend (last 5 completed events),
+        and registration breakdowns by union and mission.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/OrganizationDashboard" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /organizations/{organization}/reports/attendance-overview:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [Reports]
+      summary: Get organization-level attendance overview
+      description: >
+        Breakdown of attendance across all events by union and mission. Org Admin+ only.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/OrganizationAttendanceOverview" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /reports/dashboard:
+    get:
+      tags: [Reports]
+      summary: Get global dashboard with cross-organization metrics
+      description: >
+        **Access Policy:** Super Admin only (403 Forbidden for all other roles: Org Admin, Checker, Attendee).
+
+        Returns cross-organization totals (organizations, events by status, attendees, registrations)
+        and a per-organization breakdown table. Used for high-level monitoring across all organizations.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                { $ref: "#/components/schemas/GlobalDashboard" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ---------------------------------------------------------------- Attendance (continued)
+  /attendance/sync-batch:
+    post:
+      tags: [Attendance]
+      summary: Process a batch of attendance scans with per-item error handling
+      description: >
+        Submit multiple scans (QR or manual) in a single request. Each scan is processed
+        independently; partial failures do not affect other scans in the batch. Returns a
+        per-item result array with status (created/duplicate/error) and message.
+        `scanned_at` (optional, ISO 8601 format) allows offline clients to preserve the
+        original scan time; if omitted, defaults to the current server time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [scans]
+              properties:
+                scans:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    { $ref: "#/components/schemas/AttendanceScanBatchItem" }
+      responses:
+        "200":
+          description: Batch processed (some or all scans may have failed)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      { $ref: "#/components/schemas/AttendanceScanBatchResult" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1119,6 +1542,487 @@ components:
       type: string
       enum: [qr, manual]
 
+    AttendanceMethodValue:
+      type: string
+      enum: [qr, manual]
+
+    AttendanceSummary:
+      type: object
+      description: Attendance count summary for past events.
+      properties:
+        sessions_total: { type: integer, description: "Total sessions in the event" }
+        sessions_attended: { type: integer, description: "Number of sessions attended (checked in)" }
+
+    AttendeeProfileData:
+      type: object
+      nullable: true
+      description: The Attendee master record linked to this user, if it exists.
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer }
+        union_id: { type: integer, nullable: true }
+        mission_id: { type: integer, nullable: true }
+        first_name: { type: string }
+        middle_name: { type: string, nullable: true }
+        last_name: { type: string }
+        full_name: { type: string }
+        photo_urls: { $ref: "#/components/schemas/ImageUrls" }
+        union:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            name: { type: string }
+        mission:
+          type: object
+          nullable: true
+          properties:
+            id: { type: integer }
+            name: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AttendeeAccountData:
+      type: object
+      description: The authenticated User record.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [attendee] }
+        organization_id: { type: integer }
+        photo_urls: { $ref: "#/components/schemas/ImageUrls" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    UpcomingEventData:
+      type: object
+      description: Event registration data for an upcoming event.
+      properties:
+        registration_id: { type: integer, description: "EventRegistration id" }
+        event: { $ref: "#/components/schemas/Event" }
+        qr_token: { type: string, description: "Opaque token for QR code check-in" }
+        id_card_ready: { type: boolean, description: "Whether the ID card has been generated" }
+        id_card_url:
+          type: string
+          format: uri
+          nullable: true
+          description: "URL to download the ID card PDF, or null if not ready"
+        next_session:
+          type: object
+          nullable: true
+          description: "The earliest upcoming session, or null if all sessions have passed"
+          properties:
+            id: { type: integer }
+            event_id: { type: integer }
+            name: { type: string }
+            description: { type: string, nullable: true }
+            session_date: { type: string, format: date }
+            start_time: { type: string, example: "08:00:00" }
+            end_time: { type: string, example: "12:00:00" }
+            check_in_opens_at: { type: string, format: date-time }
+        days_until_start:
+          type: integer
+          nullable: true
+          description: "Number of days until event start (in next_event spotlight only); null for regular upcoming_events list items"
+
+    PastEventData:
+      type: object
+      description: Event registration data for a past event.
+      properties:
+        registration_id: { type: integer, description: "EventRegistration id" }
+        event: { $ref: "#/components/schemas/Event" }
+        attendance_summary: { $ref: "#/components/schemas/AttendanceSummary" }
+
+    AttendeeStatsData:
+      type: object
+      description: Aggregate statistics for the attendee.
+      properties:
+        total_events_registered: { type: integer, description: "Total events the attendee is registered for" }
+        total_upcoming_events: { type: integer, description: "Events with end_date >= today" }
+        total_past_events: { type: integer, description: "Events with end_date < today" }
+        total_sessions_attended: { type: integer, description: "Total sessions checked in to" }
+        total_sessions_available: { type: integer, description: "Total sessions across past events" }
+        attendance_rate: { type: number, format: float, description: "Percentage (0-100) of available sessions attended, rounded to 1 decimal" }
+
+    AttendeeDashboard:
+      type: object
+      properties:
+        profile: { $ref: "#/components/schemas/AttendeeProfileData" }
+        account: { $ref: "#/components/schemas/AttendeeAccountData" }
+        upcoming_events:
+          type: array
+          items: { $ref: "#/components/schemas/UpcomingEventData" }
+          description: "Sorted ascending by event start_date (soonest first)"
+        past_events:
+          type: array
+          items: { $ref: "#/components/schemas/PastEventData" }
+          description: "Sorted descending by event end_date (most recent first)"
+        next_event:
+          allOf: [{ $ref: "#/components/schemas/UpcomingEventData" }]
+          nullable: true
+          description: "Spotlight: the soonest upcoming event, with days_until_start included. Null if no upcoming events."
+        latest_event:
+          allOf: [{ $ref: "#/components/schemas/PastEventData" }]
+          nullable: true
+          description: "Spotlight: the most recent past event with attendance summary. Null if no past events."
+        stats: { $ref: "#/components/schemas/AttendeeStatsData" }
+
+    OrganizationDashboard:
+      type: object
+      description: Organization dashboard with metrics, trends, and breakdowns.
+      properties:
+        organization_id: { type: integer }
+        organization_name: { type: string }
+        events:
+          type: object
+          properties:
+            total: { type: integer }
+            draft: { type: integer }
+            published: { type: integer }
+            completed: { type: integer }
+            cancelled: { type: integer }
+            upcoming: { type: integer, description: "Events with start_date >= today and status != cancelled" }
+            ongoing: { type: integer, description: "Events with start_date <= today and end_date >= today and status != cancelled" }
+        attendees:
+          type: object
+          properties:
+            total: { type: integer }
+        registrations:
+          type: object
+          properties:
+            total: { type: integer }
+        latest_event:
+          type: object
+          nullable: true
+          description: "Most recent completed event, or null if none exist. Falls back to most recent ended event by date."
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            start_date: { type: string, format: date }
+            end_date: { type: string, format: date }
+            venue: { type: string, nullable: true }
+            stats:
+              type: object
+              properties:
+                registered: { type: integer }
+                checked_in: { type: integer }
+                checked_out: { type: integer }
+                no_show: { type: integer }
+                check_in_rate: { type: number, format: float, description: "Percentage 0-100" }
+                check_out_rate: { type: number, format: float, description: "Percentage 0-100" }
+        next_upcoming_event:
+          type: object
+          nullable: true
+          description: "Earliest event with start_date >= today and status in (draft, published), or null if none exist."
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            start_date: { type: string, format: date }
+            end_date: { type: string, format: date }
+            venue: { type: string, nullable: true }
+            days_until_start: { type: integer }
+            registrations_count: { type: integer }
+        attendance_rate_trend:
+          type: array
+          description: "Last 5 completed events, ordered by end_date descending (most recent first)."
+          items:
+            type: object
+            properties:
+              event_id: { type: integer }
+              event_name: { type: string }
+              end_date: { type: string, format: date }
+              registered: { type: integer }
+              checked_in: { type: integer }
+              rate: { type: number, format: float, description: "Check-in percentage 0-100" }
+        breakdown_by_union:
+          type: object
+          description: "Registration counts keyed by union name (or 'No Union')"
+          additionalProperties:
+            type: integer
+        breakdown_by_mission:
+          type: object
+          description: "Registration counts keyed by mission name (or 'No Mission')"
+          additionalProperties:
+            type: integer
+
+    GlobalDashboard:
+      type: object
+      description: Global dashboard for SuperAdmin (cross-organization view).
+      properties:
+        organizations:
+          type: object
+          properties:
+            total: { type: integer, description: "Total organizations across the system" }
+            active: { type: integer, description: "Organizations with is_active = true" }
+        events:
+          type: object
+          description: "Event counts across all organizations by status"
+          properties:
+            total: { type: integer }
+            draft: { type: integer }
+            published: { type: integer }
+            completed: { type: integer }
+            cancelled: { type: integer }
+            upcoming: { type: integer }
+            ongoing: { type: integer }
+        attendees:
+          type: object
+          properties:
+            total: { type: integer }
+        registrations:
+          type: object
+          properties:
+            total: { type: integer }
+        by_organization:
+          type: array
+          description: "Per-organization breakdown table"
+          items:
+            type: object
+            properties:
+              organization_id: { type: integer }
+              organization_name: { type: string }
+              total_events: { type: integer }
+              total_attendees: { type: integer }
+              total_registrations: { type: integer }
+
+    HomeDashboardUser:
+      type: object
+      description: Common authenticated-user envelope shared by all `/dashboard` role variants.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        email: { type: string, format: email }
+        organization_id: { type: integer, nullable: true, description: "Always null for super_admin." }
+        photo_urls: { $ref: "#/components/schemas/ImageUrls" }
+
+    HomeDashboardEventCounts:
+      type: object
+      description: Event counts by status, scoped to whatever set of events the dashboard variant covers.
+      properties:
+        total: { type: integer }
+        draft: { type: integer }
+        published: { type: integer }
+        completed: { type: integer }
+        cancelled: { type: integer }
+        upcoming: { type: integer, description: "start_date >= today and status != cancelled" }
+        ongoing: { type: integer, description: "start_date <= today and end_date >= today and status != cancelled" }
+
+    HomeDashboardUpcomingEvent:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        start_date: { type: string, format: date }
+        end_date: { type: string, format: date }
+        venue: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/EventStatus" }
+        registrations_count: { type: integer }
+        days_until_start: { type: integer }
+
+    HomeDashboardTodaySession:
+      type: object
+      description: A session scheduled for today, with live check-in/check-out progress.
+      properties:
+        id: { type: integer }
+        event_id: { type: integer }
+        event_name: { type: string }
+        name: { type: string }
+        start_time: { type: string, example: "08:00:00" }
+        end_time: { type: string, example: "12:00:00" }
+        check_in_opens_at: { type: string, format: date-time }
+        registered:
+          type: integer
+          description: "Total registrations for the parent event (shared across all of its sessions)."
+        checked_in: { type: integer }
+        checked_out: { type: integer }
+
+    HomeDashboardAttendanceTrendItem:
+      type: object
+      properties:
+        event_id: { type: integer }
+        event_name: { type: string }
+        end_date: { type: string, format: date }
+        registered: { type: integer }
+        checked_in: { type: integer }
+        rate: { type: number, format: float, description: "Check-in percentage 0-100" }
+
+    HomeDashboardRecentActivityItem:
+      type: object
+      properties:
+        id: { type: integer }
+        action: { type: string, example: "attendee.created" }
+        user: { type: string, nullable: true, description: "Name of the actor, or null for system actions." }
+        auditable_type: { type: string, nullable: true, description: "Class basename, e.g. \"Attendee\"." }
+        created_at: { type: string, format: date-time }
+
+    SuperAdminHomeDashboard:
+      type: object
+      description: "`/dashboard` response for role = super_admin: cross-organization overview."
+      properties:
+        role: { type: string, enum: [super_admin] }
+        user: { $ref: "#/components/schemas/HomeDashboardUser" }
+        generated_at: { type: string, format: date-time }
+        organizations:
+          type: object
+          properties:
+            total: { type: integer }
+            active: { type: integer, description: "is_active = true" }
+            inactive: { type: integer, description: "is_active = false" }
+        events: { $ref: "#/components/schemas/HomeDashboardEventCounts" }
+        attendees:
+          type: object
+          properties:
+            total: { type: integer }
+        users:
+          type: object
+          description: "Staff user counts across all organizations, by role."
+          properties:
+            total: { type: integer }
+            super_admins: { type: integer }
+            org_admins: { type: integer }
+            checkers: { type: integer }
+        registrations:
+          type: object
+          properties:
+            total: { type: integer }
+        top_organizations:
+          type: array
+          description: "Top 5 organizations by total registrations, descending."
+          items:
+            type: object
+            properties:
+              organization_id: { type: integer }
+              organization_name: { type: string }
+              total_events: { type: integer }
+              total_attendees: { type: integer }
+              total_registrations: { type: integer }
+        next_upcoming_event:
+          allOf: [{ $ref: "#/components/schemas/HomeDashboardUpcomingEvent" }]
+          nullable: true
+          description: "Spotlight: soonest of upcoming_events, or null if none exist."
+        upcoming_events:
+          type: array
+          description: "Next 5 upcoming events platform-wide, ordered by start_date ascending."
+          items: { $ref: "#/components/schemas/HomeDashboardUpcomingEvent" }
+        attendance_rate_trend:
+          type: array
+          description: "Last 5 completed events platform-wide, ordered by end_date descending."
+          items: { $ref: "#/components/schemas/HomeDashboardAttendanceTrendItem" }
+        recent_activity:
+          type: array
+          description: "Latest 10 audit log entries system-wide, most recent first."
+          items: { $ref: "#/components/schemas/HomeDashboardRecentActivityItem" }
+
+    OrgAdminHomeDashboard:
+      type: object
+      description: "`/dashboard` response for role = org_admin: overview scoped to the caller's organization."
+      properties:
+        role: { type: string, enum: [org_admin] }
+        user: { $ref: "#/components/schemas/HomeDashboardUser" }
+        generated_at: { type: string, format: date-time }
+        organization:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            code: { type: string }
+            logo_url: { type: string, format: uri, nullable: true }
+        events: { $ref: "#/components/schemas/HomeDashboardEventCounts" }
+        attendees:
+          type: object
+          properties:
+            total: { type: integer }
+        users:
+          type: object
+          description: "Staff user counts within the organization, by role."
+          properties:
+            total: { type: integer }
+            org_admins: { type: integer }
+            checkers: { type: integer }
+        unions:
+          type: object
+          properties:
+            total: { type: integer }
+        missions:
+          type: object
+          properties:
+            total: { type: integer }
+        registrations:
+          type: object
+          properties:
+            total: { type: integer }
+        next_upcoming_event:
+          allOf: [{ $ref: "#/components/schemas/HomeDashboardUpcomingEvent" }]
+          nullable: true
+          description: "Spotlight: soonest of upcoming_events, or null if none exist."
+        upcoming_events:
+          type: array
+          description: "Next 5 upcoming events for the organization, ordered by start_date ascending."
+          items: { $ref: "#/components/schemas/HomeDashboardUpcomingEvent" }
+        today_sessions:
+          type: array
+          description: "Sessions scheduled for today across the organization's events, ordered by start_time ascending."
+          items: { $ref: "#/components/schemas/HomeDashboardTodaySession" }
+        attendance_rate_trend:
+          type: array
+          description: "Last 5 completed events for the organization, ordered by end_date descending."
+          items: { $ref: "#/components/schemas/HomeDashboardAttendanceTrendItem" }
+        breakdown_by_union:
+          type: object
+          description: "Registration counts keyed by union name (or 'No Union')."
+          additionalProperties: { type: integer }
+        breakdown_by_mission:
+          type: object
+          description: "Registration counts keyed by mission name (or 'No Mission')."
+          additionalProperties: { type: integer }
+        recent_activity:
+          type: array
+          description: "Latest 10 audit log entries for the organization, most recent first."
+          items: { $ref: "#/components/schemas/HomeDashboardRecentActivityItem" }
+
+    CheckerHomeDashboard:
+      type: object
+      description: "`/dashboard` response for role = checker: operational, scanning-focused overview."
+      properties:
+        role: { type: string, enum: [checker] }
+        user: { $ref: "#/components/schemas/HomeDashboardUser" }
+        generated_at: { type: string, format: date-time }
+        access_restricted:
+          type: boolean
+          description: >
+            Whether this checker has explicit event_checker_access rows (true = restricted to
+            accessible_events_count events only; false = full organization access, the default).
+        accessible_events_count: { type: integer }
+        upcoming_events:
+          type: array
+          description: "Next 5 upcoming accessible events, ordered by start_date ascending."
+          items: { $ref: "#/components/schemas/HomeDashboardUpcomingEvent" }
+        today_sessions:
+          type: array
+          description: "Sessions scheduled for today across accessible events, ordered by start_time ascending."
+          items: { $ref: "#/components/schemas/HomeDashboardTodaySession" }
+        my_scan_stats:
+          type: object
+          description: "Attendance records personally recorded (checked in or manually marked) by this checker."
+          properties:
+            today: { type: integer }
+            total: { type: integer, description: "All-time count." }
+        recent_scans:
+          type: array
+          description: "Last 10 attendance records recorded by this checker, most recent first."
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              attendee_name: { type: string }
+              event_id: { type: integer }
+              event_name: { type: string }
+              session_name: { type: string, nullable: true }
+              method: { $ref: "#/components/schemas/AttendanceMethod" }
+              check_in_at: { type: string, format: date-time, nullable: true }
+              check_out_at: { type: string, format: date-time, nullable: true }
+
     Organization:
       type: object
       properties:
@@ -1137,6 +2041,7 @@ components:
         name: { type: string }
         email: { type: string, format: email }
         role: { $ref: "#/components/schemas/UserRole" }
+        photo_urls: { $ref: "#/components/schemas/ImageUrls" }
         organization_id:
           {
             type: integer,
@@ -1170,6 +2075,15 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    ImageUrls:
+      type: object
+      description: URLs for 4 WebP image sizes. All are null if photo/banner was never uploaded.
+      properties:
+        sm: { type: string, format: uri, nullable: true, description: "480px width" }
+        md: { type: string, format: uri, nullable: true, description: "1024px width" }
+        lg: { type: string, format: uri, nullable: true, description: "1920px width" }
+        original: { type: string, format: uri, nullable: true, description: "Up to 3000px width, maintains aspect ratio" }
+
     Attendee:
       type: object
       properties:
@@ -1185,7 +2099,7 @@ components:
             type: string,
             description: "Derived: first + middle + last, trimmed.",
           }
-        profile_photo_path: { type: string, nullable: true }
+        photo_urls: { $ref: "#/components/schemas/ImageUrls" }
         union: { $ref: "#/components/schemas/Union" }
         mission: { $ref: "#/components/schemas/Mission" }
         created_at: { type: string, format: date-time }
@@ -1204,6 +2118,7 @@ components:
         status: { $ref: "#/components/schemas/EventStatus" }
         requires_check_out: { type: boolean }
         check_in_window_minutes: { type: integer }
+        banner_urls: { $ref: "#/components/schemas/ImageUrls" }
         id_card_background_url:
           type: string
           format: uri
@@ -1579,3 +2494,12 @@ components:
                 properties:
                   links: { $ref: "#/components/schemas/PaginationLinks" }
                   meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    AttendeeDashboardItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/AttendeeDashboard" }

@@ -6,12 +6,15 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\SyncUserEventAccessRequest;
 use App\Http\Requests\UpdateUserRequest;
+use App\Http\Requests\UploadUserPhotoRequest;
 use App\Http\Resources\EventResource;
 use App\Http\Resources\UserResource;
 use App\Models\AuditLog;
 use App\Models\User;
+use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 
 class UserController extends Controller
 {
@@ -97,5 +100,47 @@ class UserController extends Controller
         $user->accessibleEvents()->sync($request->validated('event_ids'));
 
         return EventResource::collection($user->accessibleEvents()->get());
+    }
+
+    /**
+     * Upload (or replace) the user's profile photo.
+     */
+    public function uploadPhoto(UploadUserPhotoRequest $request, User $user)
+    {
+        $service = new ImageUploadService;
+        $input = $request->file('photo') ?? $request->input('photo');
+
+        $paths = $service->process(
+            $input,
+            preset: 'profile_photo',
+            directory: "users/{$user->id}",
+            prefix: 'photo',
+        );
+
+        $user->update(['photo_paths' => $paths]);
+
+        AuditLog::record('user.photo_updated', $user);
+
+        return UserResource::make($user);
+    }
+
+    /**
+     * Remove the user's profile photo.
+     */
+    public function removePhoto(User $user)
+    {
+        $this->authorize('update', $user);
+
+        if ($user->photo_paths) {
+            foreach ($user->photo_paths as $path) {
+                Storage::disk('public')->delete($path);
+            }
+        }
+
+        $user->update(['photo_paths' => null]);
+
+        AuditLog::record('user.photo_removed', $user);
+
+        return UserResource::make($user);
     }
 }

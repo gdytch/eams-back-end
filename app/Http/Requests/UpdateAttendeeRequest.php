@@ -25,7 +25,6 @@ class UpdateAttendeeRequest extends FormRequest
             'first_name' => ['sometimes', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['sometimes', 'string', 'max:100'],
-            'profile_photo_path' => ['nullable', 'string'],
         ];
     }
 }

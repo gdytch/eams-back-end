@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->foreignId('event_id')->constrained()->cascadeOnDelete();
             $table->foreignId('attendee_id')->constrained()->cascadeOnDelete();
-            $table->string('qr_token', 64)->unique();
+            $table->string('qr_token', 512)->unique();
             $table->foreignId('registered_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('registered_at');
             $table->timestamps();

@@ -21,6 +21,11 @@ class Mission extends Model
         return $this->belongsTo(Union::class);
     }
 
+    public function churches(): HasMany
+    {
+        return $this->hasMany(Church::class);
+    }
+
     public function attendees(): HasMany
     {
         return $this->hasMany(Attendee::class);

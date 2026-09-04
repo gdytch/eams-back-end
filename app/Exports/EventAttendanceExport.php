@@ -19,7 +19,7 @@ class EventAttendanceExport implements FromCollection, WithHeadings
     public function collection(): Collection
     {
         return $this->event->registrations()
-            ->with('attendee.union', 'attendee.mission', 'attendanceRecords')
+            ->with('attendee.union', 'attendee.mission', 'attendee.church', 'attendanceRecords')
             ->get()
             ->map(function ($registration) {
                 $checkInRecord = $registration->attendanceRecords->first();
@@ -38,10 +38,14 @@ class EventAttendanceExport implements FromCollection, WithHeadings
                     'Last Name' => $registration->attendee->last_name,
                     'Union' => $registration->attendee->union?->name ?? '',
                     'Mission' => $registration->attendee->mission?->name ?? '',
+                    'Church' => $registration->attendee->church?->name ?? '',
+                    'Mobile No.' => $registration->attendee->mobile_no ?? '',
+                    'Email Address' => $registration->attendee->email_address ?? '',
                     'Status' => $status,
                     'Method' => ucfirst($method),
                     'Check-in Time' => $checkInAt?->format('Y-m-d H:i:s') ?? '',
                     'Check-out Time' => $checkOutAt?->format('Y-m-d H:i:s') ?? '',
+                    'Remarks' => $registration->attendee->remarks ?? '',
                 ];
             });
     }
@@ -54,10 +58,14 @@ class EventAttendanceExport implements FromCollection, WithHeadings
             'Last Name',
             'Union',
             'Mission',
+            'Church',
+            'Mobile No.',
+            'Email Address',
             'Status',
             'Method',
             'Check-in Time',
             'Check-out Time',
+            'Remarks',
         ];
     }
 }

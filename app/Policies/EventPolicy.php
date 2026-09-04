@@ -33,4 +33,10 @@ class EventPolicy
     {
         return $this->update($user, $event);
     }
+
+    public function manageIdCards(User $user, Event $event): bool
+    {
+        return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
+            && $user->hasAccessToEvent($event);
+    }
 }

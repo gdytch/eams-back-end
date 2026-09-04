@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Attendee;
+use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
@@ -46,6 +47,15 @@ class DatabaseSeeder extends Seeder
             Mission::factory()->for($organization)->for($union)->create(['name' => 'Southern Mindanao Mission', 'code' => 'SMM']),
         ];
 
+        // Create churches under each mission
+        $churches = [];
+        foreach ($missions as $mission) {
+            $churches[$mission->id] = [
+                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'Central '.$mission->name.' Church']),
+                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'District '.$mission->name.' Church']),
+            ];
+        }
+
         $event = Event::factory()->for($organization)->create([
             'name' => 'Annual Convention 2027',
             'created_by' => $orgAdmin->id,
@@ -69,16 +79,25 @@ class DatabaseSeeder extends Seeder
             ->recycle($organization)
             ->count(100)
             ->create(['created_by' => $checker->id])
-            ->each(function (Attendee $attendee, int $index) use ($missions, $union, $event, $checker) {
+            ->each(function (Attendee $attendee, int $index) use ($missions, $churches, $union, $event, $checker) {
                 $mission = $missions[$index % count($missions)];
+                $missionChurches = $churches[$mission->id];
+                $church = $missionChurches[$index % count($missionChurches)];
+
                 $attendee->update([
                     'union_id' => $union->id,
                     'mission_id' => $mission->id,
+                    'church_id' => $church->id,
+                    'mobile_no' => fake()->phoneNumber(),
+                    'email_address' => fake()->unique()->safeEmail(),
+                    'remarks' => fake()->optional(0.7)->sentence(),
                 ]);
 
                 EventRegistration::factory()->for($event)->for($attendee)->create([
                     'registered_by' => $checker->id,
                 ]);
             });
+
+        $this->call(AttendanceRecordSeeder::class);
     }
 }

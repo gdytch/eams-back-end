@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Church;
+use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
@@ -52,6 +54,34 @@ class OrganizationIsolationTest extends TestCase
         $union = Union::factory()->for($org)->create();
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->getJson("/api/v1/unions/{$union->id}");
+
+        $response->assertOk();
+    }
+
+    public function test_org_admin_cannot_view_church_belonging_to_another_organization(): void
+    {
+        $orgA = Organization::factory()->create();
+        $orgB = Organization::factory()->create();
+
+        $orgAdminA = User::factory()->orgAdmin()->for($orgA)->create();
+        $unionB = Union::factory()->for($orgB)->create();
+        $missionB = Mission::factory()->for($orgB)->for($unionB)->create();
+        $churchB = Church::factory()->for($orgB)->for($unionB)->for($missionB)->create();
+
+        $response = $this->actingAs($orgAdminA, 'sanctum')->getJson("/api/v1/churches/{$churchB->id}");
+
+        $response->assertNotFound();
+    }
+
+    public function test_org_admin_can_view_church_within_own_organization(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $union = Union::factory()->for($org)->create();
+        $mission = Mission::factory()->for($org)->for($union)->create();
+        $church = Church::factory()->for($org)->for($union)->for($mission)->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson("/api/v1/churches/{$church->id}");
 
         $response->assertOk();
     }

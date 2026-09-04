@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\AttendeeController;
 use App\Http\Controllers\Api\V1\AttendeeDashboardController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventController;
 use App\Http\Controllers\Api\V1\EventRegistrationController;
@@ -40,6 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('unions', UnionController::class);
     Route::apiResource('missions', MissionController::class);
+    Route::apiResource('churches', ChurchController::class);
 
     Route::get('attendees/check-duplicates', [AttendeeController::class, 'checkDuplicates']);
     Route::apiResource('attendees', AttendeeController::class);

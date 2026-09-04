@@ -39,7 +39,7 @@ class EventRegistrationPolicy
 
     public function manageIdCards(User $user, EventRegistration $eventRegistration): bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id);
+        return ($user->isSuperAdmin() || $user->organization_id === $eventRegistration->event->organization_id)
+            && $user->hasAccessToEvent($eventRegistration->event);
     }
 }

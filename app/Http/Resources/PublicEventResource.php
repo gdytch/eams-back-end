@@ -24,6 +24,7 @@ class PublicEventResource extends JsonResource
             'status' => $this->status,
             'organization' => OrganizationResource::make($this->whenLoaded('organization')),
             'sessions' => EventSessionResource::collection($this->whenLoaded('sessions')),
+            'banner_urls' => $this->banner_urls,
         ];
     }
 }

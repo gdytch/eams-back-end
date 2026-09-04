@@ -20,10 +20,14 @@ class AttendeeResource extends JsonResource
             'organization_id' => $this->organization_id,
             'union_id' => $this->union_id,
             'mission_id' => $this->mission_id,
+            'church_id' => $this->church_id,
             'first_name' => $this->first_name,
             'middle_name' => $this->middle_name,
             'last_name' => $this->last_name,
             'full_name' => trim("{$this->first_name} {$this->middle_name} {$this->last_name}"),
+            'mobile_no' => $this->mobile_no,
+            'email_address' => $this->email_address,
+            'remarks' => $this->remarks,
             'photo_urls' => $this->photo_paths
                 ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [
                     $key => Storage::disk('public')->url($path),
@@ -31,6 +35,7 @@ class AttendeeResource extends JsonResource
                 : null,
             'union' => UnionResource::make($this->whenLoaded('union')),
             'mission' => MissionResource::make($this->whenLoaded('mission')),
+            'church' => ChurchResource::make($this->whenLoaded('church')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

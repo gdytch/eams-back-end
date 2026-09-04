@@ -17,12 +17,65 @@ class ReportController extends Controller
 {
     /**
      * Get attendance summary for a specific event (per-session + overall totals).
+     * Also includes a paginated list of attendance records for display in a table.
      */
-    public function eventAttendanceSummary(Event $event)
+    public function eventAttendanceSummary(Request $request, Event $event)
     {
         $this->authorize('view', $event);
 
         $summary = $this->buildEventAttendanceSummary($event);
+
+        // Fetch paginated attendance records with related data
+        $perPage = $request->query('per_page', 15);
+        $attendanceRecords = $event->registrations()
+            ->with([
+                'attendanceRecords.eventSession',
+                'attendanceRecords.recordedBy',
+                'attendee.union',
+                'attendee.mission',
+            ])
+            ->paginate($perPage);
+
+        // Transform registrations into attendance records for table display
+        $records = collect();
+        foreach ($attendanceRecords->items() as $registration) {
+            foreach ($registration->attendanceRecords as $attendanceRecord) {
+                $records->push([
+                    'id' => $attendanceRecord->id,
+                    'attendee_name' => $registration->attendee->first_name . ' ' . $registration->attendee->last_name,
+                    'attendee_id' => $registration->attendee->id,
+                    'email' => $registration->attendee->email ?? 'N/A',
+                    'union' => $registration->attendee->union?->name ?? 'N/A',
+                    'mission' => $registration->attendee->mission?->name ?? 'N/A',
+                    'session' => $attendanceRecord->eventSession?->name ?? 'N/A',
+                    'session_date' => $attendanceRecord->eventSession?->session_date?->toDateString() ?? 'N/A',
+                    'check_in_at' => $attendanceRecord->check_in_at?->format('Y-m-d H:i:s'),
+                    'check_out_at' => $attendanceRecord->check_out_at?->format('Y-m-d H:i:s'),
+                    'method' => $attendanceRecord->method?->value ?? 'manual',
+                    'recorded_by' => $attendanceRecord->recordedBy?->name ?? 'System',
+                    'status' => match (true) {
+                        $attendanceRecord->check_out_at !== null => 'Checked Out',
+                        $attendanceRecord->check_in_at !== null => 'Checked In',
+                        default => 'No Show',
+                    },
+                ]);
+            }
+        }
+
+        $from = (($attendanceRecords->currentPage() - 1) * $attendanceRecords->perPage()) + 1;
+        $to = $from + count($attendanceRecords->items()) - 1;
+
+        $summary['attendance_records'] = [
+            'data' => $records->values()->toArray(),
+            'pagination' => [
+                'total' => $attendanceRecords->total(),
+                'per_page' => $attendanceRecords->perPage(),
+                'current_page' => $attendanceRecords->currentPage(),
+                'last_page' => $attendanceRecords->lastPage(),
+                'from' => $from,
+                'to' => $to,
+            ],
+        ];
 
         AuditLog::record('report.event_attendance_summary_viewed', $event);
 
@@ -134,7 +187,7 @@ class ReportController extends Controller
 
     private function buildEventAttendanceSummary(Event $event): array
     {
-        $sessions = $event->sessions()->with(['attendanceRecords' => fn ($q) => $q->with('eventRegistration')])->get();
+        $sessions = $event->sessions()->with(['attendanceRecords' => fn($q) => $q->with('eventRegistration')])->get();
 
         $totalRegistered = $event->registrations()->count();
         $totalCheckedIn = 0;
@@ -225,8 +278,8 @@ class ReportController extends Controller
         $today = today();
         $events = $organization->events()->get();
         $statusCounts = $events->countBy('status');
-        $upcomingCount = $events->filter(fn ($e) => $e->start_date >= $today && $e->status->value !== 'cancelled')->count();
-        $ongoingCount = $events->filter(fn ($e) => $e->start_date <= $today && $e->end_date >= $today && $e->status->value !== 'cancelled')->count();
+        $upcomingCount = $events->filter(fn($e) => $e->start_date >= $today && $e->status->value !== 'cancelled')->count();
+        $ongoingCount = $events->filter(fn($e) => $e->start_date <= $today && $e->end_date >= $today && $e->status->value !== 'cancelled')->count();
 
         $dashboard = [
             'organization_id' => $organization->id,
@@ -244,7 +297,7 @@ class ReportController extends Controller
                 'total' => $organization->attendees()->count(),
             ],
             'registrations' => [
-                'total' => $organization->events()->with('registrations')->get()->sum(fn ($e) => $e->registrations->count()),
+                'total' => $organization->events()->with('registrations')->get()->sum(fn($e) => $e->registrations->count()),
             ],
             'latest_event' => $this->getLatestEventStats($organization),
             'next_upcoming_event' => $this->getNextUpcomingEvent($organization),
@@ -269,13 +322,13 @@ class ReportController extends Controller
         $allEvents = Event::withoutGlobalScopes()->get();
         $statusCounts = $allEvents->countBy('status');
         $today = today();
-        $upcomingCount = $allEvents->filter(fn ($e) => $e->start_date >= $today && $e->status->value !== 'cancelled')->count();
-        $ongoingCount = $allEvents->filter(fn ($e) => $e->start_date <= $today && $e->end_date >= $today && $e->status->value !== 'cancelled')->count();
+        $upcomingCount = $allEvents->filter(fn($e) => $e->start_date >= $today && $e->status->value !== 'cancelled')->count();
+        $ongoingCount = $allEvents->filter(fn($e) => $e->start_date <= $today && $e->end_date >= $today && $e->status->value !== 'cancelled')->count();
 
         $byOrganization = $organizations->map(function ($org) {
             $events = $org->events()->count();
             $attendees = $org->attendees()->count();
-            $registrations = $org->events()->with('registrations')->get()->sum(fn ($e) => $e->registrations->count());
+            $registrations = $org->events()->with('registrations')->get()->sum(fn($e) => $e->registrations->count());
 
             return [
                 'organization_id' => $org->id,
@@ -304,7 +357,7 @@ class ReportController extends Controller
                 'total' => Attendee::withoutGlobalScopes()->count(),
             ],
             'registrations' => [
-                'total' => $allEvents->sum(fn ($e) => $e->registrations->count()),
+                'total' => $allEvents->sum(fn($e) => $e->registrations->count()),
             ],
             'by_organization' => $byOrganization,
         ];
@@ -436,9 +489,9 @@ class ReportController extends Controller
         $breakdown = $organization->events()
             ->with(['registrations.attendee.union'])
             ->get()
-            ->flatMap(fn ($e) => $e->registrations)
-            ->groupBy(fn ($r) => (string) ($r->attendee->union?->name ?? 'No Union'))
-            ->map(fn ($regs) => $regs->count())
+            ->flatMap(fn($e) => $e->registrations)
+            ->groupBy(fn($r) => (string) ($r->attendee->union?->name ?? 'No Union'))
+            ->map(fn($regs) => $regs->count())
             ->toArray();
 
         return $breakdown;
@@ -452,9 +505,9 @@ class ReportController extends Controller
         $breakdown = $organization->events()
             ->with(['registrations.attendee.mission'])
             ->get()
-            ->flatMap(fn ($e) => $e->registrations)
-            ->groupBy(fn ($r) => (string) ($r->attendee->mission?->name ?? 'No Mission'))
-            ->map(fn ($regs) => $regs->count())
+            ->flatMap(fn($e) => $e->registrations)
+            ->groupBy(fn($r) => (string) ($r->attendee->mission?->name ?? 'No Mission'))
+            ->map(fn($regs) => $regs->count())
             ->toArray();
 
         return $breakdown;

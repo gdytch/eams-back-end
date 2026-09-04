@@ -23,6 +23,9 @@ class AttendeeFactory extends Factory
             'first_name' => fake()->firstName(),
             'middle_name' => fake()->optional()->firstName(),
             'last_name' => fake()->lastName(),
+            'mobile_no' => fake()->optional(0.7)->phoneNumber(),
+            'email_address' => fake()->optional(0.7)->safeEmail(),
+            'remarks' => fake()->optional(0.3)->sentence(),
         ];
     }
 }

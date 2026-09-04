@@ -22,6 +22,7 @@ class EventAttendanceSummaryResource extends JsonResource
             'total_checked_out' => $this->resource['total_checked_out'],
             'total_no_show' => $this->resource['total_no_show'],
             'sessions' => $this->resource['sessions'] ?? [],
+            'attendance_records' => $this->resource['attendance_records'] ?? null,
         ];
     }
 }

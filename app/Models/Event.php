@@ -75,4 +75,9 @@ class Event extends Model
     {
         return $this->belongsToMany(User::class, 'event_checker_access');
     }
+
+    public function getBannerUrlsAttribute(): array
+    {
+        return array_map(fn($path) => $path ? asset("storage/{$path}") : null, $this->banner_paths ?? []);
+    }
 }

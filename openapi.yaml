@@ -540,6 +540,94 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  # ---------------------------------------------------------------- Churches
+  /churches:
+    get:
+      tags: [Territories]
+      summary: List churches
+      parameters:
+        - $ref: "#/components/parameters/Page"
+      responses:
+        "200":
+          description: Churches list
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChurchList" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+    post:
+      tags: [Territories]
+      summary: Create a church
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [union_id, mission_id, name]
+              properties:
+                organization_id: { type: integer }
+                union_id: { type: integer }
+                mission_id: { type: integer }
+                name: { type: string, maxLength: 255 }
+                address: { type: string, maxLength: 255, nullable: true }
+      responses:
+        "201":
+          description: Church created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+
+  /churches/{churchId}:
+    parameters:
+      - $ref: "#/components/parameters/ChurchId"
+    get:
+      tags: [Territories]
+      summary: Get a church
+      responses:
+        "200":
+          description: Church details
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Territories]
+      summary: Update a church
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                organization_id: { type: integer }
+                union_id: { type: integer }
+                mission_id: { type: integer }
+                name: { type: string, maxLength: 255 }
+                address: { type: string, maxLength: 255, nullable: true }
+      responses:
+        "200":
+          description: Church updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/UnprocessableEntity" }
+    delete:
+      tags: [Territories]
+      summary: Delete a church
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   # ---------------------------------------------------------------- Attendees
   /attendees:
     get:
@@ -577,9 +665,13 @@ paths:
                   }
                 union_id: { type: integer, nullable: true }
                 mission_id: { type: integer, nullable: true }
+                church_id: { type: integer, nullable: true }
                 first_name: { type: string, maxLength: 100 }
                 middle_name: { type: string, maxLength: 100, nullable: true }
                 last_name: { type: string, maxLength: 100 }
+                mobile_no: { type: string, maxLength: 20, nullable: true }
+                email_address: { type: string, format: email, nullable: true }
+                remarks: { type: string, nullable: true }
                 override_duplicate: { type: boolean, default: false }
       responses:
         "201": { $ref: "#/components/responses/AttendeeItem" }
@@ -679,9 +771,13 @@ paths:
               properties:
                 union_id: { type: integer, nullable: true }
                 mission_id: { type: integer, nullable: true }
+                church_id: { type: integer, nullable: true }
                 first_name: { type: string, maxLength: 100 }
                 middle_name: { type: string, maxLength: 100, nullable: true }
                 last_name: { type: string, maxLength: 100 }
+                mobile_no: { type: string, maxLength: 20, nullable: true }
+                email_address: { type: string, format: email, nullable: true }
+                remarks: { type: string, nullable: true }
       responses:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -1508,6 +1604,8 @@ components:
       { name: union, in: path, required: true, schema: { type: integer } }
     MissionId:
       { name: mission, in: path, required: true, schema: { type: integer } }
+    ChurchId:
+      { name: church, in: path, required: true, schema: { type: integer } }
     AttendeeId:
       { name: attendee, in: path, required: true, schema: { type: integer } }
     EventId:
@@ -2075,6 +2173,18 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    Church:
+      type: object
+      properties:
+        id: { type: integer }
+        organization_id: { type: integer }
+        union_id: { type: integer }
+        mission_id: { type: integer }
+        name: { type: string }
+        address: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
     ImageUrls:
       type: object
       description: URLs for 4 WebP image sizes. All are null if photo/banner was never uploaded.
@@ -2091,6 +2201,7 @@ components:
         organization_id: { type: integer }
         union_id: { type: integer, nullable: true }
         mission_id: { type: integer, nullable: true }
+        church_id: { type: integer, nullable: true }
         first_name: { type: string }
         middle_name: { type: string, nullable: true }
         last_name: { type: string }
@@ -2102,6 +2213,10 @@ components:
         photo_urls: { $ref: "#/components/schemas/ImageUrls" }
         union: { $ref: "#/components/schemas/Union" }
         mission: { $ref: "#/components/schemas/Mission" }
+        church: { $ref: "#/components/schemas/Church" }
+        mobile_no: { type: string, maxLength: 20, nullable: true }
+        email_address: { type: string, format: email, nullable: true }
+        remarks: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -2381,6 +2496,31 @@ components:
                   data:
                     type: array
                     items: { $ref: "#/components/schemas/Mission" }
+              - type: object
+                properties:
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    ChurchItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/Church" }
+
+    ChurchList:
+      description: OK
+      content:
+        application/json:
+          schema:
+            allOf:
+              - type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Church" }
               - type: object
                 properties:
                   links: { $ref: "#/components/schemas/PaginationLinks" }

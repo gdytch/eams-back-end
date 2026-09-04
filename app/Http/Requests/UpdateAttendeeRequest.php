@@ -22,9 +22,13 @@ class UpdateAttendeeRequest extends FormRequest
         return [
             'union_id' => ['nullable', Rule::exists('unions', 'id')->where('organization_id', $organizationId)],
             'mission_id' => ['nullable', Rule::exists('missions', 'id')->where('organization_id', $organizationId)],
+            'church_id' => ['nullable', Rule::exists('churches', 'id')->where('organization_id', $organizationId)],
             'first_name' => ['sometimes', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['sometimes', 'string', 'max:100'],
+            'mobile_no' => ['nullable', 'string', 'max:20'],
+            'email_address' => ['nullable', 'email', 'max:255'],
+            'remarks' => ['nullable', 'string'],
         ];
     }
 }

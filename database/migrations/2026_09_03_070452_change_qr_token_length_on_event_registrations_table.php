@@ -21,6 +21,11 @@ return new class extends Migration
      */
     public function down(): void
     {
+        // Truncate tokens longer than 64 characters before resizing
+        \DB::table('event_registrations')
+            ->whereRaw('LENGTH(qr_token) > 64')
+            ->update(['qr_token' => \DB::raw('LEFT(qr_token, 64)')]);
+
         Schema::table('event_registrations', function (Blueprint $table) {
             $table->string('qr_token', 64)->change();
         });

@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::post('auth/login', [AuthController::class, 'login']);
 Route::post('auth/register', [AuthController::class, 'register']);
+Route::post('auth/sso/{provider}', [AuthController::class, 'sso']);
 
 Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'show']);
 Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');

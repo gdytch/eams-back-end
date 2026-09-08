@@ -82,6 +82,75 @@ paths:
                   message: { type: string, example: "Logged out." }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
+  /auth/sso/{provider}:
+    post:
+      tags: [Auth]
+      summary: Single Sign-On via OAuth token exchange
+      description: >
+        Authenticate using OAuth credentials from Google, Microsoft, or Facebook.
+        The client obtains an OAuth access token from the provider's native SDK
+        and exchanges it with this endpoint for a Sanctum bearer token.
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          description: OAuth provider name
+          schema:
+            type: string
+            enum: [google, microsoft, facebook]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  description: OAuth access token from the provider
+                invite_token:
+                  type: string
+                  nullable: true
+                  description: Optional event invite token to assign organization_id and trigger automated event registration
+      responses:
+        "201":
+          description: New user created and authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, description: "Sanctum personal access token" }
+                  user: { $ref: "#/components/schemas/User" }
+                  is_new_user: { type: boolean, example: true }
+        "200":
+          description: Existing user authenticated (email match or identity link)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string, description: "Sanctum personal access token" }
+                  user: { $ref: "#/components/schemas/User" }
+                  is_new_user: { type: boolean, example: false }
+        "401":
+          description: Unable to verify SSO token with provider
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Unable to verify SSO token." }
+        "404":
+          description: Unknown provider
+        "422":
+          description: Provider did not return email or other validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
   /auth/me:
     get:
       tags: [Auth]

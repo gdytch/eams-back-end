@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
-  title: Event Attendance Management System (EAMS) API
+  title: Event Management System (EMS) API
   description: >
-    API-only backend for the Event Attendance Management System. Multi-organization tenant
+    API-only backend for the Event Management System. Multi-organization tenant
     model: every resource except `User` (Super Admins have no organization) is scoped to the
     caller's organization automatically — Super Admins see across all organizations, everyone
     else only ever sees their own. Cross-organization access to a scoped resource returns

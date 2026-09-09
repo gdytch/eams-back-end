@@ -21,6 +21,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        $this->app['events']->listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class.'@handle');
+        $this->app['events']->listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class . '@handle');
     }
 }

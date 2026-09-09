@@ -38,7 +38,7 @@ class Event extends Model
     public static function generateUniqueInviteToken(): string
     {
         do {
-            $token = Str::random(40);
+            $token = Str::random(10);
         } while (static::withoutGlobalScopes()->where('invite_token', $token)->exists());
 
         return $token;

@@ -196,9 +196,9 @@
                     <tr>
                         <td class="header"
                             style="background-color: {{ config('branding.colors.primary_dark') }}; padding: 24px; text-align: center; border-radius: 8px 8px 0 0;">
-                            <a href="{{ config('app.url') }}" style="text-decoration: none;">
-                                <img src="cid:logo" alt="Event Management System" class="header-logo" width="120"
-                                    style="max-width: 120px; height: auto;" />
+                            <a href="#" style="text-decoration: none;">
+                                <img src="https://eams.spac-ais.com/storage/logo/logo.png" alt="Event Management System"
+                                    class="header-logo" width="120" style="max-width: 120px; height: auto;" />
                             </a>
                         </td>
                     </tr>

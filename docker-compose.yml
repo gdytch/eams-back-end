@@ -73,10 +73,10 @@ services:
     image: phpmyadmin/phpmyadmin
     container_name: ams_phpmyadmin
     restart: unless-stopped
-    # profiles:
-    #   - dev
-    #   - local
-    #   - development
+    profiles:
+      - dev
+      - local
+      - development
     ports:
       - "8080:80"
     environment:

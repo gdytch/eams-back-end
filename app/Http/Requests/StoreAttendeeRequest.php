@@ -24,7 +24,7 @@ class StoreAttendeeRequest extends FormRequest
 
         return [
             'organization_id' => [
-                Rule::requiredIf(fn () => $this->user()->isSuperAdmin()),
+                Rule::requiredIf(fn() => $this->user()->isSuperAdmin()),
                 'nullable',
                 'exists:organizations,id',
             ],

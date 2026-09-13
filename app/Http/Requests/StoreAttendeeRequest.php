@@ -35,9 +35,25 @@ class StoreAttendeeRequest extends FormRequest
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'mobile_no' => ['nullable', 'string', 'max:20'],
-            'email_address' => ['nullable', 'email', 'max:255'],
+            'email_address' => [
+                'nullable',
+                'email',
+                'max:255',
+                Rule::unique('attendees', 'email_address'),
+                Rule::unique('users', 'email'),
+            ],
             'remarks' => ['nullable', 'string'],
             'override_duplicate' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'email_address.unique' => 'This email address is already in use by another attendee or account.',
         ];
     }
 }

@@ -28,7 +28,7 @@ class ChurchPolicy
      */
     public function create(User $user): bool
     {
-        return $user->isSuperAdmin() || $user->isOrgAdmin();
+        return $user->isSuperAdmin() || $user->isOrgAdmin() || $user->isAttendee();
     }
 
     /**

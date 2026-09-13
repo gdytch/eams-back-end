@@ -10,12 +10,17 @@ use App\Http\Requests\UploadAttendeePhotoRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
+use App\Models\EventRegistration;
+use App\Services\AttendeeInvitationService;
 use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class AttendeeController extends Controller
 {
+    public function __construct(private AttendeeInvitationService $invitationService) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -64,6 +69,8 @@ class AttendeeController extends Controller
 
         AuditLog::record('attendee.created', $attendee);
 
+        $this->invitationService->sendIfEligible($attendee, $request->user());
+
         return AttendeeResource::make($attendee)->response()->setStatusCode(201);
     }
 
@@ -84,11 +91,46 @@ class AttendeeController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Attendee $attendee)
+    public function show(Request $request, Attendee $attendee)
     {
         $this->authorize('view', $attendee);
 
-        return AttendeeResource::make($attendee);
+        $eventStats = null;
+        $eventId = $request->input('event_id');
+
+        if ($eventId !== null) {
+            $registration = EventRegistration::where('attendee_id', $attendee->id)
+                ->where('event_id', $eventId)
+                ->with(['attendanceRecords', 'event.sessions'])
+                ->first();
+
+            if ($registration !== null) {
+                $checkedInSessionIds = $registration->attendanceRecords
+                    ->filter(fn ($record) => $record->check_in_at !== null)
+                    ->pluck('event_session_id')
+                    ->unique()
+                    ->values()
+                    ->all();
+
+                $absentCount = 0;
+                foreach ($registration->event->sessions as $session) {
+                    if ($session->endsAt()->isPast() && ! in_array($session->id, $checkedInSessionIds, true)) {
+                        $absentCount++;
+                    }
+                }
+
+                $eventStats = [
+                    'registered' => true,
+                    'registered_at' => $registration->registered_at,
+                    'present_count' => count($checkedInSessionIds),
+                    'absent_count' => $absentCount,
+                    'total_sessions' => $registration->event->sessions->count(),
+                    'registration_count' => $attendee->registrations()->count(),
+                ];
+            }
+        }
+
+        return AttendeeResource::make($attendee)->additional(['event_stats' => $eventStats]);
     }
 
     /**
@@ -96,11 +138,38 @@ class AttendeeController extends Controller
      */
     public function update(UpdateAttendeeRequest $request, Attendee $attendee)
     {
-        $attendee->update($request->validated());
+        $data = $request->validated();
 
-        AuditLog::record('attendee.updated', $attendee, $request->validated());
+        return DB::transaction(function () use ($attendee, $data) {
+            $attendee->update($data);
 
-        return AttendeeResource::make($attendee);
+            // Sync name fields to linked user
+            if ($attendee->user_id !== null) {
+                $userUpdate = [];
+                if (isset($data['first_name'])) {
+                    $userUpdate['first_name'] = $data['first_name'];
+                }
+                if (isset($data['middle_name'])) {
+                    $userUpdate['middle_name'] = $data['middle_name'];
+                }
+                if (isset($data['last_name'])) {
+                    $userUpdate['last_name'] = $data['last_name'];
+                }
+
+                // Reconstruct full name from parts if any were updated
+                if ($userUpdate) {
+                    $firstName = $userUpdate['first_name'] ?? $attendee->user->first_name ?? '';
+                    $middleName = isset($userUpdate['middle_name']) ? $userUpdate['middle_name'] : $attendee->user->middle_name;
+                    $lastName = isset($userUpdate['last_name']) ? $userUpdate['last_name'] : $attendee->user->last_name ?? '';
+                    $userUpdate['name'] = trim(collect([$firstName, $middleName, $lastName])->filter()->implode(' '));
+                    $attendee->user()->update($userUpdate);
+                }
+            }
+
+            AuditLog::record('attendee.updated', $attendee, $data);
+
+            return AttendeeResource::make($attendee);
+        });
     }
 
     /**
@@ -134,6 +203,11 @@ class AttendeeController extends Controller
 
         $attendee->update(['photo_paths' => $paths]);
 
+        // Sync photo to linked user (same paths, no re-processing)
+        if ($attendee->user_id !== null) {
+            $attendee->user()->update(['photo_paths' => $paths]);
+        }
+
         AuditLog::record('attendee.photo_updated', $attendee);
 
         return AttendeeResource::make($attendee);
@@ -153,6 +227,11 @@ class AttendeeController extends Controller
         }
 
         $attendee->update(['photo_paths' => null]);
+
+        // Sync removal to linked user
+        if ($attendee->user_id !== null) {
+            $attendee->user()->update(['photo_paths' => null]);
+        }
 
         AuditLog::record('attendee.photo_removed', $attendee);
 

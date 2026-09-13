@@ -112,6 +112,7 @@ Action: this happens if the user denied the email scope/permission during the pr
 ```json
 { "message": "Too Many Requests" }
 ```
+
 Action: exponential backoff; inform the user they are attempting to sign in too frequently and should wait a minute before trying again.
 
 ## Using the returned token

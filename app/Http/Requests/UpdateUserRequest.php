@@ -18,11 +18,18 @@ class UpdateUserRequest extends FormRequest
      */
     public function rules(): array
     {
+        $targetUser = $this->route('user');
+        $isStaff = ! $this->user()->isAttendee();
+        $isSelf = $this->user()->id === $targetUser->id;
+
         return [
-            'name' => ['sometimes', 'string', 'max:255'],
-            'email' => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($this->route('user'))],
+            'name' => $isStaff ? ['sometimes', 'string', 'max:255'] : ['prohibited'],
+            'first_name' => $isStaff ? ['sometimes', 'string', 'max:100'] : ['prohibited'],
+            'middle_name' => $isStaff ? ['nullable', 'string', 'max:100'] : ['prohibited'],
+            'last_name' => $isStaff ? ['sometimes', 'string', 'max:100'] : ['prohibited'],
+            'email' => ['sometimes', 'email', Rule::unique('users', 'email')->ignore($targetUser)],
             'password' => ['sometimes', 'string', 'min:8'],
-            'role' => ['sometimes', Rule::enum(UserRole::class)],
+            'role' => $isSelf ? ['prohibited'] : ['sometimes', Rule::enum(UserRole::class)],
         ];
     }
 }

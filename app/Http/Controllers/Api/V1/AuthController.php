@@ -6,19 +6,25 @@ use App\Enums\EventStatus;
 use App\Enums\SsoProvider;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\ForgotPasswordRequest;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
+use App\Http\Requests\ResetPasswordRequest;
 use App\Http\Requests\SsoLoginRequest;
 use App\Http\Resources\UserResource;
+use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\User;
 use App\Models\UserIdentity;
+use Illuminate\Auth\Events\Registered;
+use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Socialite\Facades\Socialite;
@@ -46,25 +52,61 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
-            ->filter()
-            ->implode(' '));
+        return DB::transaction(function () use ($data, $request) {
+            // Resolve the invited attendee if an invite token is provided
+            $attendee = null;
+            if ($request->filled('invite_token')) {
+                $attendee = Attendee::withoutGlobalScopes()
+                    ->where('invite_token', $data['invite_token'])
+                    ->whereNull('user_id')
+                    ->first();
+            }
 
-        $user = User::create([
-            'name' => $name,
-            'email' => $data['email'],
-            'password' => $data['password'],
-            'first_name' => $data['first_name'],
-            'middle_name' => $data['middle_name'] ?? null,
-            'last_name' => $data['last_name'],
-            'role' => UserRole::Attendee,
-            'organization_id' => null,
-        ]);
+            $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
+                ->filter()
+                ->implode(' '));
 
-        return response()->json([
-            'token' => $user->createToken('api')->plainTextToken,
-            'user' => UserResource::make($user),
-        ], 201);
+            // Determine organization_id: inherit from attendee if available
+            $organizationId = $attendee?->organization_id;
+
+            // Mark email verified only if attendee email matches the submitted email
+            $emailVerifiedAt = null;
+            if ($attendee && $attendee->email_address === $data['email']) {
+                $emailVerifiedAt = now();
+            }
+
+            $user = User::create([
+                'name' => $name,
+                'email' => $data['email'],
+                'password' => $data['password'],
+                'first_name' => $data['first_name'],
+                'middle_name' => $data['middle_name'] ?? null,
+                'last_name' => $data['last_name'],
+                'role' => UserRole::Attendee,
+                'organization_id' => $organizationId,
+                'email_verified_at' => $emailVerifiedAt,
+            ]);
+
+            // Link the user to the attendee and clear the invite token
+            if ($attendee) {
+                $attendee->update([
+                    'user_id' => $user->id,
+                    'invite_token' => null,
+                ]);
+
+                AuditLog::record('attendee.invite_claimed', $attendee, ['user_id' => $user->id]);
+            }
+
+            // Only fire Registered event if email is not yet verified (needs verification flow)
+            if ($user->email_verified_at === null) {
+                event(new Registered($user));
+            }
+
+            return response()->json([
+                'token' => $user->createToken('api')->plainTextToken,
+                'user' => UserResource::make($user),
+            ], 201);
+        });
     }
 
     public function logout(Request $request): JsonResponse
@@ -112,17 +154,29 @@ class AuthController extends Controller
                     ->first();
 
                 if ($user === null) {
-                    // Resolve organization from invite_token if provided
-                    $organizationId = null;
+                    // Check if email exists in attendee table
+                    $attendee = Attendee::withoutGlobalScopes()
+                        ->where('email_address', $socialiteUser->getEmail())
+                        ->first();
+
+                    $validInviteToken = null;
                     if ($request->filled('invite_token')) {
-                        $event = Event::withoutGlobalScopes()
+                        $validInviteToken = Event::withoutGlobalScopes()
                             ->where('invite_token', $request->validated('invite_token'))
                             ->where('status', EventStatus::Published)
                             ->first();
+                    }
 
-                        if ($event !== null) {
-                            $organizationId = $event->organization_id;
-                        }
+                    if ($attendee === null && $validInviteToken === null) {
+                        throw ValidationException::withMessages([
+                            'email' => 'This email is not registered. Please contact your administrator.',
+                        ]);
+                    }
+
+                    // Resolve organization: prioritize attendee's organization, then invite_token
+                    $organizationId = $attendee?->organization_id;
+                    if ($organizationId === null && $validInviteToken !== null) {
+                        $organizationId = $validInviteToken->organization_id;
                     }
 
                     // Create new user
@@ -141,9 +195,42 @@ class AuthController extends Controller
                         'email_verified_at' => now(),
                     ]);
 
+                    // Link the user to the attendee if found
+                    if ($attendee !== null) {
+                        $attendee->update([
+                            'user_id' => $user->id,
+                            'invite_token' => null,
+                        ]);
+
+                        AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
+                    }
+
                     $wasNewUser = true;
                 } else {
                     $wasNewUser = false;
+
+                    // Check if existing user should be merged with an attendee
+                    $attendee = Attendee::withoutGlobalScopes()
+                        ->where('email_address', $user->email)
+                        ->whereNull('user_id')
+                        ->first();
+
+                    if ($attendee !== null) {
+                        // Link the attendee to the user if organization_id matches or user doesn't have one
+                        if ($user->organization_id === null || $user->organization_id === $attendee->organization_id) {
+                            $attendee->update([
+                                'user_id' => $user->id,
+                                'invite_token' => null,
+                            ]);
+
+                            // Update user's organization_id if currently null
+                            if ($user->organization_id === null) {
+                                $user->update(['organization_id' => $attendee->organization_id]);
+                            }
+
+                            AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
+                        }
+                    }
                 }
 
                 // Create the identity link
@@ -181,5 +268,117 @@ class AuthController extends Controller
                 'is_new_user' => $wasNewUser,
             ], $wasNewUser ? 201 : 200);
         });
+    }
+
+    public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
+    {
+        $email = $request->validated('email');
+
+        // Check if email exists in either user or attendee table
+        $emailExists = User::where('email', $email)->exists() ||
+            Attendee::where('email_address', $email)->exists();
+
+        if (! $emailExists) {
+            throw ValidationException::withMessages([
+                'email' => 'No account found with that email address.',
+            ]);
+        }
+
+        // Send reset link
+        Password::sendResetLink(['email' => $email]);
+
+        return response()->json([
+            'message' => 'A password reset link has been sent to your email.',
+        ], 200);
+    }
+
+    public function resetPassword(ResetPasswordRequest $request): JsonResponse
+    {
+        $validated = $request->validated();
+
+        return DB::transaction(function () use ($validated) {
+            // Manually verify the password reset token from the database
+            $resetRecord = DB::table('password_reset_tokens')
+                ->where('email', $validated['email'])
+                ->first();
+
+            if (! $resetRecord || ! Hash::check($validated['token'], $resetRecord->token)) {
+                throw ValidationException::withMessages([
+                    'email' => [trans('passwords.token')],
+                ]);
+            }
+
+            // Check if token has expired (default: 60 minutes)
+            if (now()->diffInMinutes($resetRecord->created_at) > 60) {
+                DB::table('password_reset_tokens')
+                    ->where('email', $validated['email'])
+                    ->delete();
+
+                throw ValidationException::withMessages([
+                    'email' => [trans('passwords.token')],
+                ]);
+            }
+
+            // Find the user without global scopes
+            $user = User::withoutGlobalScopes()->where('email', $validated['email'])->first();
+
+            if (! $user) {
+                throw ValidationException::withMessages([
+                    'email' => [trans('auth.failed')],
+                ]);
+            }
+
+            // Update password and token
+            $user->update([
+                'password' => $validated['password'],
+                'remember_token' => Str::random(60),
+            ]);
+
+            // Revoke all existing Sanctum tokens
+            $user->tokens()->delete();
+
+            // Delete the reset token
+            DB::table('password_reset_tokens')
+                ->where('email', $validated['email'])
+                ->delete();
+
+            AuditLog::record('user.password_reset', $user);
+
+            return response()->json([
+                'message' => 'Your password has been successfully reset.',
+            ], 200);
+        });
+    }
+
+    public function verifyEmail(Request $request, string $id, string $hash): JsonResponse
+    {
+        $user = User::withoutGlobalScopes()->findOrFail($id);
+
+        if (! hash_equals(sha1($user->getEmailForVerification()), $hash)) {
+            return response()->json(['message' => 'Invalid verification link.'], 400);
+        }
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Email already verified.'], 200);
+        }
+
+        $user->markEmailAsVerified();
+
+        event(new Verified($user));
+
+        return response()->json(['message' => 'Email verified successfully.'], 200);
+    }
+
+    public function resendVerification(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        if ($user->hasVerifiedEmail()) {
+            return response()->json(['message' => 'Email already verified.'], 200);
+        }
+
+        $user->sendEmailVerificationNotification();
+
+        return response()->json(['message' => 'Verification link sent to your email.'], 200);
     }
 }

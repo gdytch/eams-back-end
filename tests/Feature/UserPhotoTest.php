@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Attendee;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -220,6 +221,77 @@ class UserPhotoTest extends TestCase
         $user = User::factory()->for($org)->create();
 
         $response = $this->actingAs($superAdmin, 'sanctum')->postJson(
+            "/api/v1/users/{$user->id}/photo",
+            ['photo' => UploadedFile::fake()->image('photo.png')],
+        );
+
+        $response->assertOk();
+        $this->assertNotNull($response->json('data.photo_urls'));
+    }
+
+    public function test_user_photo_upload_syncs_to_linked_attendee(): void
+    {
+        Storage::fake('public');
+
+        $org = Organization::factory()->create();
+        $user = User::factory()->for($org)->create(['role' => 'attendee']);
+        $attendee = Attendee::factory()->for($org)->for($user)->create();
+
+        $response = $this->actingAs($user, 'sanctum')->postJson(
+            "/api/v1/users/{$user->id}/photo",
+            ['photo' => UploadedFile::fake()->image('photo.png')],
+        );
+
+        $response->assertOk();
+        $photoPaths = $response->json('data.photo_urls');
+        $this->assertNotNull($photoPaths);
+
+        // Verify the linked Attendee also has the same photo paths
+        $attendee->refresh();
+        $this->assertNotNull($attendee->photo_paths);
+        $this->assertCount(4, $attendee->photo_paths);
+    }
+
+    public function test_user_photo_remove_syncs_to_linked_attendee(): void
+    {
+        Storage::fake('public');
+
+        $org = Organization::factory()->create();
+        $user = User::factory()->for($org)->create(['role' => 'attendee']);
+        $attendee = Attendee::factory()->for($org)->for($user)->create();
+
+        // Upload first
+        $this->actingAs($user, 'sanctum')->postJson(
+            "/api/v1/users/{$user->id}/photo",
+            ['photo' => UploadedFile::fake()->image('photo.png')],
+        );
+
+        // Verify both have photos
+        $user->refresh();
+        $attendee->refresh();
+        $this->assertNotNull($user->photo_paths);
+        $this->assertNotNull($attendee->photo_paths);
+
+        // Remove
+        $response = $this->actingAs($user, 'sanctum')->deleteJson("/api/v1/users/{$user->id}/photo");
+
+        $response->assertOk();
+        $this->assertNull($response->json('data.photo_urls'));
+
+        // Verify both are cleared
+        $attendee->refresh();
+        $this->assertNull($attendee->photo_paths);
+    }
+
+    public function test_user_without_attendee_can_upload_photo(): void
+    {
+        Storage::fake('public');
+
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $user = User::factory()->for($org)->create();
+
+        $response = $this->actingAs($admin, 'sanctum')->postJson(
             "/api/v1/users/{$user->id}/photo",
             ['photo' => UploadedFile::fake()->image('photo.png')],
         );

@@ -39,7 +39,7 @@ class EventController extends Controller
             $query->where('status', 'published');
         }
 
-        return EventResource::collection($query->paginate());
+        return EventResource::collection($query->paginate($request->input('per_page', 10)));
     }
 
     /**

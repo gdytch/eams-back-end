@@ -7,14 +7,15 @@ use App\Http\Requests\StoreChurchRequest;
 use App\Http\Requests\UpdateChurchRequest;
 use App\Http\Resources\ChurchResource;
 use App\Models\Church;
+use Illuminate\Http\Request;
 
 class ChurchController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         $this->authorize('viewAny', Church::class);
 
-        return ChurchResource::collection(Church::query()->paginate());
+        return ChurchResource::collection(Church::query()->paginate($request->input('per_page', 10)));
     }
 
     public function store(StoreChurchRequest $request)

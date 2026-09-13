@@ -27,11 +27,7 @@ class AttendeeDashboardResource extends JsonResource
                 'middle_name' => $attendee->middle_name,
                 'last_name' => $attendee->last_name,
                 'full_name' => trim("{$attendee->first_name} {$attendee->middle_name} {$attendee->last_name}"),
-                'photo_urls' => $attendee->photo_paths
-                  ? collect($attendee->photo_paths)->mapWithKeys(fn ($path, $key) => [
-                      $key => Storage::disk('public')->url($path),
-                  ])->toArray()
-                  : null,
+                'photo_urls' => $attendee->photo_urls,
                 'union' => $attendee->union ? [
                     'id' => $attendee->union->id,
                     'name' => $attendee->union->name,
@@ -39,6 +35,10 @@ class AttendeeDashboardResource extends JsonResource
                 'mission' => $attendee->mission ? [
                     'id' => $attendee->mission->id,
                     'name' => $attendee->mission->name,
+                ] : null,
+                'church' => $attendee->church ? [
+                    'id' => $attendee->church->id,
+                    'name' => $attendee->church->name,
                 ] : null,
                 'created_at' => $attendee->created_at,
                 'updated_at' => $attendee->updated_at,
@@ -52,11 +52,7 @@ class AttendeeDashboardResource extends JsonResource
             'email' => $user->email,
             'role' => $user->role,
             'organization_id' => $user->organization_id,
-            'photo_urls' => $user->photo_paths
-              ? collect($user->photo_paths)->mapWithKeys(fn ($path, $key) => [
-                  $key => Storage::disk('public')->url($path),
-              ])->toArray()
-              : null,
+            'photo_urls' => $user->photo_urls,
             'created_at' => $user->created_at,
             'updated_at' => $user->updated_at,
         ];
@@ -91,13 +87,13 @@ class AttendeeDashboardResource extends JsonResource
                 'requires_check_out' => $event->requires_check_out,
                 'check_in_window_minutes' => $event->check_in_window_minutes,
                 'id_card_background_url' => $event->id_card_background_path
-                  ? Storage::disk('public')->url($event->id_card_background_path)
-                  : null,
+                    ? Storage::disk('public')->url($event->id_card_background_path)
+                    : null,
                 'banner_urls' => $event->banner_paths
-                  ? collect($event->banner_paths)->mapWithKeys(fn ($path, $key) => [
-                      $key => Storage::disk('public')->url($path),
-                  ])->toArray()
-                  : null,
+                    ? collect($event->banner_paths)->mapWithKeys(fn ($path, $key) => [
+                        $key => Storage::disk('public')->url($path),
+                    ])->toArray()
+                    : null,
                 'created_at' => $event->created_at,
                 'updated_at' => $event->updated_at,
                 'invite_token' => $event->invite_token,

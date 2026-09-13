@@ -7,17 +7,18 @@ use App\Http\Requests\StoreMissionRequest;
 use App\Http\Requests\UpdateMissionRequest;
 use App\Http\Resources\MissionResource;
 use App\Models\Mission;
+use Illuminate\Http\Request;
 
 class MissionController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
         $this->authorize('viewAny', Mission::class);
 
-        return MissionResource::collection(Mission::query()->paginate());
+        return MissionResource::collection(Mission::query()->paginate($request->input('per_page', 10)));
     }
 
     /**

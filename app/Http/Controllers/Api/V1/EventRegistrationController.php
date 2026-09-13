@@ -8,19 +8,24 @@ use App\Http\Requests\StoreEventRegistrationRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventRegistrationResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
+use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
+use App\Services\AttendeeInvitationService;
 use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class EventRegistrationController extends Controller
 {
+    public function __construct(private AttendeeInvitationService $invitationService) {}
+
     /**
      * Display a listing of the resource.
      */
@@ -37,7 +42,7 @@ class EventRegistrationController extends Controller
             });
         }
 
-        return EventRegistrationResource::collection($query->paginate());
+        return EventRegistrationResource::collection($query->paginate($request->input('per_page', 10)));
     }
 
     /**
@@ -50,6 +55,8 @@ class EventRegistrationController extends Controller
         $override = (bool) ($data['override_duplicate'] ?? false);
 
         return DB::transaction(function () use ($data, $override, $event, $request) {
+            $attendeeWasJustCreated = false;
+
             if (! empty($data['attendee_id'])) {
                 $attendee = Attendee::findOrFail($data['attendee_id']);
             } else {
@@ -71,8 +78,11 @@ class EventRegistrationController extends Controller
                     'first_name' => $data['first_name'],
                     'middle_name' => $data['middle_name'] ?? null,
                     'last_name' => $data['last_name'],
+                    'email_address' => $data['email_address'] ?? null,
                     'created_by' => $request->user()->id,
                 ]);
+
+                $attendeeWasJustCreated = true;
             }
 
             $registration = $event->registrations()->create([
@@ -83,6 +93,17 @@ class EventRegistrationController extends Controller
             AuditLog::record('event_registration.created', $registration, ['attendee_id' => $attendee->id]);
 
             GenerateAttendeeIdCardJob::dispatch($registration);
+
+            // Send welcome email if attendee has an email
+            $email = $attendee->email_address ?? $attendee->user?->email;
+            if ($email) {
+                Mail::to($email)->send(new EventRegistrationWelcomeMail($registration));
+            }
+
+            // Send account invitation if attendee was just created
+            if ($attendeeWasJustCreated) {
+                $this->invitationService->sendIfEligible($attendee, $request->user());
+            }
 
             return EventRegistrationResource::make($registration->load('attendee'))->response()->setStatusCode(201);
         });

@@ -4,7 +4,6 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class UserResource extends JsonResource
 {
@@ -18,15 +17,16 @@ class UserResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
+            'first_name' => $this->first_name,
+            'middle_name' => $this->middle_name,
+            'last_name' => $this->last_name,
             'email' => $this->email,
+            'email_verified_at' => $this->email_verified_at,
+            'email_verified' => $this->hasVerifiedEmail(),
             'role' => $this->role,
             'organization_id' => $this->organization_id,
             'organization' => OrganizationResource::make($this->whenLoaded('organization')),
-            'photo_urls' => $this->photo_paths
-                ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [
-                    $key => Storage::disk('public')->url($path),
-                ])->toArray()
-                : null,
+            'photo_urls' => $this->photo_urls,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

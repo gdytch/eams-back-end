@@ -30,9 +30,26 @@ class StoreEventRegistrationRequest extends FormRequest
             'first_name' => ['required_without:attendee_id', 'nullable', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['required_without:attendee_id', 'nullable', 'string', 'max:100'],
+            'email_address' => [
+                'nullable',
+                'email',
+                'max:255',
+                Rule::unique('attendees', 'email_address'),
+                Rule::unique('users', 'email'),
+            ],
             'union_id' => ['nullable', Rule::exists('unions', 'id')->where('organization_id', $organizationId)],
             'mission_id' => ['nullable', Rule::exists('missions', 'id')->where('organization_id', $organizationId)],
             'override_duplicate' => ['sometimes', 'boolean'],
+        ];
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'email_address.unique' => 'This email address is already in use by another attendee or account.',
         ];
     }
 }

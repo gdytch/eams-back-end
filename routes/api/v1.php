@@ -24,12 +24,21 @@ Route::middleware('throttle:10,1')->group(function () {
     Route::post('auth/sso/{provider}', [AuthController::class, 'sso']);
 });
 
+Route::middleware('throttle:6,1')->group(function () {
+    Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
+    Route::get('auth/email/verify/{id}/{hash}', [AuthController::class, 'verifyEmail'])
+        ->middleware('signed')
+        ->name('verification.verify');
+});
+
 Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'show']);
 Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('auth/logout', [AuthController::class, 'logout']);
     Route::get('auth/me', [AuthController::class, 'me']);
+    Route::middleware('throttle:6,1')->post('auth/email/verification-notification', [AuthController::class, 'resendVerification']);
     Route::get('attendee/dashboard', [AttendeeDashboardController::class, 'index']);
     Route::get('dashboard', [DashboardController::class, 'index']);
 
@@ -70,6 +79,8 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventRegistrationController::class, 'regenerateIdCard']);
 
         Route::get('events/{event}/sessions/{session}/attendance', [AttendanceController::class, 'forSession']);
+        Route::get('events/{event}/sessions/{session}/roster', [AttendanceController::class, 'roster']);
+        Route::get('events/{event}/sessions/{session}/quick-stats', [ReportController::class, 'eventSessionQuickStats']);
 
         Route::get('events/{event}/reports/attendance-summary', [ReportController::class, 'eventAttendanceSummary']);
         Route::get('events/{event}/reports/attendance-summary/export', [ReportController::class, 'exportEventAttendance']);

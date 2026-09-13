@@ -7,6 +7,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\EventRegistrationResource;
 use App\Http\Resources\PublicEventResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
+use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
@@ -15,6 +16,7 @@ use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 
 class PublicEventController extends Controller
@@ -53,6 +55,7 @@ class PublicEventController extends Controller
                         'first_name' => $firstName,
                         'middle_name' => $user->middle_name,
                         'last_name' => $lastName,
+                        'email_address' => $user->email,
                         'user_id' => $user->id,
                         'created_by' => $user->id,
                     ]);
@@ -76,6 +79,12 @@ class PublicEventController extends Controller
             if ($registration->wasRecentlyCreated) {
                 AuditLog::record('event_registration.self_registered', $registration, ['attendee_id' => $attendee->id]);
                 GenerateAttendeeIdCardJob::dispatch($registration);
+
+                // Send welcome email if attendee has an email
+                $email = $attendee->email_address ?? $attendee->user?->email;
+                if ($email) {
+                    Mail::to($email)->send(new EventRegistrationWelcomeMail($registration));
+                }
 
                 return EventRegistrationResource::make($registration->load('attendee'))
                     ->response()

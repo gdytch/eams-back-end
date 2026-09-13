@@ -8,6 +8,7 @@ use App\Http\Requests\ManualAttendanceRequest;
 use App\Http\Requests\ScanAttendanceRequest;
 use App\Http\Requests\SyncAttendanceBatchRequest;
 use App\Http\Resources\AttendanceRecordResource;
+use App\Http\Resources\EventSessionRosterEntryResource;
 use App\Models\AttendanceRecord;
 use App\Models\AuditLog;
 use App\Models\Event;
@@ -80,16 +81,68 @@ class AttendanceController extends Controller
     /**
      * List attendance records for a given event session.
      */
-    public function forSession(Event $event, EventSession $session)
+    public function forSession(Request $request, Event $event, EventSession $session)
     {
         $this->authorize('view', $session);
 
         $records = AttendanceRecord::whereHas('eventRegistration', fn ($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
             ->with('eventRegistration.attendee')
-            ->get();
+            ->paginate($request->input('per_page', 15));
 
         return AttendanceRecordResource::collection($records);
+    }
+
+    /**
+     * List every registration for a session with its attendance status (present/absent), sorted by check-in.
+     */
+    public function roster(Request $request, Event $event, EventSession $session)
+    {
+        $this->authorize('view', $session);
+
+        $status = strtolower((string) $request->query('status', 'all'));
+        $search = $request->query('search', '');
+
+        if (! in_array($status, ['all', 'present', 'absent'], true)) {
+            throw ValidationException::withMessages([
+                'status' => 'The status must be one of: all, present, absent.',
+            ]);
+        }
+
+        $checkedInRegistrationIds = AttendanceRecord::where('event_session_id', $session->id)
+            ->whereNotNull('check_in_at')
+            ->select('event_registration_id');
+
+        $registrations = $event->registrations()
+            ->with(['attendee.union', 'attendee.mission'])
+            ->addSelect([
+                'session_check_in_at' => AttendanceRecord::select('check_in_at')
+                    ->whereColumn('event_registration_id', 'event_registrations.id')
+                    ->where('event_session_id', $session->id)
+                    ->limit(1),
+                'session_check_out_at' => AttendanceRecord::select('check_out_at')
+                    ->whereColumn('event_registration_id', 'event_registrations.id')
+                    ->where('event_session_id', $session->id)
+                    ->limit(1),
+            ])
+            ->withCasts([
+                'session_check_in_at' => 'datetime',
+                'session_check_out_at' => 'datetime',
+            ])
+            ->when($status === 'present', fn ($q) => $q->whereIn('id', $checkedInRegistrationIds))
+            ->when($status === 'absent', fn ($q) => $q->whereNotIn('id', $checkedInRegistrationIds))
+            ->when($search !== '', fn ($q) => $q->whereHas('attendee', function ($query) use ($search) {
+                $query->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%");
+            }))
+            ->orderByRaw('session_check_in_at is null, session_check_in_at asc')
+            ->paginate($request->input('per_page', 15));
+
+        return EventSessionRosterEntryResource::collection($registrations)->additional([
+            'event_id' => $event->id,
+            'session_id' => $session->id,
+            'status' => $status,
+        ]);
     }
 
     /**

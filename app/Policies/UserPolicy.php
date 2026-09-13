@@ -14,6 +14,10 @@ class UserPolicy
 
     public function view(User $user, User $model): bool
     {
+        if ($user->id === $model->id) {
+            return true;
+        }
+
         return $user->isSuperAdmin()
             || ($user->isOrgAdmin() && $user->organization_id === $model->organization_id);
     }
@@ -25,6 +29,10 @@ class UserPolicy
 
     public function update(User $user, User $model): bool
     {
+        if ($user->id === $model->id) {
+            return true;
+        }
+
         return $user->isSuperAdmin()
             || ($user->isOrgAdmin() && $user->organization_id === $model->organization_id && $model->role !== UserRole::SuperAdmin);
     }

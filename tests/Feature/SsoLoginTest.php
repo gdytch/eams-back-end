@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\EventStatus;
 use App\Enums\UserRole;
+use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Organization;
 use App\Models\User;
@@ -19,8 +20,62 @@ class SsoLoginTest extends TestCase
     use LazilyRefreshDatabase;
 
     #[Test]
-    public function brand_new_user_without_invite_token_creates_attendee(): void
+    public function brand_new_user_with_email_in_attendee_prioritizes_attendee_organization(): void
     {
+        $attendeeOrg = Organization::factory()->create();
+        $inviteOrg = Organization::factory()->create();
+
+        $attendee = Attendee::factory()
+            ->for($attendeeOrg)
+            ->state(['email_address' => 'newuser@example.com'])
+            ->create();
+
+        $event = Event::factory()
+            ->for($inviteOrg)
+            ->state(['status' => EventStatus::Published])
+            ->create();
+
+        $socialiteUser = $this->createSocialiteUser('google', '12345', 'newuser@example.com', 'John Doe');
+
+        Socialite::shouldReceive('driver')
+            ->with('google')
+            ->andReturn($mock = \Mockery::mock())
+            ->once();
+
+        $mock->shouldReceive('stateless')
+            ->andReturnSelf()
+            ->once();
+
+        $mock->shouldReceive('userFromToken')
+            ->with('valid_token')
+            ->andReturn($socialiteUser)
+            ->once();
+
+        $response = $this->postJson('/api/v1/auth/sso/google', [
+            'token' => 'valid_token',
+            'invite_token' => $event->invite_token,
+        ]);
+
+        $response->assertCreated();
+
+        $user = User::where('email', 'newuser@example.com')->first();
+        $this->assertNotNull($user);
+        // Verify attendee organization is used, not invite_token organization
+        $this->assertEquals($attendeeOrg->id, $user->organization_id);
+
+        $attendee->refresh();
+        $this->assertEquals($user->id, $attendee->user_id);
+    }
+
+    #[Test]
+    public function brand_new_user_with_email_in_attendee_creates_user(): void
+    {
+        $org = Organization::factory()->create();
+        $attendee = Attendee::factory()
+            ->for($org)
+            ->state(['email_address' => 'newuser@example.com'])
+            ->create();
+
         $socialiteUser = $this->createSocialiteUser('google', '12345', 'newuser@example.com', 'John Doe');
 
         Socialite::shouldReceive('driver')
@@ -52,8 +107,13 @@ class SsoLoginTest extends TestCase
         $user = User::where('email', 'newuser@example.com')->first();
         $this->assertNotNull($user);
         $this->assertEquals(UserRole::Attendee, $user->role);
-        $this->assertNull($user->organization_id);
         $this->assertNotNull($user->email_verified_at);
+        $this->assertEquals($org->id, $user->organization_id);
+
+        // Verify attendee was linked to the user
+        $attendee->refresh();
+        $this->assertEquals($user->id, $attendee->user_id);
+        $this->assertNull($attendee->invite_token);
 
         $identity = UserIdentity::where('provider', 'google')
             ->where('provider_id', '12345')
@@ -102,7 +162,12 @@ class SsoLoginTest extends TestCase
     #[Test]
     public function existing_user_matched_by_email_links_identity(): void
     {
-        $user = User::factory()->create(['email' => 'existing@example.com']);
+        $org = Organization::factory()->create();
+        $user = User::factory()->create(['email' => 'existing@example.com', 'organization_id' => null]);
+        $attendee = Attendee::factory()
+            ->for($org)
+            ->state(['email_address' => 'existing@example.com', 'user_id' => null])
+            ->create();
 
         $socialiteUser = $this->createSocialiteUser('facebook', 'fb-user-456', 'existing@example.com', 'Existing User');
 
@@ -132,6 +197,12 @@ class SsoLoginTest extends TestCase
             ->first();
         $this->assertNotNull($identity);
         $this->assertEquals($user->id, $identity->user_id);
+
+        // Verify attendee was linked to the user and organization inherited
+        $attendee->refresh();
+        $this->assertEquals($user->id, $attendee->user_id);
+        $user->refresh();
+        $this->assertEquals($org->id, $user->organization_id);
     }
 
     #[Test]
@@ -237,9 +308,36 @@ class SsoLoginTest extends TestCase
     }
 
     #[Test]
-    public function invalid_invite_token_ignores_it(): void
+    public function unregistered_email_without_invite_token_returns_validation_error(): void
     {
-        $socialiteUser = $this->createSocialiteUser('google', '12345', 'user@example.com', 'User Name');
+        $socialiteUser = $this->createSocialiteUser('google', '12345', 'unregistered@example.com', 'User Name');
+
+        Socialite::shouldReceive('driver')
+            ->with('google')
+            ->andReturn($mock = \Mockery::mock())
+            ->once();
+
+        $mock->shouldReceive('stateless')
+            ->andReturnSelf()
+            ->once();
+
+        $mock->shouldReceive('userFromToken')
+            ->with('valid_token')
+            ->andReturn($socialiteUser)
+            ->once();
+
+        $response = $this->postJson('/api/v1/auth/sso/google', [
+            'token' => 'valid_token',
+        ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['email']);
+    }
+
+    #[Test]
+    public function unregistered_email_with_invalid_invite_token_returns_validation_error(): void
+    {
+        $socialiteUser = $this->createSocialiteUser('google', '12345', 'unregistered@example.com', 'User Name');
 
         Socialite::shouldReceive('driver')
             ->with('google')
@@ -260,10 +358,46 @@ class SsoLoginTest extends TestCase
             'invite_token' => 'invalid_token_that_does_not_exist',
         ]);
 
-        $response->assertCreated();
+        $response->assertStatus(422);
+        $response->assertJsonValidationErrors(['email']);
+    }
 
-        $user = User::where('email', 'user@example.com')->first();
-        $this->assertNull($user->organization_id);
+    #[Test]
+    public function unregistered_email_with_valid_invite_token_creates_user(): void
+    {
+        $org = Organization::factory()->create();
+        $event = Event::factory()
+            ->for($org)
+            ->state(['status' => EventStatus::Published])
+            ->create();
+
+        $socialiteUser = $this->createSocialiteUser('google', '12345', 'newattendee@example.com', 'New Attendee');
+
+        Socialite::shouldReceive('driver')
+            ->with('google')
+            ->andReturn($mock = \Mockery::mock())
+            ->once();
+
+        $mock->shouldReceive('stateless')
+            ->andReturnSelf()
+            ->once();
+
+        $mock->shouldReceive('userFromToken')
+            ->with('valid_token')
+            ->andReturn($socialiteUser)
+            ->once();
+
+        $response = $this->postJson('/api/v1/auth/sso/google', [
+            'token' => 'valid_token',
+            'invite_token' => $event->invite_token,
+        ]);
+
+        $response->assertCreated();
+        $response->assertJson(['is_new_user' => true]);
+
+        $user = User::where('email', 'newattendee@example.com')->first();
+        $this->assertNotNull($user);
+        $this->assertEquals($org->id, $user->organization_id);
     }
 
     /**

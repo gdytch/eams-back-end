@@ -4,7 +4,6 @@ namespace App\Http\Resources;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
-use Illuminate\Support\Facades\Storage;
 
 class AttendeeResource extends JsonResource
 {
@@ -28,11 +27,7 @@ class AttendeeResource extends JsonResource
             'mobile_no' => $this->mobile_no,
             'email_address' => $this->email_address,
             'remarks' => $this->remarks,
-            'photo_urls' => $this->photo_paths
-                ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [
-                    $key => Storage::disk('public')->url($path),
-                ])->toArray()
-                : null,
+            'photo_urls' => $this->photo_urls,
             'union' => UnionResource::make($this->whenLoaded('union')),
             'mission' => MissionResource::make($this->whenLoaded('mission')),
             'church' => ChurchResource::make($this->whenLoaded('church')),

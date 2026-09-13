@@ -141,4 +141,66 @@ class ChurchTest extends TestCase
         $response->assertUnprocessable();
         $response->assertJsonValidationErrors('mission_id');
     }
+
+    public function test_attendee_can_create_church(): void
+    {
+        $org = Organization::factory()->create();
+        $attendee = User::factory()->for($org)->create(['role' => 'attendee']);
+        $union = Union::factory()->for($org)->create();
+        $mission = Mission::factory()->for($org)->for($union)->create();
+
+        $response = $this->actingAs($attendee, 'sanctum')->postJson('/api/v1/churches', [
+            'union_id' => $union->id,
+            'mission_id' => $mission->id,
+            'name' => 'My Church',
+            'address' => '456 Church Ave',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('data.name', 'My Church');
+        $response->assertJsonPath('data.organization_id', $org->id);
+        $this->assertDatabaseHas('churches', [
+            'name' => 'My Church',
+            'organization_id' => $org->id,
+        ]);
+    }
+
+    public function test_attendee_created_church_is_immediately_available(): void
+    {
+        $org = Organization::factory()->create();
+        $attendee = User::factory()->for($org)->create(['role' => 'attendee']);
+        $otherAttendee = User::factory()->for($org)->create(['role' => 'attendee']);
+        $union = Union::factory()->for($org)->create();
+        $mission = Mission::factory()->for($org)->for($union)->create();
+
+        // Attendee creates a church
+        $createResponse = $this->actingAs($attendee, 'sanctum')->postJson('/api/v1/churches', [
+            'union_id' => $union->id,
+            'mission_id' => $mission->id,
+            'name' => 'New Church',
+        ]);
+
+        $churchId = $createResponse->json('data.id');
+
+        // Other attendee in same org can immediately see and use it
+        $listResponse = $this->actingAs($otherAttendee, 'sanctum')->getJson('/api/v1/churches');
+        $listResponse->assertJsonFragment(['id' => $churchId, 'name' => 'New Church']);
+    }
+
+    public function test_attendee_cannot_create_church_for_different_org(): void
+    {
+        $org = Organization::factory()->create();
+        $attendee = User::factory()->for($org)->create(['role' => 'attendee']);
+        $otherOrg = Organization::factory()->create();
+        $unionOther = Union::factory()->for($otherOrg)->create();
+        $missionOther = Mission::factory()->for($otherOrg)->for($unionOther)->create();
+
+        $response = $this->actingAs($attendee, 'sanctum')->postJson('/api/v1/churches', [
+            'union_id' => $unionOther->id,
+            'mission_id' => $missionOther->id,
+            'name' => 'Other Org Church',
+        ]);
+
+        $response->assertUnprocessable();
+    }
 }

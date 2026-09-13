@@ -79,6 +79,60 @@ class EventAttendanceReportTest extends TestCase
         $response->assertNotFound();
     }
 
+    public function test_event_session_quick_stats_returns_attendance_metrics(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = $this->createEventWithAttendees($org, 4);
+        $session = $event->sessions()->firstOrFail();
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/events/{$event->id}/sessions/{$session->id}/quick-stats");
+
+        $response->assertOk()
+            ->assertJson([
+                'event_id' => $event->id,
+                'session_id' => $session->id,
+                'total_registered' => 4,
+                'attendance' => [
+                    'present' => 3,
+                    'absent' => 1,
+                    'attendance_rate' => 75,
+                ],
+            ]);
+    }
+
+    public function test_event_session_quick_stats_handles_no_registrations(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $session = EventSession::factory()->for($event)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/events/{$event->id}/sessions/{$session->id}/quick-stats");
+
+        $response->assertOk()
+            ->assertJsonPath('total_registered', 0)
+            ->assertJsonPath('attendance.present', 0)
+            ->assertJsonPath('attendance.absent', 0)
+            ->assertJsonPath('attendance.attendance_rate', 0);
+    }
+
+    public function test_event_session_quick_stats_rejects_a_session_from_another_event(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $otherEvent = Event::factory()->for($org)->create();
+        $session = EventSession::factory()->for($otherEvent)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/events/{$event->id}/sessions/{$session->id}/quick-stats");
+
+        $response->assertNotFound();
+    }
+
     public function test_export_event_attendance_as_xlsx(): void
     {
         $org = Organization::factory()->create();

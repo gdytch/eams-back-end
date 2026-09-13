@@ -7,17 +7,18 @@ use App\Http\Requests\StoreUnionRequest;
 use App\Http\Requests\UpdateUnionRequest;
 use App\Http\Resources\UnionResource;
 use App\Models\Union;
+use Illuminate\Http\Request;
 
 class UnionController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
         $this->authorize('viewAny', Union::class);
 
-        return UnionResource::collection(Union::query()->paginate());
+        return UnionResource::collection(Union::query()->paginate($request->input('per_page', 10)));
     }
 
     /**

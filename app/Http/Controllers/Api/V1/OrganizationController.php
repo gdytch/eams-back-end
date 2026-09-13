@@ -19,7 +19,7 @@ class OrganizationController extends Controller
     {
         $this->authorize('viewAny', Organization::class);
 
-        return OrganizationResource::collection(Organization::query()->paginate());
+        return OrganizationResource::collection(Organization::query()->paginate($request->input('per_page', 10)));
     }
 
     /**

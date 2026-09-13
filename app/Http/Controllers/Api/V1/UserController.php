@@ -13,6 +13,7 @@ use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 
@@ -31,7 +32,7 @@ class UserController extends Controller
             $query->where('organization_id', $request->user()->organization_id);
         }
 
-        return UserResource::collection($query->paginate());
+        return UserResource::collection($query->paginate($request->input('per_page', 10)));
     }
 
     /**
@@ -67,15 +68,35 @@ class UserController extends Controller
     {
         $data = $request->validated();
 
-        if (array_key_exists('password', $data)) {
-            $data['password'] = Hash::make($data['password']);
-        }
+        return DB::transaction(function () use ($user, $data) {
+            if (array_key_exists('password', $data)) {
+                $data['password'] = Hash::make($data['password']);
+            }
 
-        $user->update($data);
+            $user->update($data);
 
-        AuditLog::record('user.updated', $user, array_diff_key($data, ['password' => null]));
+            // Sync name fields to linked attendee
+            if ($user->attendee !== null) {
+                $attendeeUpdate = [];
+                if (isset($data['first_name'])) {
+                    $attendeeUpdate['first_name'] = $data['first_name'];
+                }
+                if (isset($data['middle_name'])) {
+                    $attendeeUpdate['middle_name'] = $data['middle_name'];
+                }
+                if (isset($data['last_name'])) {
+                    $attendeeUpdate['last_name'] = $data['last_name'];
+                }
 
-        return UserResource::make($user);
+                if ($attendeeUpdate) {
+                    $user->attendee()->update($attendeeUpdate);
+                }
+            }
+
+            AuditLog::record('user.updated', $user, array_diff_key($data, ['password' => null]));
+
+            return UserResource::make($user);
+        });
     }
 
     /**
@@ -119,6 +140,11 @@ class UserController extends Controller
 
         $user->update(['photo_paths' => $paths]);
 
+        // Sync photo to linked attendee (same paths, no re-processing)
+        if ($user->attendee !== null) {
+            $user->attendee()->update(['photo_paths' => $paths]);
+        }
+
         AuditLog::record('user.photo_updated', $user);
 
         return UserResource::make($user);
@@ -138,6 +164,11 @@ class UserController extends Controller
         }
 
         $user->update(['photo_paths' => null]);
+
+        // Sync removal to linked attendee
+        if ($user->attendee !== null) {
+            $user->attendee()->update(['photo_paths' => null]);
+        }
 
         AuditLog::record('user.photo_removed', $user);
 

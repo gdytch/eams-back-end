@@ -24,6 +24,10 @@ class AttendeePolicy
 
     public function update(User $user, Attendee $attendee): bool
     {
+        if ($user->isAttendee()) {
+            return $attendee->user_id === $user->id;
+        }
+
         return $this->view($user, $attendee);
     }
 

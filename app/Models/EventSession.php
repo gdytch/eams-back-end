@@ -45,4 +45,12 @@ class EventSession extends Model
     {
         return $this->startsAt()->subMinutes($this->event->check_in_window_minutes);
     }
+
+    /**
+     * The end time of this session.
+     */
+    public function endsAt(): Carbon
+    {
+        return Carbon::parse($this->session_date->toDateString().' '.$this->end_time);
+    }
 }

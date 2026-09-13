@@ -151,6 +151,230 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ValidationError" }
 
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user account
+      description: >
+        Create a new user account and obtain a bearer token.
+        An email verification notification is sent upon successful registration, unless the account
+        is claimed via `invite_token` (see below).
+
+
+        **Attendee invitation claiming**: when an admin or attendance checker creates an attendee
+        record with an email address (and no linked user account yet), an invitation email is sent
+        containing a unique `invite_token` and a link to this registration flow (the frontend has no
+        dedicated "sign up" entry point otherwise — registration is normally only reached via an
+        event's public registration link). Passing that `invite_token` here:
+          - links the new user to the existing attendee record (`user_id`), so their prior event
+            registrations, ID cards, and attendance history are immediately visible in their dashboard
+          - inherits the attendee's `organization_id`
+          - automatically marks the email as verified (skipping the verification email) **only if**
+            the submitted `email` matches the attendee's `email_address` exactly
+
+        An invite token can only be used once; it is unknown/expired if already claimed.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, last_name, email, password]
+              properties:
+                first_name: { type: string, maxLength: 100 }
+                middle_name: { type: string, maxLength: 100, nullable: true }
+                last_name: { type: string, maxLength: 100 }
+                email: { type: string, format: email }
+                password:
+                  {
+                    type: string,
+                    format: password,
+                    minLength: 8,
+                    description: "Must be at least 8 characters. `password_confirmation` is required.",
+                  }
+                password_confirmation: { type: string, format: password, minLength: 8 }
+                invite_token:
+                  {
+                    type: string,
+                    nullable: true,
+                    description: "Token from an attendee account-invitation email. Must reference an attendee that has not yet been claimed by another user.",
+                  }
+      responses:
+        "201":
+          description: Account created and authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    {
+                      type: string,
+                      description: "Sanctum personal access token — send as `Authorization: Bearer <token>` on every subsequent request.",
+                    }
+                  user: { $ref: "#/components/schemas/User" }
+        "422":
+          description: Validation failed (duplicate email, weak password, missing fields, unknown/already-claimed invite_token, etc.)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request a password reset link
+      description: >
+        Initiate password reset for an account.
+        If the email exists, a password reset link is sent to the email address.
+        Always returns 200 regardless of whether the email exists (to prevent user enumeration).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        "200":
+          description: Password reset link sent (or email not found, but response is always 200)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    {
+                      type: string,
+                      example: "If an account exists with that email, a password reset link has been sent.",
+                    }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password with a valid token
+      description: >
+        Complete the password reset process using the token from the email link.
+        Upon success, all existing Sanctum tokens are revoked to force re-login on all devices.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, email, password, password_confirmation]
+              properties:
+                token: { type: string, description: "Password reset token from the email link" }
+                email: { type: string, format: email }
+                password: { type: string, format: password, minLength: 8 }
+                password_confirmation: { type: string, format: password, minLength: 8 }
+      responses:
+        "200":
+          description: Password reset successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    { type: string, example: "Your password has been successfully reset." }
+        "422":
+          description: Invalid token, email mismatch, or validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
+  /auth/email/verify/{id}/{hash}:
+    get:
+      tags: [Auth]
+      summary: Verify email address with signed link
+      description: >
+        Complete email verification using the signed link sent to the user's email.
+        Link contains `id`, `hash`, `expires`, and `signature` query parameters — all are required.
+        No authentication required; the signature validates the request.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+          description: User ID
+        - name: hash
+          in: path
+          required: true
+          schema: { type: string }
+          description: Email verification hash (SHA1)
+        - name: expires
+          in: query
+          required: true
+          schema: { type: integer }
+          description: Expiration timestamp (Unix)
+        - name: signature
+          in: query
+          required: true
+          schema: { type: string }
+          description: Signed URL signature
+      responses:
+        "200":
+          description: Email verified successfully (or already verified)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    {
+                      type: string,
+                      example: "Email verified successfully.",
+                      enum:
+                        [
+                          "Email verified successfully.",
+                          "Email already verified.",
+                        ],
+                    }
+        "400":
+          description: Invalid hash or signature
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: "Invalid verification link." }
+        "403":
+          description: Link has expired or signature is invalid
+        "404":
+          description: User not found
+
+  /auth/email/verification-notification:
+    post:
+      tags: [Auth]
+      summary: Resend verification email
+      description: >
+        Send a new verification email to the authenticated user.
+        Returns 200 if already verified (no-op); returns 200 and resends if not yet verified.
+      responses:
+        "200":
+          description: Verification email sent or already verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    {
+                      type: string,
+                      enum:
+                        [
+                          "Verification link sent to your email.",
+                          "Email already verified.",
+                        ],
+                    }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+
   /auth/me:
     get:
       tags: [Auth]
@@ -1122,6 +1346,41 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/sessions/{session}/roster:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      tags: [Attendance]
+      summary: List every registration for a session with its attendance status
+      description: >
+        Every registration for the event, each annotated with its attendance status for this
+        specific session. Sorted by check-in time ascending; registrations without a check-in
+        (absent) sort last. Paginated.
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - name: per_page
+          in: query
+          description: Items per page.
+          schema: { type: integer, default: 15 }
+        - name: status
+          in: query
+          description: Filter by attendance status for this session. Case-insensitive.
+          schema:
+            type: string
+            enum: [all, present, absent]
+            default: all
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventSessionRoster" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   # ---------------------------------------------------------------- Event Registrations
   /events/{event}/registrations:
@@ -2207,6 +2466,8 @@ components:
         id: { type: integer }
         name: { type: string }
         email: { type: string, format: email }
+        email_verified_at: { type: string, format: date-time, nullable: true, description: "Null if email is not yet verified." }
+        email_verified: { type: boolean, description: "True if email_verified_at is set." }
         role: { $ref: "#/components/schemas/UserRole" }
         photo_urls: { $ref: "#/components/schemas/ImageUrls" }
         organization_id:
@@ -2362,6 +2623,33 @@ components:
         event_registration: { $ref: "#/components/schemas/EventRegistration" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    EventSessionRoster:
+      type: object
+      properties:
+        event_id: { type: integer }
+        session_id: { type: integer }
+        status:
+          type: string
+          enum: [all, present, absent]
+          description: "The status filter that was applied."
+        data:
+          type: array
+          items: { $ref: "#/components/schemas/EventSessionRosterEntry" }
+        links: { $ref: "#/components/schemas/PaginationLinks" }
+        meta: { $ref: "#/components/schemas/PaginationMeta" }
+
+    EventSessionRosterEntry:
+      type: object
+      properties:
+        event_registration_id: { type: integer }
+        attendee_name: { type: string }
+        attendee_photo_url: { type: string, nullable: true }
+        union: { type: string, nullable: true }
+        mission: { type: string, nullable: true }
+        attendance_status: { type: string, enum: [Present, Absent] }
+        check_in_at: { type: string, format: date-time, nullable: true }
+        check_out_at: { type: string, format: date-time, nullable: true }
 
     AuditLog:
       type: object

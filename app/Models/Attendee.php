@@ -111,4 +111,13 @@ class Attendee extends Model
             ])->toArray()
             : null;
     }
+
+    public function getTerritoryAttribute()
+    {
+        $unionName = $this->union ? $this->union->name.', ' : '';
+        $missionName = $this->mission ? $this->mission->name.', ' : '';
+        $churchName = $this->church ? $this->church->name : '';
+
+        return trim("{$unionName}{$missionName}{$churchName}");
+    }
 }

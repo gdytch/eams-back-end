@@ -482,4 +482,111 @@ class AttendeeDashboardTest extends TestCase
 
         $this->assertEquals(0, $data['stats']['attendance_rate']);
     }
+
+    public function test_unauthenticated_user_cannot_access_registrations(): void
+    {
+        $response = $this->getJson('/api/v1/attendee/registrations');
+
+        $response->assertUnauthorized();
+    }
+
+    public function test_non_attendee_user_cannot_access_registrations(): void
+    {
+        $checker = User::factory()->checker()->create();
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson('/api/v1/attendee/registrations');
+
+        $response->assertForbidden();
+    }
+
+    public function test_attendee_with_no_linked_attendee_record_gets_not_found(): void
+    {
+        $attendeeUser = User::factory()->attendee()->create();
+
+        $response = $this->actingAs($attendeeUser, 'sanctum')
+            ->getJson('/api/v1/attendee/registrations');
+
+        $response->assertNotFound();
+    }
+
+    public function test_attendee_can_list_all_registrations(): void
+    {
+        $org = Organization::factory()->create();
+        $attendeeUser = User::factory()->attendee()->create(['organization_id' => $org->id]);
+        $attendee = Attendee::factory()->for($org)->for($attendeeUser)->create();
+
+        $event1 = Event::factory()->for($org)->create();
+        $event2 = Event::factory()->for($org)->create();
+
+        EventRegistration::factory()->for($event1)->for($attendee)->create();
+        EventRegistration::factory()->for($event2)->for($attendee)->create();
+
+        $response = $this->actingAs($attendeeUser, 'sanctum')
+            ->getJson('/api/v1/attendee/registrations');
+
+        $response->assertOk();
+        $data = $response->json('data');
+
+        $this->assertCount(2, $data);
+    }
+
+    public function test_attendee_registrations_include_event_and_attendance_data(): void
+    {
+        $org = Organization::factory()->create();
+        $attendeeUser = User::factory()->attendee()->create(['organization_id' => $org->id]);
+        $attendee = Attendee::factory()->for($org)->for($attendeeUser)->create();
+
+        $event = Event::factory()->for($org)->create();
+        $registration = EventRegistration::factory()
+            ->for($event)
+            ->for($attendee)
+            ->state(['id_card_generated_at' => now()])
+            ->create();
+
+        $response = $this->actingAs($attendeeUser, 'sanctum')
+            ->getJson('/api/v1/attendee/registrations');
+
+        $response->assertOk();
+
+        $fullResponse = $response->json();
+        $data = is_array($fullResponse['data'] ?? null) ? $fullResponse['data'] : $fullResponse;
+
+        $this->assertCount(1, $data);
+        $registrationData = $data[0];
+
+        $this->assertEquals($registration->id, $registrationData['id']);
+        $this->assertEquals($event->id, $registrationData['event_id']);
+        $this->assertEquals($attendee->id, $registrationData['attendee_id']);
+        $this->assertTrue($registrationData['id_card_ready']);
+        $this->assertNotNull($registrationData['event']);
+        $this->assertEquals($event->id, $registrationData['event']['id']);
+    }
+
+    public function test_attendee_does_not_see_other_attendees_registrations_in_list(): void
+    {
+        $org = Organization::factory()->create();
+
+        $attendee1User = User::factory()->attendee()->create(['organization_id' => $org->id]);
+        $attendee1 = Attendee::factory()->for($org)->for($attendee1User)->create();
+
+        $attendee2User = User::factory()->attendee()->create(['organization_id' => $org->id]);
+        $attendee2 = Attendee::factory()->for($org)->for($attendee2User)->create();
+
+        $event = Event::factory()->for($org)->create();
+
+        $registration1 = EventRegistration::factory()->for($event)->for($attendee1)->create();
+        EventRegistration::factory()->for($event)->for($attendee2)->create();
+
+        $response = $this->actingAs($attendee1User, 'sanctum')
+            ->getJson('/api/v1/attendee/registrations');
+
+        $response->assertOk();
+
+        $fullResponse = $response->json();
+        $data = is_array($fullResponse['data'] ?? null) ? $fullResponse['data'] : $fullResponse;
+
+        $this->assertCount(1, $data);
+        $this->assertEquals($registration1->id, $data[0]['id']);
+    }
 }

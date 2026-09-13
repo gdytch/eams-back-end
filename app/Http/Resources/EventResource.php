@@ -29,6 +29,7 @@ class EventResource extends JsonResource
             'id_card_background_url' => $this->id_card_background_path
                 ? Storage::disk('public')->url($this->id_card_background_path)
                 : null,
+            'id_card_font_color' => $this->id_card_font_color ?? '#000000',
             'banner_urls' => $this->banner_paths
                 ? collect($this->banner_paths)->mapWithKeys(fn ($path, $key) => [
                     $key => Storage::disk('public')->url($path),

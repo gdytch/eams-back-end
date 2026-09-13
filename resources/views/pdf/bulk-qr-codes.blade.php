@@ -9,27 +9,31 @@
             font-family: sans-serif;
             font-size: 12px;
             color: #111;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            padding: 12px;
         }
 
         h1 {
             font-size: 16px;
             margin-bottom: 4px;
+            grid-column: 1 / -1;
         }
 
         .subtitle {
             color: #555;
-            margin-bottom: 16px;
+            margin-bottom: 50px;
+            grid-column: 1 / -1;
         }
 
         .cell {
-            display: inline-block;
-            width: 45%;
             text-align: center;
             border: 1px solid #ccc;
             border-radius: 4px;
             padding: 12px;
-            margin: 2%;
             page-break-inside: avoid;
+            display: inline-block;
         }
 
         .qr img {

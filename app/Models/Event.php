@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
-#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'banner_paths', 'created_by', 'invite_token'])]
+#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'created_by', 'invite_token'])]
 class Event extends Model
 {
     /** @use HasFactory<EventFactory> */
@@ -66,6 +66,11 @@ class Event extends Model
         return $this->hasMany(EventRegistration::class);
     }
 
+    public function gridDownloads(): HasMany
+    {
+        return $this->hasMany(IdCardGridDownload::class);
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
@@ -78,6 +83,6 @@ class Event extends Model
 
     public function getBannerUrlsAttribute(): array
     {
-        return array_map(fn($path) => $path ? asset("storage/{$path}") : null, $this->banner_paths ?? []);
+        return array_map(fn ($path) => $path ? asset("storage/{$path}") : null, $this->banner_paths ?? []);
     }
 }

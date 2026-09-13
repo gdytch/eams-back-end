@@ -4,15 +4,19 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ExportEventRegistrationsQrRequest;
+use App\Http\Requests\StartIdCardGridDownloadRequest;
 use App\Http\Requests\StoreEventRegistrationRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventRegistrationResource;
+use App\Http\Resources\IdCardGridDownloadResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
+use App\Jobs\GenerateIdCardGridDownloadJob;
 use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
+use App\Models\IdCardGridDownload;
 use App\Services\AttendeeInvitationService;
 use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -173,7 +177,7 @@ class EventRegistrationController extends Controller
      */
     public function downloadIdCard(Event $event, EventRegistration $registration)
     {
-        $this->authorize('manageIdCards', $registration);
+        $this->authorize('downloadIdCard', $registration);
 
         if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
             return response()->json([
@@ -299,5 +303,165 @@ class EventRegistrationController extends Controller
         return response($mergedPdf)
             ->header('Content-Type', 'application/pdf')
             ->header('Content-Disposition', "attachment; filename=\"event-{$event->id}-all-id-cards.pdf\"");
+    }
+
+    /**
+     * Stream the generated identification card image for display on the frontend.
+     */
+    public function getIdCardImage(Event $event, EventRegistration $registration)
+    {
+        $this->authorize('viewIdCardImage', $registration);
+
+        if (! $registration->id_card_images_path || empty($registration->id_card_images_path)) {
+            return response()->json([
+                'message' => 'The identification card image is still being generated. Try again shortly.',
+            ], 202);
+        }
+
+        $imagePath = $registration->id_card_images_path[0] ?? null;
+
+        if (! $imagePath) {
+            return response()->json([
+                'message' => 'No image path found in registration.',
+            ], 404);
+        }
+
+        // Normalize the path (remove leading slash if present)
+        $imagePath = ltrim($imagePath, '/');
+
+        if (! Storage::disk('local')->exists($imagePath)) {
+            return response()->json([
+                'message' => 'Identification card image not found.',
+                'debug' => [
+                    'requested_path' => $imagePath,
+                    'full_path' => Storage::disk('local')->path($imagePath),
+                ],
+            ], 404);
+        }
+
+        return response()->file(Storage::disk('local')->path($imagePath));
+    }
+
+    /**
+     * Start a background job to generate a grid PDF of ID card images for specified registrations.
+     * Returns a download batch ID; use GET /id-cards/grid-download/{id} to poll status,
+     * then GET /id-cards/grid-download/{id}/file to download once completed.
+     */
+    public function startIdCardGridDownload(StartIdCardGridDownloadRequest $request, Event $event)
+    {
+        $this->authorize('manageIdCards', $event);
+
+        $data = $request->validated();
+        $registrationIds = $data['registration_ids'] ?? null;
+
+        // If specific registration IDs provided, verify they exist and belong to this event
+        if ($registrationIds !== null) {
+            $registrations = $event->registrations()
+                ->whereIn('id', $registrationIds)
+                ->get();
+
+            if ($registrations->isEmpty()) {
+                return response()->json([
+                    'message' => 'No registrations found with the provided IDs.',
+                ], 404);
+            }
+        }
+
+        $download = IdCardGridDownload::create([
+            'event_id' => $event->id,
+            'requested_by' => $request->user()->id,
+            'registration_ids' => $registrationIds,
+            'status' => 'pending',
+        ]);
+
+        GenerateIdCardGridDownloadJob::dispatch($download);
+
+        AuditLog::record('event_registration.id_card_grid_download_started', $event, [
+            'download_id' => $download->id,
+            'registration_ids' => $registrationIds,
+        ]);
+
+        return IdCardGridDownloadResource::make($download)->response()->setStatusCode(202);
+    }
+
+    /**
+     * Start a background job to generate a grid PDF of ID card images for all registrations.
+     * Returns a download batch ID; use GET /id-cards/grid-download/{id} to poll status,
+     * then GET /id-cards/grid-download/{id}/file to download once completed.
+     */
+    public function startIdCardGridDownloadAll(Event $event)
+    {
+        $this->authorize('manageIdCards', $event);
+
+        if ($event->registrations()->count() === 0) {
+            return response()->json([
+                'message' => 'No registrations found for this event.',
+            ], 404);
+        }
+
+        $download = IdCardGridDownload::create([
+            'event_id' => $event->id,
+            'requested_by' => auth()->user()->id,
+            'registration_ids' => null,
+            'status' => 'pending',
+        ]);
+
+        GenerateIdCardGridDownloadJob::dispatch($download);
+
+        AuditLog::record('event_registration.id_card_grid_download_started', $event, [
+            'download_id' => $download->id,
+            'registration_ids' => null,
+        ]);
+
+        return IdCardGridDownloadResource::make($download)->response()->setStatusCode(202);
+    }
+
+    /**
+     * Check the status of a grid PDF download batch.
+     */
+    public function showIdCardGridDownload(Event $event, IdCardGridDownload $gridDownload)
+    {
+        $this->authorize('manageIdCards', $event);
+
+        if ($gridDownload->event_id !== $event->id) {
+            return response()->json([
+                'message' => 'Download not found.',
+            ], 404);
+        }
+
+        return IdCardGridDownloadResource::make($gridDownload);
+    }
+
+    /**
+     * Download the completed grid PDF of ID card images.
+     * Returns 202 if still processing, 422 if generation failed.
+     */
+    public function downloadIdCardGridDownload(Event $event, IdCardGridDownload $gridDownload)
+    {
+        $this->authorize('manageIdCards', $event);
+
+        if ($gridDownload->event_id !== $event->id) {
+            return response()->json([
+                'message' => 'Download not found.',
+            ], 404);
+        }
+
+        if ($gridDownload->status->value === 'pending' || $gridDownload->status->value === 'processing') {
+            return response()->json([
+                'message' => 'Grid PDF is still being generated. Check back shortly.',
+                'status' => $gridDownload->status->value,
+            ], 202);
+        }
+
+        if ($gridDownload->status->value === 'failed') {
+            return response()->json([
+                'message' => $gridDownload->failure_reason,
+            ], 422);
+        }
+
+        return Storage::disk('local')->download(
+            $gridDownload->file_path,
+            "event-{$event->id}-id-card-grid.pdf"
+        );
     }
 }

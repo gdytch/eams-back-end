@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PublicEventController;
 use App\Http\Controllers\Api\V1\ReportController;
+use App\Http\Controllers\Api\V1\SystemLogController;
 use App\Http\Controllers\Api\V1\UnionController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
@@ -40,6 +41,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::middleware('throttle:6,1')->post('auth/email/verification-notification', [AuthController::class, 'resendVerification']);
     Route::get('attendee/dashboard', [AttendeeDashboardController::class, 'index']);
+    Route::get('attendee/registrations', [AttendeeDashboardController::class, 'registrations']);
     Route::get('dashboard', [DashboardController::class, 'index']);
 
     Route::get('reports/dashboard', [ReportController::class, 'globalDashboard']);
@@ -73,9 +75,14 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr']);
         Route::get('events/{event}/registrations/id-cards/bulk-download', [EventRegistrationController::class, 'bulkDownloadIdCards']);
         Route::get('events/{event}/registrations/id-cards/download-all', [EventRegistrationController::class, 'downloadAllIdCards']);
+        Route::post('events/{event}/registrations/id-cards/grid-download', [EventRegistrationController::class, 'startIdCardGridDownload']);
+        Route::post('events/{event}/registrations/id-cards/grid-download-all', [EventRegistrationController::class, 'startIdCardGridDownloadAll']);
+        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}', [EventRegistrationController::class, 'showIdCardGridDownload'])->name('events.registrations.id-card-grid-download');
+        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}/file', [EventRegistrationController::class, 'downloadIdCardGridDownload'])->name('events.registrations.id-card-grid-download-file');
         Route::apiResource('events.registrations', EventRegistrationController::class)
             ->only(['index', 'store', 'show', 'destroy']);
         Route::get('events/{event}/registrations/{registration}/id-card', [EventRegistrationController::class, 'downloadIdCard']);
+        Route::get('events/{event}/registrations/{registration}/id-card-image', [EventRegistrationController::class, 'getIdCardImage'])->name('events.registrations.id-card-image');
         Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventRegistrationController::class, 'regenerateIdCard']);
 
         Route::get('events/{event}/sessions/{session}/attendance', [AttendanceController::class, 'forSession']);
@@ -92,6 +99,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('attendance/sync-batch', [AttendanceController::class, 'syncBatch']);
 
     Route::get('audit-logs', [AuditLogController::class, 'index']);
+
+    Route::middleware('role:super_admin')->group(function () {
+        Route::get('system-logs/dates', [SystemLogController::class, 'dates']);
+        Route::get('system-logs', [SystemLogController::class, 'index']);
+    });
 
     Route::get('organizations/{organization}/reports/dashboard', [ReportController::class, 'organizationDashboard']);
     Route::get('organizations/{organization}/reports/attendance-overview', [ReportController::class, 'organizationAttendanceOverview']);

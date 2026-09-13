@@ -29,6 +29,8 @@ tags:
   - name: Attendance
   - name: Reports
   - name: Audit Logs
+  - name: System Logs
+    description: Super Admin only.
 
 paths:
   # ---------------------------------------------------------------- Auth
@@ -997,9 +999,18 @@ paths:
   /attendees/{attendee}:
     parameters:
       - $ref: "#/components/parameters/AttendeeId"
+      - name: event_id
+        in: query
+        required: false
+        schema: { type: integer }
+        description: If provided, returns registration stats for the attendee at this event.
     get:
       tags: [Attendees]
       summary: Get an attendee
+      description: >
+        Returns the attendee's profile. If `event_id` is provided, also includes
+        `event_stats` with attendance data for that event (present/absent counts, total sessions, etc.).
+        If the attendee is not registered to the event, `event_stats` is null.
       responses:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -1529,6 +1540,134 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /events/{event}/registrations/id-cards/grid-download:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [Event Registrations]
+      summary: Start a background job to generate a grid PDF of ID card images
+      description: >
+        Org Admin+ only. Creates a background job that generates a print-ready PDF with ID card
+        images arranged in a 2x2 grid on A4 pages (4 cards per page). Each card maintains its
+        3in x 4in size with 1rem gaps. Pass `registration_ids[]` to generate a grid for specific
+        registrations, or omit it to include only those with ready ID card images. The job runs
+        in the background; immediately returns a batch ID with status "pending". Use
+        `GET /events/{event}/registrations/id-cards/grid-download/{id}` to poll the status, and
+        `GET /events/{event}/registrations/id-cards/grid-download/{id}/file` to download the PDF
+        once status is "completed". This action is recorded in the audit log.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                registration_ids:
+                  type: array
+                  items: { type: integer }
+                  description: Optional. Specific registration IDs to include. If omitted, includes all with ready images.
+      responses:
+        "202":
+          description: Background job started. Batch ID returned with status "pending".
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdCardGridDownload" }
+        "400":
+          description: No registrations found with the provided IDs.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/registrations/id-cards/grid-download-all:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [Event Registrations]
+      summary: Start a background job to generate a grid PDF of all ID card images
+      description: >
+        Org Admin+ only. Creates a background job that generates a print-ready PDF with ID card
+        images for all registrations arranged in a 2x2 grid on A4 pages (4 cards per page).
+        Each card maintains its 3in x 4in size with 1rem gaps. Only registrations with ready
+        ID card images are included. The job runs in the background; immediately returns a batch
+        ID with status "pending". Use `GET /events/{event}/registrations/id-cards/grid-download/{id}`
+        to poll the status, and `GET /events/{event}/registrations/id-cards/grid-download/{id}/file`
+        to download the PDF once status is "completed". This action is recorded in the audit log.
+      responses:
+        "202":
+          description: Background job started. Batch ID returned with status "pending".
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdCardGridDownload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/registrations/id-cards/grid-download/{gridDownload}:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - name: gridDownload
+        in: path
+        required: true
+        schema: { type: integer }
+        description: ID card grid download batch ID
+    get:
+      tags: [Event Registrations]
+      summary: Check the status of a grid PDF download batch
+      description: >
+        Poll this endpoint to check if the background job has completed. Returns the batch status
+        (pending, processing, completed, or failed) and, once completed, includes a `download_url`.
+        When status is "failed", the response includes a `failure_reason` explaining why.
+      responses:
+        "200":
+          description: Current batch status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IdCardGridDownload" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/registrations/id-cards/grid-download/{gridDownload}/file:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - name: gridDownload
+        in: path
+        required: true
+        schema: { type: integer }
+        description: ID card grid download batch ID
+    get:
+      tags: [Event Registrations]
+      summary: Download the completed grid PDF of ID card images
+      description: >
+        Returns the generated PDF file when the batch status is "completed". Returns 202 if the
+        batch is still processing, or 422 if generation failed with the reason in the response body.
+      responses:
+        "200":
+          description: PDF file stream containing the grid of ID card images
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "202":
+          description: Grid PDF is still being generated. Check back shortly.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  status: { type: string, enum: [pending, processing] }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: Grid generation failed (see message for reason)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /events/{event}/registrations/{registration}:
     parameters:
       - $ref: "#/components/parameters/EventId"
@@ -1752,6 +1891,92 @@ paths:
         "200": { $ref: "#/components/responses/AuditLogList" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
+
+  # ---------------------------------------------------------------- System Logs
+  /system-logs/dates:
+    get:
+      tags: [System Logs]
+      summary: List available log dates
+      description: >
+        Returns a list of available daily Laravel log files with metadata (file size, modification time).
+        Super Admin only.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dates:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                          description: Date of the log file (YYYY-MM-DD)
+                        size:
+                          type: integer
+                          description: File size in bytes
+                        modified_at:
+                          type: integer
+                          description: Unix timestamp of last modification
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /system-logs:
+    get:
+      tags: [System Logs]
+      summary: List paginated log entries for a date
+      description: >
+        Retrieve Laravel log entries for a specific date with optional filtering by log level
+        and keyword search. Multi-line entries (including stack traces) are included in full.
+        Entries are ordered newest-first. Super Admin only.
+      parameters:
+        - name: date
+          in: query
+          required: true
+          description: Date to retrieve logs for (YYYY-MM-DD format)
+          schema: { type: string, format: date }
+        - name: level
+          in: query
+          description: >-
+            Filter by log level (case-insensitive). One of: debug, info, notice, warning, error,
+            critical, alert, emergency.
+          schema:
+            type: string
+            enum: [debug, info, notice, warning, error, critical, alert, emergency]
+        - name: search
+          in: query
+          description: Keyword search within log entries (case-insensitive, max 255 chars)
+          schema: { type: string, maxLength: 255 }
+        - $ref: "#/components/parameters/Page"
+        - name: per_page
+          in: query
+          description: Items per page (1-100, default 15)
+          schema: { type: integer, minimum: 1, maximum: 100, default: 15 }
+      responses:
+        "200":
+          description: OK — paginated log entries
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/LogEntry" }
+                  meta: { $ref: "#/components/schemas/PaginationMeta" }
+                  links: { $ref: "#/components/schemas/PaginationLinks" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422":
+          description: Validation error (invalid date format, level, or per_page)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
 
   # ---------------------------------------------------------------- Reports
   /events/{event}/reports/attendance-summary:
@@ -2059,6 +2284,17 @@ components:
         registration_id: { type: integer, description: "EventRegistration id" }
         event: { $ref: "#/components/schemas/Event" }
         attendance_summary: { $ref: "#/components/schemas/AttendanceSummary" }
+
+    EventRegistrationStats:
+      type: object
+      description: Quick stats for an attendee's registration to a specific event.
+      properties:
+        registered: { type: boolean, description: "True if attendee is registered to the event" }
+        registered_at: { type: string, format: date-time, nullable: true, description: "When the attendee registered (null if not registered)" }
+        present_count: { type: integer, description: "Number of sessions attendee checked in to" }
+        absent_count: { type: integer, description: "Number of past sessions attendee did not check in to (future sessions excluded)" }
+        total_sessions: { type: integer, description: "Total sessions in the event" }
+        registration_count: { type: integer, description: "Total events this attendee is registered to (across all events)" }
 
     AttendeeStatsData:
       type: object
@@ -2569,6 +2805,12 @@ components:
           format: uri
           nullable: true
           description: Public URL of the uploaded attendee-ID-card background image, if any.
+        id_card_font_color:
+          type: string
+          pattern: "^#[0-9A-Fa-f]{6}$"
+          example: "#000000"
+          nullable: true
+          description: Hex color code (e.g. #000000) for attendee name text in generated ID cards. Defaults to #000000 if not set.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -2607,6 +2849,34 @@ components:
           { type: integer, nullable: true, description: "User id." }
         registered_at: { type: string, format: date-time }
         attendee: { $ref: "#/components/schemas/Attendee" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    IdCardGridDownload:
+      type: object
+      properties:
+        id: { type: integer }
+        event_id: { type: integer }
+        status:
+          type: string
+          enum: [pending, processing, completed, failed]
+          description: Job status. "pending" or "processing" = still generating. "completed" = ready to download. "failed" = see failure_reason.
+        progress_percentage:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Progress as a percentage (0-100). Updates during processing.
+        registration_ids:
+          type: array
+          items: { type: integer }
+          nullable: true
+          description: Specific registration IDs included in this batch. Null means "all registrations with ready images".
+        failure_reason:
+          { type: string, nullable: true, description: "If status is 'failed', the reason why." }
+        download_url:
+          { type: string, format: uri, nullable: true, description: "Available only when status is 'completed'. URL to download the PDF." }
+        completed_at:
+          { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -2673,6 +2943,28 @@ components:
         ip_address: { type: string, nullable: true }
         user_agent: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
+
+    LogEntry:
+      type: object
+      description: A single Laravel log entry (one or more lines including stack traces)
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          description: When the log entry was recorded
+        channel:
+          type: string
+          description: Log channel name (usually "laravel")
+        level:
+          type: string
+          description: Log level (debug, info, notice, warning, error, critical, alert, emergency)
+          enum: [debug, info, notice, warning, error, critical, alert, emergency]
+        message:
+          type: string
+          description: The first line of the log entry (summary)
+        raw:
+          type: string
+          description: Complete raw log text including multi-line stack traces and context
 
     PaginationLinks:
       type: object
@@ -2891,6 +3183,10 @@ components:
             type: object
             properties:
               data: { $ref: "#/components/schemas/Attendee" }
+              event_stats:
+                allOf: [{ $ref: "#/components/schemas/EventRegistrationStats" }]
+                nullable: true
+                description: Registration stats for a specific event (only present if event_id query param was provided).
 
     AttendeeList:
       description: OK

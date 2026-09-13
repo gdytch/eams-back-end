@@ -25,7 +25,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $this->registration->loadMissing(['attendee', 'event']);
+        $this->registration->loadMissing(['attendee', 'event', 'attendee.union', 'attendee.mission', 'attendee.church']);
 
         $attendee = $this->registration->attendee;
         $event = $this->registration->event;
@@ -35,12 +35,15 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         );
 
         $backgroundImage = $this->encodedBackgroundImage($event->id_card_background_path);
+        $fontColor = $event->id_card_font_color ?? '#000000';
 
         $pdf = Pdf::loadView('pdf.attendee-id-card', [
             'qrImage' => $qrImage,
             'backgroundImage' => $backgroundImage,
             'attendeeName' => trim("{$attendee->first_name} {$attendee->last_name}"),
-        ])->setPaper([0, 0, 216, 288]); // 3in x 4in, in points (72pt per inch)
+            'attendeeTerritory' => $attendee->territory ?? null,
+            'fontColor' => $fontColor,
+        ])->setPaper([0, 0, 234, 342]); // 3.25in x 4.75in, in points (72pt per inch)
 
         $path = "{$event->id}/{$attendee->id}.pdf";
 

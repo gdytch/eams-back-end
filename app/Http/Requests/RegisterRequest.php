@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Attendee;
+use App\Models\Event;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -31,7 +32,6 @@ class RegisterRequest extends FormRequest
                 'required',
                 'email',
                 Rule::unique('users', 'email'),
-                // Allow email if it matches the invite token's attendee, otherwise it must be unique in attendees table
                 function ($attribute, $value, $fail) {
                     if (! $this->filled('invite_token')) {
                         // No invite token, so email must be unique in attendees table
@@ -43,30 +43,53 @@ class RegisterRequest extends FormRequest
                             $fail('This email address is already in use.');
                         }
                     } else {
-                        // Invite token provided, check if it matches this email's attendee
-                        $attendee = Attendee::withoutGlobalScopes()
-                            ->where('invite_token', $this->input('invite_token'))
-                            ->whereNull('user_id')
+                        $inviteToken = $this->input('invite_token');
+
+                        // Check if it's an event invite token or attendee invite token
+                        $event = Event::withoutGlobalScopes()
+                            ->where('invite_token', $inviteToken)
                             ->first();
 
-                        // Only allow if email matches the invite token's attendee
-                        if ($attendee === null || $attendee->email_address !== $value) {
-                            // Either invalid token or email doesn't match the attendee
-                            // But if there's a duplicate email elsewhere, reject it
-                            $duplicate = Attendee::withoutGlobalScopes()
+                        if ($event !== null) {
+                            // Event invite token: allow merge if email matches an unclaimed attendee in same org
+                            $attendeeByEmail = Attendee::withoutGlobalScopes()
                                 ->where('email_address', $value)
-                                ->where('invite_token', '!=', $this->input('invite_token'))
                                 ->first();
 
-                            if ($duplicate !== null) {
-                                $fail('This email address is already in use.');
+                            if ($attendeeByEmail !== null) {
+                                // Fail if already claimed by another user or belongs to different org
+                                if ($attendeeByEmail->user_id !== null || ($attendeeByEmail->organization_id !== null && $attendeeByEmail->organization_id !== $event->organization_id)) {
+                                    $fail('This email address is already in use.');
+                                }
+                                // Otherwise allow (will be merged in controller)
+                            }
+                        } else {
+                            // Not an event token, check if it's a valid attendee invite token
+                            $attendeeByToken = Attendee::withoutGlobalScopes()
+                                ->where('invite_token', $inviteToken)
+                                ->whereNull('user_id')
+                                ->first();
+
+                            if ($attendeeByToken === null) {
+                                // Invalid token (neither event nor attendee)
+                                $fail('Invalid invite token.');
+                            } else {
+                                // Attendee personal invite token: email must match or be unique in attendees
+                                $attendeeByEmail = Attendee::withoutGlobalScopes()
+                                    ->where('email_address', $value)
+                                    ->first();
+
+                                if ($attendeeByEmail !== null && $attendeeByEmail->id !== $attendeeByToken->id) {
+                                    // Email exists on a different attendee
+                                    $fail('This email address is already in use.');
+                                }
                             }
                         }
                     }
                 },
             ],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'invite_token' => ['nullable', 'string', 'exists:attendees,invite_token'],
+            'invite_token' => ['nullable', 'string'],
         ];
     }
 

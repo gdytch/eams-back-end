@@ -18,6 +18,7 @@ class EventSessionRosterEntryResource extends JsonResource
             'event_registration_id' => $this->id,
             'attendee' => [
                 'name' => $this->attendee->full_name,
+                'id' => $this->attendee->id,
                 'photo_urls' => $this->attendee->photo_urls,
             ],
             'union' => $this->attendee->union?->name,

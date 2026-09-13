@@ -23,6 +23,7 @@ class EventRegistrationResource extends JsonResource
             'id_card_generated_at' => $this->id_card_generated_at,
             'registered_by' => $this->registered_by,
             'registered_at' => $this->registered_at,
+            'event' => EventResource::make($this->whenLoaded('event')),
             'attendee' => AttendeeResource::make($this->whenLoaded('attendee')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

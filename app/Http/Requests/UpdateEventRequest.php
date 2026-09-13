@@ -27,6 +27,7 @@ class UpdateEventRequest extends FormRequest
             'status' => ['sometimes', Rule::enum(EventStatus::class)],
             'requires_check_out' => ['sometimes', 'boolean'],
             'check_in_window_minutes' => ['sometimes', 'integer', 'min:0'],
+            'id_card_font_color' => ['sometimes', 'nullable', 'regex:/^#[0-9A-Fa-f]{6}$/'],
         ];
     }
 }

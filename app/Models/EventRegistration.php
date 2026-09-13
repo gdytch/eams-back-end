@@ -21,6 +21,7 @@ class EventRegistration extends Model
         return [
             'registered_at' => 'datetime',
             'id_card_generated_at' => 'datetime',
+            'id_card_images_path' => 'array',
         ];
     }
 
@@ -40,10 +41,10 @@ class EventRegistration extends Model
         $event_id = $eventId ?? Event::query()->count() + 1;
         $attendee_id = $attendeeId ?? Attendee::query()->count() + 1;
         do {
-            $token = "{$event_id}{$attendee_id}" . Str::random(20);
+            $token = "{$event_id}{$attendee_id}".Str::random(20);
         } while (static::withoutGlobalScopes()->where('qr_token', $token)->exists());
 
-        return config('app.CLIENT_URL') . '/attendee/' . $token;
+        return config('app.CLIENT_URL').'/attendee/'.$token;
     }
 
     public function event(): BelongsTo
@@ -64,5 +65,17 @@ class EventRegistration extends Model
     public function attendanceRecords(): HasMany
     {
         return $this->hasMany(AttendanceRecord::class);
+    }
+
+    public function getIDCardImageAttribute()
+    {
+        if (! $this->id_card_images_path || empty($this->id_card_images_path)) {
+            return null;
+        }
+
+        return route('events.registrations.id-card-image', [
+            'event' => $this->event_id,
+            'registration' => $this->id,
+        ]);
     }
 }

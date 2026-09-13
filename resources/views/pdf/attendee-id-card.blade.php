@@ -40,13 +40,13 @@
         }
 
         .qr {
-            margin-top: 90px;
+            margin-top: 215px;
 
         }
 
         .qr img {
-            width: 120px;
-            height: 120px;
+            width: 110px;
+            height: 110px;
             border: 1rem solid #fff;
         }
 
@@ -55,7 +55,12 @@
             padding: 0 8px;
             font-size: 14px;
             font-weight: bold;
-            color: #111;
+        }
+
+        .territory {
+            margin-top: 5px;
+            padding: 0 8px;
+            font-size: 10px;
         }
     </style>
 </head>
@@ -66,7 +71,8 @@
     @endif
     <div class="content">
         <div class="qr"><img src="{{ $qrImage }}" alt="QR code"></div>
-        <div class="name">{{ $attendeeName }}</div>
+        <div class="name" style="color: {{ $fontColor }}">{{ $attendeeName }}</div>
+        <div class="territory" style="color: {{ $fontColor }}">{{ $attendeeTerritory }}</div>
     </div>
 </body>
 

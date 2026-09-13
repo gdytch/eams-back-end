@@ -53,25 +53,53 @@ class AuthController extends Controller
         $data = $request->validated();
 
         return DB::transaction(function () use ($data, $request) {
-            // Resolve the invited attendee if an invite token is provided
+            // Resolve the invited attendee if an attendee invite token is provided
             $attendee = null;
+            $event = null;
+            $attendeeMatchMethod = null; // 'personal_token' or 'email_merge'
+
             if ($request->filled('invite_token')) {
+                // First check if it's an attendee invite token
                 $attendee = Attendee::withoutGlobalScopes()
                     ->where('invite_token', $data['invite_token'])
                     ->whereNull('user_id')
                     ->first();
+
+                // If not found, check if it's an event invite token
+                if ($attendee === null) {
+                    $event = Event::withoutGlobalScopes()
+                        ->where('invite_token', $data['invite_token'])
+                        ->first();
+
+                    // If event token, try to find unclaimed attendee by email in same org
+                    if ($event !== null) {
+                        $attendee = Attendee::withoutGlobalScopes()
+                            ->where('email_address', $data['email'])
+                            ->whereNull('user_id')
+                            ->first();
+
+                        if ($attendee !== null && $attendee->organization_id !== null && $attendee->organization_id !== $event->organization_id) {
+                            // Different org, don't merge
+                            $attendee = null;
+                        } elseif ($attendee !== null) {
+                            $attendeeMatchMethod = 'email_merge';
+                        }
+                    }
+                } else {
+                    $attendeeMatchMethod = 'personal_token';
+                }
             }
 
             $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
                 ->filter()
                 ->implode(' '));
 
-            // Determine organization_id: inherit from attendee if available
-            $organizationId = $attendee?->organization_id;
+            // Determine organization_id: inherit from attendee or event if available
+            $organizationId = $attendee?->organization_id ?? $event?->organization_id;
 
-            // Mark email verified only if attendee email matches the submitted email
+            // Mark email verified only if attendee email matches by personal token
             $emailVerifiedAt = null;
-            if ($attendee && $attendee->email_address === $data['email']) {
+            if ($attendeeMatchMethod === 'personal_token' && $attendee && $attendee->email_address === $data['email']) {
                 $emailVerifiedAt = now();
             }
 
@@ -94,7 +122,11 @@ class AuthController extends Controller
                     'invite_token' => null,
                 ]);
 
-                AuditLog::record('attendee.invite_claimed', $attendee, ['user_id' => $user->id]);
+                if ($attendeeMatchMethod === 'personal_token') {
+                    AuditLog::record('attendee.invite_claimed', $attendee, ['user_id' => $user->id]);
+                } else {
+                    AuditLog::record('attendee.email_merged', $attendee, ['user_id' => $user->id]);
+                }
             }
 
             // Only fire Registered event if email is not yet verified (needs verification flow)
@@ -159,25 +191,35 @@ class AuthController extends Controller
                         ->where('email_address', $socialiteUser->getEmail())
                         ->first();
 
-                    $validInviteToken = null;
+                    // Check invite token (can be event or attendee token)
+                    $inviteEvent = null;
+                    $inviteAttendee = null;
+
                     if ($request->filled('invite_token')) {
-                        $validInviteToken = Event::withoutGlobalScopes()
+                        // First check if it's an event invite token
+                        $inviteEvent = Event::withoutGlobalScopes()
                             ->where('invite_token', $request->validated('invite_token'))
                             ->where('status', EventStatus::Published)
                             ->first();
+
+                        // If not found, check if it's an attendee invite token
+                        if ($inviteEvent === null) {
+                            $inviteAttendee = Attendee::withoutGlobalScopes()
+                                ->where('invite_token', $request->validated('invite_token'))
+                                ->whereNull('user_id')
+                                ->first();
+                        }
                     }
 
-                    if ($attendee === null && $validInviteToken === null) {
+                    // Validate: either attendee exists or valid invite token provided
+                    if ($attendee === null && $inviteEvent === null && $inviteAttendee === null) {
                         throw ValidationException::withMessages([
                             'email' => 'This email is not registered. Please contact your administrator.',
                         ]);
                     }
 
-                    // Resolve organization: prioritize attendee's organization, then invite_token
-                    $organizationId = $attendee?->organization_id;
-                    if ($organizationId === null && $validInviteToken !== null) {
-                        $organizationId = $validInviteToken->organization_id;
-                    }
+                    // Resolve organization: prioritize attendee, then invite (event or attendee)
+                    $organizationId = $attendee?->organization_id ?? $inviteAttendee?->organization_id ?? $inviteEvent?->organization_id;
 
                     // Create new user
                     $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
@@ -195,14 +237,15 @@ class AuthController extends Controller
                         'email_verified_at' => now(),
                     ]);
 
-                    // Link the user to the attendee if found
-                    if ($attendee !== null) {
-                        $attendee->update([
+                    // Link the user to the attendee if found (either from pre-existing attendee or invite attendee)
+                    $attendeeToLink = $attendee ?? $inviteAttendee;
+                    if ($attendeeToLink !== null) {
+                        $attendeeToLink->update([
                             'user_id' => $user->id,
                             'invite_token' => null,
                         ]);
 
-                        AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
+                        AuditLog::record('attendee.sso_merged', $attendeeToLink, ['user_id' => $user->id]);
                     }
 
                     $wasNewUser = true;

@@ -70,7 +70,15 @@ class EventController extends Controller
      */
     public function update(UpdateEventRequest $request, Event $event)
     {
-        $event->update($request->validated());
+        $data = $request->validated();
+        $oldFontColor = $event->id_card_font_color;
+
+        $event->update($data);
+
+        // Regenerate ID cards if font color changed
+        if (array_key_exists('id_card_font_color', $data) && $data['id_card_font_color'] !== $oldFontColor) {
+            $this->regenerateIdCardsFor($event);
+        }
 
         return EventResource::make($event);
     }
@@ -100,16 +108,7 @@ class EventController extends Controller
 
         $event->update(['id_card_background_path' => $path]);
 
-        // Clear ID card paths and regenerate for all registrations
-        $event->registrations()->update([
-            'id_card_path' => null,
-            'id_card_images_path' => null,
-            'id_card_generated_at' => null,
-        ]);
-
-        $event->registrations->each(function (EventRegistration $registration) {
-            GenerateAttendeeIdCardJob::dispatch($registration);
-        });
+        $this->regenerateIdCardsFor($event);
 
         AuditLog::record('event.id_card_background_updated', $event);
 
@@ -129,16 +128,7 @@ class EventController extends Controller
 
         $event->update(['id_card_background_path' => null]);
 
-        // Clear ID card paths and regenerate for all registrations
-        $event->registrations()->update([
-            'id_card_path' => null,
-            'id_card_images_path' => null,
-            'id_card_generated_at' => null,
-        ]);
-
-        $event->registrations->each(function (EventRegistration $registration) {
-            GenerateAttendeeIdCardJob::dispatch($registration);
-        });
+        $this->regenerateIdCardsFor($event);
 
         AuditLog::record('event.id_card_background_removed', $event);
 
@@ -185,5 +175,21 @@ class EventController extends Controller
         AuditLog::record('event.banner_removed', $event);
 
         return EventResource::make($event);
+    }
+
+    /**
+     * Clear and regenerate ID cards for all registrations of the event.
+     */
+    private function regenerateIdCardsFor(Event $event): void
+    {
+        $event->registrations()->update([
+            'id_card_path' => null,
+            'id_card_images_path' => null,
+            'id_card_generated_at' => null,
+        ]);
+
+        $event->registrations->each(function (EventRegistration $registration) {
+            GenerateAttendeeIdCardJob::dispatch($registration);
+        });
     }
 }

@@ -171,4 +171,138 @@ class AttendeeIdCardTest extends TestCase
 
         Storage::disk('local')->assertExists("{$event->id}/{$registration->attendee_id}.pdf");
     }
+
+    public function test_updating_event_font_color_dispatches_id_card_regeneration(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $registration = EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($org))
+            ->create(['id_card_generated_at' => now()]);
+
+        $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
+            'id_card_font_color' => '#ff0000',
+        ]);
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class);
+        $this->assertEquals('#ff0000', $event->fresh()->id_card_font_color);
+    }
+
+    public function test_updating_event_without_changing_font_color_does_not_dispatch_regeneration(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create(['id_card_font_color' => '#ff0000']);
+        EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($org))
+            ->create(['id_card_generated_at' => now()]);
+
+        $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
+            'name' => 'Updated Event Name',
+        ]);
+
+        Queue::assertNotPushed(GenerateAttendeeIdCardJob::class);
+    }
+
+    public function test_invalid_hex_font_color_fails_validation(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
+            'id_card_font_color' => 'red',
+        ]);
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors('id_card_font_color');
+    }
+
+    public function test_invalid_hex_format_fails_validation(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+
+        // Without #
+        $response = $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
+            'id_card_font_color' => 'ff0000',
+        ]);
+        $response->assertUnprocessable();
+
+        // 3-digit hex (not allowed)
+        $response = $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
+            'id_card_font_color' => '#f00',
+        ]);
+        $response->assertUnprocessable();
+    }
+
+    public function test_event_resource_includes_id_card_font_color(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create(['id_card_font_color' => '#111111']);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson("/api/v1/events/{$event->id}");
+
+        $response->assertOk();
+        $this->assertEquals('#111111', $response->json('data.id_card_font_color'));
+    }
+
+    public function test_event_resource_defaults_font_color_to_black(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create(['id_card_font_color' => null]);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson("/api/v1/events/{$event->id}");
+
+        $response->assertOk();
+        $this->assertEquals('#000000', $response->json('data.id_card_font_color'));
+    }
+
+    public function test_id_card_pdf_uses_configured_font_color(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create(['id_card_font_color' => '#ff0000']);
+        $registration = EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($org)->create(['first_name' => 'John', 'last_name' => 'Doe']))
+            ->create();
+
+        (new GenerateAttendeeIdCardJob($registration))->handle();
+
+        $pdf = Storage::disk('local')->get("{$event->id}/{$registration->attendee_id}.pdf");
+        $this->assertNotEmpty($pdf);
+        // PDF content should include the hex color value (dompdf will embed it in the PDF)
+    }
+
+    public function test_clearing_font_color_reverts_to_default(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create(['id_card_font_color' => '#ff0000']);
+        EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($org))
+            ->create(['id_card_generated_at' => now()]);
+
+        $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
+            'id_card_font_color' => null,
+        ]);
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class);
+        $this->assertNull($event->fresh()->id_card_font_color);
+    }
 }

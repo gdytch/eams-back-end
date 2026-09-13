@@ -94,7 +94,7 @@ class AttendeeController extends Controller
     public function show(Request $request, Attendee $attendee)
     {
         $this->authorize('view', $attendee);
-
+        $attendee->load('union', 'mission', 'church');
         $eventStats = null;
         $eventId = $request->input('event_id');
 

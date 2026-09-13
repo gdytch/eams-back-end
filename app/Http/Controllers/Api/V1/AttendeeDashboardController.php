@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\AttendeeDashboardResource;
+use App\Http\Resources\EventRegistrationResource;
 use App\Models\Attendee;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class AttendeeDashboardController extends Controller
 {
@@ -91,6 +93,24 @@ class AttendeeDashboardController extends Controller
                 'attendance_rate' => $attendanceRate,
             ],
         ])->response();
+    }
+
+    /**
+     * List all registrations for the authenticated attendee.
+     */
+    public function registrations(Request $request): AnonymousResourceCollection
+    {
+        abort_unless($request->user()->isAttendee(), 403, 'You do not have permission to perform this action.');
+
+        $user = $request->user();
+        $attendee = Attendee::where('user_id', $user->id)->firstOrFail();
+
+        $registrations = $attendee->registrations()
+            ->with(['event', 'attendanceRecords'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return EventRegistrationResource::collection($registrations);
     }
 
     /**

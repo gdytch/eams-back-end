@@ -89,6 +89,7 @@ class AttendeeDashboardResource extends JsonResource
                 'id_card_background_url' => $event->id_card_background_path
                     ? Storage::disk('public')->url($event->id_card_background_path)
                     : null,
+                'id_card_font_color' => $event->id_card_font_color ?? '#000000',
                 'banner_urls' => $event->banner_paths
                     ? collect($event->banner_paths)->mapWithKeys(fn ($path, $key) => [
                         $key => Storage::disk('public')->url($path),
@@ -138,7 +139,7 @@ class AttendeeDashboardResource extends JsonResource
     private function formatNextEvent(array $eventData): array
     {
         $formatted = $this->transformEvents([$eventData], false)[0];
-        $formatted['days_until_start'] = now()->diffInDays($eventData['event']->start_date, false);
+        $formatted['days_until_start'] = today()->diffInDays($eventData['event']->start_date);
 
         return $formatted;
     }

@@ -1,0 +1,371 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Enums\IdCardGridDownloadStatus;
+use App\Jobs\GenerateIdCardGridDownloadJob;
+use App\Models\Attendee;
+use App\Models\Event;
+use App\Models\EventRegistration;
+use App\Models\IdCardGridDownload;
+use App\Models\Organization;
+use App\Models\User;
+use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Storage;
+use Tests\TestCase;
+
+class IdCardGridDownloadTest extends TestCase
+{
+    use LazilyRefreshDatabase;
+
+    public function test_start_grid_download_with_specific_registrations_queues_job(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $reg1 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg2 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download",
+            ['registration_ids' => [$reg1->id, $reg2->id]]
+        );
+
+        $response->assertStatus(202);
+        $response->assertJsonStructure(['data' => ['id', 'event_id', 'status', 'registration_ids']]);
+        $this->assertEquals('pending', $response->json('data.status'));
+        $this->assertEquals([$reg1->id, $reg2->id], $response->json('data.registration_ids'));
+
+        Queue::assertPushed(GenerateIdCardGridDownloadJob::class);
+
+        $download = IdCardGridDownload::first();
+        $this->assertNotNull($download);
+        $this->assertEquals($event->id, $download->event_id);
+        $this->assertEquals($orgAdmin->id, $download->requested_by);
+        $this->assertEquals([$reg1->id, $reg2->id], $download->registration_ids);
+    }
+
+    public function test_start_grid_download_all_queues_job(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all"
+        );
+
+        $response->assertStatus(202);
+        $response->assertJsonStructure(['data' => ['id', 'event_id', 'status']]);
+        $this->assertNull($response->json('data.registration_ids'));
+
+        Queue::assertPushed(GenerateIdCardGridDownloadJob::class);
+
+        $download = IdCardGridDownload::first();
+        $this->assertNull($download->registration_ids);
+    }
+
+    public function test_start_grid_download_requires_org_admin(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download",
+            ['registration_ids' => [$reg->id]]
+        );
+
+        $response->assertForbidden();
+        Queue::assertNotPushed(GenerateIdCardGridDownloadJob::class);
+    }
+
+    public function test_start_grid_download_with_nonexistent_registration_ids_returns_404(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download",
+            ['registration_ids' => [9999]]
+        );
+
+        $response->assertNotFound();
+        Queue::assertNotPushed(GenerateIdCardGridDownloadJob::class);
+    }
+
+    public function test_start_grid_download_all_with_no_registrations_returns_404(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all"
+        );
+
+        $response->assertNotFound();
+        Queue::assertNotPushed(GenerateIdCardGridDownloadJob::class);
+    }
+
+    public function test_show_grid_download_returns_current_status(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Processing,
+        ]);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}"
+        );
+
+        $response->assertOk();
+        $response->assertJsonStructure(['data' => ['id', 'event_id', 'status']]);
+        $this->assertEquals('processing', $response->json('data.status'));
+    }
+
+    public function test_show_grid_download_from_different_org_returns_404(): void
+    {
+        $org1 = Organization::factory()->create();
+        $org2 = Organization::factory()->create();
+        $user = User::factory()->orgAdmin()->for($org2)->create();
+        $event = Event::factory()->for($org1)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create();
+
+        $response = $this->actingAs($user, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}"
+        );
+
+        $response->assertNotFound();
+    }
+
+    public function test_download_grid_file_returns_202_while_processing(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Processing,
+        ]);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}/file"
+        );
+
+        $response->assertStatus(202);
+        $response->assertJson([
+            'message' => 'Grid PDF is still being generated. Check back shortly.',
+            'status' => 'processing',
+        ]);
+    }
+
+    public function test_download_grid_file_returns_422_when_failed(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->failed()->for($event)->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}/file"
+        );
+
+        $response->assertStatus(422);
+        $response->assertJson([
+            'message' => 'No ID cards were ready to include in this batch.',
+        ]);
+    }
+
+    public function test_download_grid_file_returns_pdf_when_completed(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->completed()->for($event)->create([
+            'file_path' => 'test-grid.pdf',
+        ]);
+
+        Storage::disk('local')->put('test-grid.pdf', 'fake pdf content');
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}/file"
+        );
+
+        $response->assertOk();
+        $response->assertHeader('content-type', 'application/pdf');
+    }
+
+    public function test_job_generates_pdf_and_completes_successfully(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $reg1 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg2 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        // Simulate image files
+        $imagePath1 = "{$event->id}/images/image1.jpg";
+        $imagePath2 = "{$event->id}/images/image2.jpg";
+        Storage::disk('local')->put($imagePath1, 'fake image 1');
+        Storage::disk('local')->put($imagePath2, 'fake image 2');
+
+        // Update registrations to have images
+        $reg1->update(['id_card_images_path' => [$imagePath1]]);
+        $reg2->update(['id_card_images_path' => [$imagePath2]]);
+
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'registration_ids' => [$reg1->id, $reg2->id],
+            'status' => IdCardGridDownloadStatus::Pending,
+        ]);
+
+        (new GenerateIdCardGridDownloadJob($download))->handle();
+
+        $download->refresh();
+
+        $this->assertEquals(IdCardGridDownloadStatus::Completed, $download->status);
+        $this->assertNotNull($download->file_path);
+        $this->assertNotNull($download->completed_at);
+        $this->assertNull($download->failure_reason);
+        Storage::disk('local')->assertExists($download->file_path);
+    }
+
+    public function test_job_marks_failed_when_no_ready_images(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'registration_ids' => [$reg->id],
+            'status' => IdCardGridDownloadStatus::Pending,
+        ]);
+
+        (new GenerateIdCardGridDownloadJob($download))->handle();
+
+        $download->refresh();
+
+        $this->assertEquals(IdCardGridDownloadStatus::Failed, $download->status);
+        $this->assertStringContainsString('No ID cards', $download->failure_reason);
+        $this->assertNotNull($download->completed_at);
+        $this->assertNull($download->file_path);
+    }
+
+    public function test_job_handles_all_registrations_when_ids_are_null(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        $imagePath = "{$event->id}/images/image.jpg";
+        Storage::disk('local')->put($imagePath, 'fake image');
+        $reg->update(['id_card_images_path' => [$imagePath]]);
+
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'registration_ids' => null,
+            'status' => IdCardGridDownloadStatus::Pending,
+        ]);
+
+        (new GenerateIdCardGridDownloadJob($download))->handle();
+
+        $download->refresh();
+
+        $this->assertEquals(IdCardGridDownloadStatus::Completed, $download->status);
+        Storage::disk('local')->assertExists($download->file_path);
+    }
+
+    public function test_job_updates_progress_percentage_during_processing(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $reg1 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg2 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        // Simulate image files
+        $imagePath1 = "{$event->id}/images/image1.jpg";
+        $imagePath2 = "{$event->id}/images/image2.jpg";
+        Storage::disk('local')->put($imagePath1, 'fake image 1');
+        Storage::disk('local')->put($imagePath2, 'fake image 2');
+
+        $reg1->update(['id_card_images_path' => [$imagePath1]]);
+        $reg2->update(['id_card_images_path' => [$imagePath2]]);
+
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'registration_ids' => [$reg1->id, $reg2->id],
+            'status' => IdCardGridDownloadStatus::Pending,
+            'progress_percentage' => 0,
+        ]);
+
+        (new GenerateIdCardGridDownloadJob($download))->handle();
+
+        $download->refresh();
+
+        $this->assertEquals(IdCardGridDownloadStatus::Completed, $download->status);
+        $this->assertEquals(100, $download->progress_percentage);
+    }
+
+    public function test_job_resets_progress_percentage_on_failure(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'registration_ids' => [$reg->id],
+            'status' => IdCardGridDownloadStatus::Pending,
+            'progress_percentage' => 0,
+        ]);
+
+        (new GenerateIdCardGridDownloadJob($download))->handle();
+
+        $download->refresh();
+
+        $this->assertEquals(IdCardGridDownloadStatus::Failed, $download->status);
+        $this->assertEquals(0, $download->progress_percentage);
+    }
+
+    public function test_progress_percentage_returned_in_api_response(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Processing,
+            'progress_percentage' => 50,
+        ]);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}"
+        );
+
+        $response->assertOk();
+        $response->assertJsonPath('data.progress_percentage', 50);
+    }
+}

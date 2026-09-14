@@ -3,12 +3,14 @@
 namespace App\Exports;
 
 use App\Models\Event;
-use Illuminate\Support\Collection;
-use Maatwebsite\Excel\Concerns\FromCollection;
-use Maatwebsite\Excel\Concerns\WithHeadings;
+use Maatwebsite\Excel\Concerns\Export;
+use Maatwebsite\Excel\Concerns\Exportable;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;
 
-class EventAttendanceExport implements FromCollection, WithHeadings
+class EventAttendanceExport implements Export, WithMultipleSheets
 {
+    use Exportable;
+
     protected Event $event;
 
     public function __construct(Event $event)
@@ -16,56 +18,17 @@ class EventAttendanceExport implements FromCollection, WithHeadings
         $this->event = $event;
     }
 
-    public function collection(): Collection
+    public function sheets(): array
     {
-        return $this->event->registrations()
-            ->with('attendee.union', 'attendee.mission', 'attendee.church', 'attendanceRecords')
-            ->get()
-            ->map(function ($registration) {
-                $checkInRecord = $registration->attendanceRecords->first();
-                $checkInAt = $checkInRecord?->check_in_at;
-                $checkOutAt = $checkInRecord?->check_out_at;
-                $method = $checkInRecord?->method?->value ?? 'no_show';
-                $status = match (true) {
-                    $checkOutAt !== null => 'Checked Out',
-                    $checkInAt !== null => 'Checked In',
-                    default => 'No Show',
-                };
-
-                return [
-                    'First Name' => $registration->attendee->first_name,
-                    'Middle Name' => $registration->attendee->middle_name ?? '',
-                    'Last Name' => $registration->attendee->last_name,
-                    'Union' => $registration->attendee->union?->name ?? '',
-                    'Mission' => $registration->attendee->mission?->name ?? '',
-                    'Church' => $registration->attendee->church?->name ?? '',
-                    'Mobile No.' => $registration->attendee->mobile_no ?? '',
-                    'Email Address' => $registration->attendee->email_address ?? '',
-                    'Status' => $status,
-                    'Method' => ucfirst($method),
-                    'Check-in Time' => $checkInAt?->format('Y-m-d H:i:s') ?? '',
-                    'Check-out Time' => $checkOutAt?->format('Y-m-d H:i:s') ?? '',
-                    'Remarks' => $registration->attendee->remarks ?? '',
-                ];
-            });
-    }
-
-    public function headings(): array
-    {
-        return [
-            'First Name',
-            'Middle Name',
-            'Last Name',
-            'Union',
-            'Mission',
-            'Church',
-            'Mobile No.',
-            'Email Address',
-            'Status',
-            'Method',
-            'Check-in Time',
-            'Check-out Time',
-            'Remarks',
+        $sheets = [
+            new EventOverviewAttendanceSheetExport($this->event),
         ];
+
+        // Add one sheet per session
+        foreach ($this->event->sessions()->orderBy('session_date')->get() as $session) {
+            $sheets[] = new EventSessionAttendanceSheetExport($this->event, $session);
+        }
+
+        return $sheets;
     }
 }

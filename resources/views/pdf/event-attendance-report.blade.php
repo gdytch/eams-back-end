@@ -17,6 +17,14 @@
             margin-bottom: 4px;
         }
 
+        h2 {
+            font-size: 14px;
+            margin-top: 24px;
+            margin-bottom: 8px;
+            border-bottom: 2px solid #333;
+            padding-bottom: 4px;
+        }
+
         .subtitle {
             color: #555;
             font-size: 12px;
@@ -56,9 +64,18 @@
             font-weight: bold;
         }
 
-        .status-no-show {
+        .status-no-show,
+        .status-absent {
             color: #dc3545;
             font-weight: bold;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .text-right {
+            text-align: right;
         }
     </style>
 </head>
@@ -69,6 +86,35 @@
         Event Attendance Report — Generated {{ now()->format('Y-m-d H:i') }}
     </div>
 
+    <h2>Attendance Summary by Session</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Session</th>
+                <th>Date</th>
+                <th class="text-right">Registered</th>
+                <th class="text-right">Checked In</th>
+                <th class="text-right">Checked Out</th>
+                <th class="text-right">Absent</th>
+                <th class="text-right">Check-in Rate</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ($sessionSummaries as $summary)
+                <tr>
+                    <td>{{ $summary['name'] }}</td>
+                    <td>{{ $summary['date'] }}</td>
+                    <td class="text-center">{{ $summary['total_registered'] }}</td>
+                    <td class="text-center status-checked-in">{{ $summary['checked_in'] }}</td>
+                    <td class="text-center status-checked-out">{{ $summary['checked_out'] }}</td>
+                    <td class="text-center status-no-show">{{ $summary['no_show'] }}</td>
+                    <td class="text-center">{{ $summary['check_in_rate'] }}%</td>
+                </tr>
+            @endforeach
+        </tbody>
+    </table>
+
+    <h2>Detailed Attendance Roster (First Check-in Per Registrant)</h2>
     <table>
         <thead>
             <tr>
@@ -104,6 +150,10 @@
 
     <div class="subtitle">
         Total Registrations: {{ $registrations->count() }}
+    </div>
+    <div class="subtitle">
+        For detailed per-session attendance records, please refer to the Excel export which includes separate sheets for
+        each session.
     </div>
 </body>
 

@@ -184,6 +184,8 @@ class EventRegistrationController extends Controller
                 'message' => 'The identification card is still being generated. Try again shortly.',
                 'registration_id' => $registration->id,
                 'card_path' => $registration->id_card_path,
+                'path' => Storage::disk('local')->path($registration->id_card_path),
+                'url' => Storage::disk('local')->url($registration->id_card_path),
             ], 202);
         }
 

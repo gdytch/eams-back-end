@@ -153,8 +153,8 @@ class EventRegistrationController extends Controller
         $registrations = $query->get();
 
         // dompdf cannot render inline <svg> elements, so embed the QR as a base64 data URI <img> instead.
-        $qrImages = $registrations->mapWithKeys(fn (EventRegistration $registration) => [
-            $registration->id => 'data:image/svg+xml;base64,'.base64_encode(
+        $qrImages = $registrations->mapWithKeys(fn(EventRegistration $registration) => [
+            $registration->id => 'data:image/svg+xml;base64,' . base64_encode(
                 QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token)
             ),
         ]);
@@ -182,6 +182,8 @@ class EventRegistrationController extends Controller
         if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
             return response()->json([
                 'message' => 'The identification card is still being generated. Try again shortly.',
+                'registration_id' => $registration->id,
+                'card_path' => $registration->id_card_path,
             ], 202);
         }
 
@@ -235,7 +237,7 @@ class EventRegistrationController extends Controller
         // Collect valid ID card paths (filter out missing or not yet generated cards)
         $pdfPaths = $registrations
             ->filter(
-                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
+                fn(EventRegistration $reg) => $reg->id_card_path !== null &&
                     Storage::disk('local')->exists($reg->id_card_path)
             )
             ->pluck('id_card_path')
@@ -281,7 +283,7 @@ class EventRegistrationController extends Controller
         // Collect valid ID card paths (filter out missing or not yet generated cards)
         $pdfPaths = $registrations
             ->filter(
-                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
+                fn(EventRegistration $reg) => $reg->id_card_path !== null &&
                     Storage::disk('local')->exists($reg->id_card_path)
             )
             ->pluck('id_card_path')

@@ -19,14 +19,15 @@ class EventFactory extends Factory
      */
     public function definition(): array
     {
-        $startDate = fake()->dateTimeBetween('now', '+2 months');
+        $startDate = fake()->dateTimeBetween('now');
+        $endDate = (clone $startDate)->modify('+3 day');
 
         return [
             'organization_id' => Organization::factory(),
             'name' => fake()->unique()->sentence(3),
             'description' => fake()->optional()->paragraph(),
             'start_date' => $startDate,
-            'end_date' => $startDate,
+            'end_date' => $endDate,
             'venue' => fake()->address(),
             'status' => EventStatus::Published,
             'requires_check_out' => false,

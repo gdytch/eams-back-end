@@ -11,6 +11,7 @@ use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
+use Carbon\Carbon;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -26,7 +27,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $organization = Organization::factory()->create([
-            'name' => 'Sample Conference',
+            'name' => 'Southeastern Philippine Union Mission',
             'code' => 'SAMPLE',
         ]);
 
@@ -40,7 +41,7 @@ class DatabaseSeeder extends Seeder
             'email' => 'checker@example.com',
         ]);
 
-        $union = Union::factory()->for($organization)->create(['name' => 'South Philippine Union Mission', 'code' => 'SEPUM']);
+        $union = Union::factory()->for($organization)->create(['name' => 'Southeastern Philippine Union Mission', 'code' => 'SEPUM']);
         $missions = [
             Mission::factory()->for($organization)->for($union)->create(['name' => 'Davao Mission', 'code' => 'DM']),
             Mission::factory()->for($organization)->for($union)->create(['name' => 'Northern Davao Mission', 'code' => 'NDM']),
@@ -61,19 +62,26 @@ class DatabaseSeeder extends Seeder
             'created_by' => $orgAdmin->id,
         ]);
 
-        $morning = EventSession::factory()->for($event)->create([
-            'name' => 'Morning Session',
-            'session_date' => $event->start_date,
-            'start_time' => '08:00:00',
-            'end_time' => '12:00:00',
-        ]);
+        $startDate = Carbon::parse($event->start_date);
+        $endDate = Carbon::parse($event->end_date);
+        $day = 1;
+        while (! $startDate->isAfter($endDate)) {
+            EventSession::factory()->for($event)->create([
+                'name' => "Day {$day} Morning Session",
+                'session_date' => $startDate->toDateString(),
+                'start_time' => '08:00:00',
+                'end_time' => '12:00:00',
+            ]);
 
-        $afternoon = EventSession::factory()->for($event)->create([
-            'name' => 'Afternoon Session',
-            'session_date' => $event->start_date,
-            'start_time' => '13:00:00',
-            'end_time' => '17:00:00',
-        ]);
+            EventSession::factory()->for($event)->create([
+                'name' => "Day {$day} Afternoon Session",
+                'session_date' => $startDate->toDateString(),
+                'start_time' => '13:00:00',
+                'end_time' => '17:00:00',
+            ]);
+            $startDate->addDay();
+            $day++;
+        }
 
         Attendee::factory()
             ->recycle($organization)

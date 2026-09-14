@@ -24,7 +24,7 @@ class ImageUploadService
      * @param  string  $preset  Configuration preset key (e.g., 'profile_photo', 'event_banner')
      * @param  string  $directory  Storage directory (e.g., 'events/1', 'users/2', 'attendees/3')
      * @param  string  $prefix  Filename prefix (e.g., 'banner', 'photo')
-     * @return array<string, string> Associative array: ['sm' => path, 'md' => path, 'lg' => path, 'original' => path]
+     * @return array<string, string> Associative array keyed by the preset's size keys (e.g. ['sm' => path, 'md' => path, 'lg' => path])
      *
      * @throws InvalidArgumentException
      */

@@ -24,7 +24,7 @@ Event: {{ $eventName }}
 Your attendee ID card has been generated and is available in your portal. You'll need it to check in at the event.
 
 View your registration and ID card here:
-{{ config('app.frontend_url') }}/dashboard
+{{ config('app.frontend_url') }}
 
 If you have any questions or need to make changes to your registration, please visit your attendee dashboard or contact
 support at {{ config('branding.support_email') }}.

@@ -262,9 +262,10 @@ class AttendanceController extends Controller
             ->first();
 
         if ($existing !== null && $existing->check_in_at !== null) {
-            throw ValidationException::withMessages([
-                'qr_token' => 'Already Checked In.',
-            ]);
+            return response()->json([
+                'message' => 'Already Checked In for this session.',
+                'attendance_record_id' => $existing->id,
+            ], 200);
         }
 
         $canOverride = ($overrideFlag || $request->boolean('override'))

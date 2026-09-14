@@ -51,6 +51,7 @@ class AttendanceController extends Controller
         $event = Event::findOrFail($request->validated('event_id'));
         $session = EventSession::where('event_id', $event->id)->findOrFail($request->validated('session_id'));
         $registration = EventRegistration::where('event_id', $event->id)
+            ->with(['attendee.union', 'attendee.mission'])
             ->findOrFail($request->validated('event_registration_id'));
 
         return $this->recordAttendance($request, $registration, $session, AttendanceMethod::Manual);
@@ -113,6 +114,8 @@ class AttendanceController extends Controller
             ->whereNotNull('check_in_at')
             ->select('event_registration_id');
 
+        $sessionHasStarted = now()->greaterThanOrEqualTo($session->startsAt());
+
         $registrations = $event->registrations()
             ->with(['attendee.union', 'attendee.mission'])
             ->addSelect([
@@ -137,6 +140,9 @@ class AttendanceController extends Controller
             }))
             ->orderByRaw('session_check_in_at is null, session_check_in_at asc')
             ->paginate($request->input('per_page', 15));
+
+        // Attach session status information to each registration
+        $registrations->each(fn ($reg) => $reg->setAttribute('session_has_started', $sessionHasStarted));
 
         return EventSessionRosterEntryResource::collection($registrations)->additional([
             'event_id' => $event->id,

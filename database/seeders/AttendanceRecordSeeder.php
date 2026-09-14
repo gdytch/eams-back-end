@@ -49,7 +49,7 @@ class AttendanceRecordSeeder extends Seeder
             }
 
             // Only simulate if session is in the past
-            if ($session->startsAt()->isFuture()) {
+            if ($session->endsAt()->isFuture()) {
                 continue;
             }
 

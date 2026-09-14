@@ -14,6 +14,14 @@ class EventSessionRosterEntryResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
+        $attendanceStatus = 'Absent';
+
+        if ($this->session_check_in_at !== null) {
+            $attendanceStatus = 'Present';
+        } elseif (! $this->session_has_started) {
+            $attendanceStatus = 'Session Not Yet Occurred';
+        }
+
         return [
             'event_registration_id' => $this->id,
             'attendee' => [
@@ -23,7 +31,7 @@ class EventSessionRosterEntryResource extends JsonResource
             ],
             'union' => $this->attendee->union?->name,
             'mission' => $this->attendee->mission?->name,
-            'attendance_status' => $this->session_check_in_at !== null ? 'Present' : 'Absent',
+            'attendance_status' => $attendanceStatus,
             'check_in_at' => $this->session_check_in_at,
             'check_out_at' => $this->session_check_out_at,
         ];

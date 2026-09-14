@@ -13,7 +13,7 @@
         <p style="margin: 24px 0; text-align: center;">
             @component('emails.components.button')
                 @slot('url')
-                    {{ config('app.frontend_url') }}/verify-email?id={{ $id }}&hash={{ $hash }}&expires={{ $expires }}&signature={{ $signature }}
+                    {{ config('app.frontend_url') }}/verify-email?id={{ $id }}&hash={{ $hash }}&{{ $signature }}
                 @endslot
                 @slot('text')
                     Verify Email

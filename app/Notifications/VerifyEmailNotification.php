@@ -17,32 +17,34 @@ class VerifyEmailNotification extends VerifyEmail implements ShouldQueue
      */
     public function toMail($notifiable): MailMessage
     {
-        // Generate the backend signed URL
+        // Generate the backend signed URL with proper Laravel signature
+        $expiryMinutes = config('auth.verification.expire', 60);
+        $id = $notifiable->getKey();
+        $hash = sha1($notifiable->getEmailForVerification());
+
         $signedUrl = URL::temporarySignedRoute(
             'verification.verify',
-            now()->addMinutes(config('auth.verification.expire', 60)),
+            now()->addMinutes($expiryMinutes),
             [
-                'id' => $notifiable->getKey(),
-                'hash' => sha1($notifiable->getEmailForVerification()),
+                'id' => $id,
+                'hash' => $hash,
             ]
         );
 
-        // Extract query parameters from the signed URL
+        // Extract query parameters from the signed URL (these contain the real signature and expires)
         $urlParts = parse_url($signedUrl);
         $query = $urlParts['query'] ?? '';
 
-        // Rewrite to frontend URL
-        $frontendUrl = config('app.frontend_url').'/verify-email?'.$query;
-
-        $expiryMinutes = config('auth.verification.expire', 60);
+        // Rewrite to frontend URL, including id and hash in the query string
+        $frontendUrl = config('app.frontend_url') . '/verify-email?id=' . $id . '&hash=' . $hash . '&' . $query;
 
         return (new MailMessage)
             ->view(['emails.verify-email', 'emails.verify-email-text'], [
                 'name' => $notifiable->first_name ?? $notifiable->name,
-                'id' => $notifiable->getKey(),
-                'hash' => sha1($notifiable->getEmailForVerification()),
+                'id' => $id,
+                'hash' => $hash,
                 'expires' => now()->addMinutes($expiryMinutes)->timestamp,
-                'signature' => base64_encode(hash_hmac('sha256', "verification.verify:{$notifiable->getKey()}:".sha1($notifiable->getEmailForVerification()), config('app.key'), true)),
+                'signature' => $query, // Pass the query string with signature and expires
                 'expiryMinutes' => $expiryMinutes,
             ]);
     }

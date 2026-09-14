@@ -5,7 +5,7 @@ Hi {{ $name }},
 Thank you for registering! Please verify your email address to activate your account and access all features.
 
 Verify your email using the link below:
-{{ config('app.frontend_url') }}/verify-email?id={{ $id }}&hash={{ $hash }}&expires={{ $expires }}&signature={{ $signature }}
+{{ config('app.frontend_url') }}/verify-email?id={{ $id }}&hash={{ $hash }}&{{ $signature }}
 
 This link will expire in {{ $expiryMinutes }} minutes.
 

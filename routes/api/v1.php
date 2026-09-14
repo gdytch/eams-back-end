@@ -48,6 +48,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('reports/dashboard', [ReportController::class, 'globalDashboard']);
 
+    Route::get('download/id-card-template', function () {
+        $filePath = storage_path('id-card-formats/format1.jpg');
+        if (!file_exists($filePath)) {
+            abort(404, 'ID card template not found.');
+        }
+
+        return response()->download($filePath, 'id_card_template.jpg', [
+            'Content-Type' => 'image/jpeg',
+        ]);
+    });
+
     Route::apiResource('organizations', OrganizationController::class);
 
     Route::post('users/invite', [UserController::class, 'invite']);

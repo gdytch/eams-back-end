@@ -42,9 +42,14 @@ class AttendanceRecordSeeder extends Seeder
 
         foreach ($sessions as $session) {
             // Get registrations for this event
-            $eventRegistrations = $registrations->filter(fn ($reg) => $reg->event_id === $session->event_id);
+            $eventRegistrations = $registrations->filter(fn($reg) => $reg->event_id === $session->event_id);
 
             if ($eventRegistrations->isEmpty()) {
+                continue;
+            }
+
+            // Only simulate if session is in the past
+            if ($session->startsAt()->isFuture()) {
                 continue;
             }
 

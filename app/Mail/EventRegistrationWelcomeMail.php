@@ -42,7 +42,7 @@ class EventRegistrationWelcomeMail extends Mailable implements ShouldQueue
 
         $sessions = $event?->sessions?->map(fn ($session) => [
             'name' => $session->name,
-            'start_time' => $session->start_time?->format('M d, Y @ g:i A'),
+            'start_time' => $session->startsAt()->format('M d, Y @ g:i A'),
         ])->toArray() ?? [];
 
         return new Content(

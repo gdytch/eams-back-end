@@ -3,6 +3,9 @@ FROM php:8.4-fpm
 # Set working directory
 WORKDIR /var/www
 
+# Set timezone
+RUN ln -fs /usr/share/zoneinfo/Asia/Manila /etc/localtime && dpkg-reconfigure -f noninteractive tzdata
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \

@@ -132,6 +132,7 @@ class AttendeeController extends Controller
                     'absent_count' => $absentCount,
                     'total_sessions' => $registration->event->sessions->count(),
                     'registration_count' => $attendee->registrations()->count(),
+                    'qr_token' => $registration->qr_token,
                 ];
             }
         }

@@ -26,6 +26,8 @@ class UserResource extends JsonResource
             'role' => $this->role,
             'organization_id' => $this->organization_id,
             'organization' => OrganizationResource::make($this->whenLoaded('organization')),
+            'invited_at' => $this->invited_at,
+            'invite_status' => $this->invite_token !== null ? 'pending' : ($this->invited_at !== null ? 'accepted' : null),
             'photo_urls' => $this->photo_urls,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

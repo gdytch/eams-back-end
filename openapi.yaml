@@ -377,6 +377,78 @@ paths:
                     }
         "401": { $ref: "#/components/responses/Unauthenticated" }
 
+  /auth/invite/{token}:
+    get:
+      tags: [Auth]
+      summary: Get user invitation details
+      description: >
+        Retrieve the details of a pending user invitation. Public endpoint (no authentication required).
+        Returns email, role, and organization name for the invitee to view before accepting.
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+          description: User invitation token
+      responses:
+        "200":
+          description: Invitation details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string, format: email }
+                  role: { $ref: "#/components/schemas/UserRole" }
+                  organization: { type: string, nullable: true }
+        "404":
+          description: Invalid or expired invitation token
+
+  /auth/accept-invite:
+    post:
+      tags: [Auth]
+      summary: Accept user invitation and create account
+      description: >
+        Accept a pending user invitation and complete account creation.
+        The invitee provides their name, password, and the invitation token/email.
+        Public endpoint (no authentication required).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, email, first_name, last_name, password]
+              properties:
+                token: { type: string, description: "Invitation token from invite email" }
+                email: { type: string, format: email, description: "Email must match the invitation" }
+                first_name: { type: string, maxLength: 100 }
+                middle_name: { type: string, maxLength: 100, nullable: true }
+                last_name: { type: string, maxLength: 100 }
+                password: { type: string, format: password, minLength: 8 }
+                password_confirmation: { type: string, format: password, minLength: 8 }
+      responses:
+        "201":
+          description: Account created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    {
+                      type: string,
+                      description: "Sanctum personal access token — send as `Authorization: Bearer <token>` on every subsequent request.",
+                    }
+                  user: { $ref: "#/components/schemas/User" }
+        "422":
+          description: Invalid invitation token, mismatched email, or validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
   /auth/me:
     get:
       tags: [Auth]
@@ -659,6 +731,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /users/invite:
+    post:
+      tags: [Users]
+      summary: Invite a new user by email
+      description: >
+        Super Admin or Org Admin only. Creates a pending user account and sends an invitation email.
+        The invitee will receive a link to accept the invitation and complete their account setup with name and password.
+        `organization_id` is required when a Super Admin creates a non-Super-Admin user; otherwise it defaults to the actor's own organization.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email }
+                role: { $ref: "#/components/schemas/UserRole" }
+                organization_id: { type: integer, nullable: true }
+      responses:
+        "201": { $ref: "#/components/responses/UserItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
   /users/{user}/event-access:
     parameters:
       - $ref: "#/components/parameters/UserId"
@@ -696,6 +793,46 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /users/{user}/resend-invite:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    post:
+      tags: [Users]
+      summary: Resend invitation email for a pending user
+      description: >
+        Super Admin or Org Admin only. Generates a new invitation token and resends the invitation email.
+        Only works for users with pending invitations (not yet accepted).
+      responses:
+        "200": { $ref: "#/components/responses/UserItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: User invitation already accepted or other validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
+
+  /users/{user}/cancel-invite:
+    parameters:
+      - $ref: "#/components/parameters/UserId"
+    delete:
+      tags: [Users]
+      summary: Cancel a pending user invitation
+      description: >
+        Super Admin or Org Admin only. Deletes a pending user account and cancels the invitation.
+        Only works for users with pending invitations (not yet accepted).
+      responses:
+        "204": { description: Invitation cancelled and user deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: User invitation already accepted or other error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ValidationError" }
 
   # ---------------------------------------------------------------- Unions
   /unions:
@@ -2700,7 +2837,14 @@ components:
       type: object
       properties:
         id: { type: integer }
-        name: { type: string }
+        first_name: { type: string }
+        middle_name: { type: string, nullable: true }
+        last_name: { type: string }
+        name:
+          {
+            type: string,
+            description: "Derived: first + middle + last, trimmed.",
+          }
         email: { type: string, format: email }
         email_verified_at: { type: string, format: date-time, nullable: true, description: "Null if email is not yet verified." }
         email_verified: { type: boolean, description: "True if email_verified_at is set." }
@@ -2715,6 +2859,8 @@ components:
         organization:
           allOf: [{ $ref: "#/components/schemas/Organization" }]
           description: Only present when explicitly eager-loaded server-side.
+        invited_at: { type: string, format: date-time, nullable: true, description: "Timestamp when invitation was sent (null if user was created directly, not via invite)." }
+        invite_status: { type: string, enum: [pending, accepted, null], nullable: true, description: "'pending' if invitation not yet accepted, 'accepted' if accepted, null if created directly." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

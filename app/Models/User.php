@@ -17,9 +17,10 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'email_verified_at', 'organization_id', 'role', 'first_name', 'middle_name', 'last_name', 'photo_paths'])]
+#[Fillable(['name', 'email', 'password', 'email_verified_at', 'organization_id', 'role', 'first_name', 'middle_name', 'last_name', 'photo_paths', 'invite_token', 'invited_at'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -38,6 +39,7 @@ class User extends Authenticatable implements MustVerifyEmail
             'password' => 'hashed',
             'role' => UserRole::class,
             'photo_paths' => 'array',
+            'invited_at' => 'datetime',
         ];
     }
 
@@ -112,7 +114,21 @@ class User extends Authenticatable implements MustVerifyEmail
     public function getPhotoUrlsAttribute(): ?array
     {
         return $this->photo_paths
-            ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [$key => Storage::disk('public')->url($path)])->toArray()
+            ? collect($this->photo_paths)->mapWithKeys(fn($path, $key) => [$key => Storage::disk('public')->url($path)])->toArray()
             : null;
+    }
+
+    public static function generateUniqueInviteToken(): string
+    {
+        do {
+            $token = Str::random(40);
+        } while (static::withoutGlobalScopes()->where('invite_token', $token)->exists());
+
+        return $token;
+    }
+
+    public function isPendingInvite(): bool
+    {
+        return $this->invite_token !== null;
     }
 }

@@ -3,19 +3,23 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\InviteUserRequest;
 use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\SyncUserEventAccessRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Http\Requests\UploadUserPhotoRequest;
 use App\Http\Resources\EventResource;
 use App\Http\Resources\UserResource;
+use App\Mail\UserAccountInviteMail;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 class UserController extends Controller
 {
@@ -47,6 +51,31 @@ class UserController extends Controller
         $user = User::create($data);
 
         AuditLog::record('user.created', $user, ['role' => $data['role']]);
+
+        return UserResource::make($user)->response()->setStatusCode(201);
+    }
+
+    /**
+     * Invite a new user by email.
+     */
+    public function invite(InviteUserRequest $request)
+    {
+        $data = $request->validated();
+        $data['organization_id'] ??= $request->user()->organization_id;
+
+        $user = User::create([
+            'name' => Str::before($data['email'], '@'),
+            'email' => $data['email'],
+            'password' => Hash::make(Str::random(40)),
+            'role' => $data['role'],
+            'organization_id' => $data['organization_id'],
+            'invite_token' => User::generateUniqueInviteToken(),
+            'invited_at' => now(),
+        ]);
+
+        Mail::to($user->email)->send(new UserAccountInviteMail($user));
+
+        AuditLog::record('user.invited', $user, ['role' => $data['role']]);
 
         return UserResource::make($user)->response()->setStatusCode(201);
     }
@@ -173,5 +202,46 @@ class UserController extends Controller
         AuditLog::record('user.photo_removed', $user);
 
         return UserResource::make($user);
+    }
+
+    /**
+     * Resend the invitation email for a pending user.
+     */
+    public function resendInvite(User $user)
+    {
+        $this->authorize('update', $user);
+
+        if (! $user->isPendingInvite()) {
+            return response()->json(['message' => 'User invitation already accepted.'], 422);
+        }
+
+        $user->update([
+            'invite_token' => User::generateUniqueInviteToken(),
+            'invited_at' => now(),
+        ]);
+
+        Mail::to($user->email)->send(new UserAccountInviteMail($user));
+
+        AuditLog::record('user.invite_resent', $user);
+
+        return UserResource::make($user);
+    }
+
+    /**
+     * Cancel the invitation for a pending user.
+     */
+    public function cancelInvite(User $user)
+    {
+        $this->authorize('delete', $user);
+
+        if (! $user->isPendingInvite()) {
+            return response()->json(['message' => 'Cannot cancel an accepted invite.'], 422);
+        }
+
+        AuditLog::record('user.invite_cancelled', $user);
+
+        $user->delete();
+
+        return response()->noContent();
     }
 }

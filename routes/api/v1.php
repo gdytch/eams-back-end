@@ -23,6 +23,8 @@ Route::middleware('throttle:10,1')->group(function () {
     Route::post('auth/login', [AuthController::class, 'login']);
     Route::post('auth/register', [AuthController::class, 'register']);
     Route::post('auth/sso/{provider}', [AuthController::class, 'sso']);
+    Route::get('auth/invite/{token}', [AuthController::class, 'showInvite']);
+    Route::post('auth/accept-invite', [AuthController::class, 'acceptInvite']);
 });
 
 Route::middleware('throttle:6,1')->group(function () {
@@ -48,9 +50,12 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('organizations', OrganizationController::class);
 
+    Route::post('users/invite', [UserController::class, 'invite']);
     Route::put('users/{user}/event-access', [UserController::class, 'syncEventAccess']);
     Route::post('users/{user}/photo', [UserController::class, 'uploadPhoto']);
     Route::delete('users/{user}/photo', [UserController::class, 'removePhoto']);
+    Route::post('users/{user}/resend-invite', [UserController::class, 'resendInvite']);
+    Route::delete('users/{user}/cancel-invite', [UserController::class, 'cancelInvite']);
     Route::apiResource('users', UserController::class);
 
     Route::apiResource('unions', UnionController::class);

@@ -6,6 +6,7 @@ use App\Enums\EventStatus;
 use App\Enums\SsoProvider;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\AcceptUserInviteRequest;
 use App\Http\Requests\ForgotPasswordRequest;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
@@ -423,5 +424,53 @@ class AuthController extends Controller
         $user->sendEmailVerificationNotification();
 
         return response()->json(['message' => 'Verification link sent to your email.'], 200);
+    }
+
+    public function showInvite(string $token): JsonResponse
+    {
+        $user = User::withoutGlobalScopes()
+            ->where('invite_token', $token)
+            ->first();
+
+        abort_if($user === null, 404, 'Invalid invite token.');
+
+        return response()->json([
+            'email' => $user->email,
+            'role' => $user->role,
+            'organization' => $user->organization?->name,
+        ]);
+    }
+
+    public function acceptInvite(AcceptUserInviteRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        return DB::transaction(function () use ($data) {
+            $user = User::withoutGlobalScopes()
+                ->where('invite_token', $data['token'])
+                ->where('email', $data['email'])
+                ->first();
+
+            $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
+                ->filter()
+                ->implode(' '));
+
+            $user->update([
+                'name' => $name,
+                'first_name' => $data['first_name'],
+                'middle_name' => $data['middle_name'] ?? null,
+                'last_name' => $data['last_name'],
+                'password' => Hash::make($data['password']),
+                'email_verified_at' => now(),
+                'invite_token' => null,
+            ]);
+
+            AuditLog::record('user.invite_accepted', $user);
+
+            return response()->json([
+                'token' => $user->createToken('api')->plainTextToken,
+                'user' => UserResource::make($user),
+            ], 201);
+        });
     }
 }

@@ -35,6 +35,7 @@ services:
         condition: service_started
     networks:
       - ams_network
+    user: www-data
   # Web Server (Nginx)
   webserver:
     image: nginx:alpine

@@ -38,6 +38,12 @@ class AttendeeController extends Controller
             });
         }
 
+        if ($eventId = $request->input('event_id')) {
+            $query->whereHas('registrations', function ($q) use ($eventId) {
+                $q->where('event_id', $eventId);
+            });
+        }
+
         $query->with(['union', 'mission', 'church'])->orderBy('last_name')->orderBy('first_name');
 
         return AttendeeResource::collection($query->paginate($request->input('per_page', 10)));
@@ -106,7 +112,7 @@ class AttendeeController extends Controller
 
             if ($registration !== null) {
                 $checkedInSessionIds = $registration->attendanceRecords
-                    ->filter(fn ($record) => $record->check_in_at !== null)
+                    ->filter(fn($record) => $record->check_in_at !== null)
                     ->pluck('event_session_id')
                     ->unique()
                     ->values()

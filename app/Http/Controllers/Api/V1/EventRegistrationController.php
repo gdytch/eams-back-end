@@ -182,10 +182,6 @@ class EventRegistrationController extends Controller
         if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
             return response()->json([
                 'message' => 'The identification card is still being generated. Try again shortly.',
-                'registration_id' => $registration->id,
-                'card_path' => $registration->id_card_path,
-                'path' => Storage::disk('local')->path($registration->id_card_path),
-                'url' => Storage::disk('local')->url($registration->id_card_path),
             ], 202);
         }
 
@@ -316,17 +312,20 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('viewIdCardImage', $registration);
 
-        if (! $registration->id_card_images_path || empty($registration->id_card_images_path)) {
+        // Validate that id_card_images_path is a non-empty array
+        $imagePaths = $registration->id_card_images_path;
+
+        if (! is_array($imagePaths) || empty($imagePaths)) {
             return response()->json([
                 'message' => 'The identification card image is still being generated. Try again shortly.',
             ], 202);
         }
 
-        $imagePath = $registration->id_card_images_path[0] ?? null;
+        $imagePath = $imagePaths[0] ?? null;
 
-        if (! $imagePath) {
+        if (! $imagePath || ! is_string($imagePath)) {
             return response()->json([
-                'message' => 'No image path found in registration.',
+                'message' => 'No valid image path found in registration.',
             ], 404);
         }
 

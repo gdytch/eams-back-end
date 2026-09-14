@@ -86,9 +86,10 @@ class AttendanceController extends Controller
     {
         $this->authorize('view', $session);
 
-        $records = AttendanceRecord::whereHas('eventRegistration', fn ($q) => $q->where('event_id', $event->id))
+        $records = AttendanceRecord::whereHas('eventRegistration', fn($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
             ->with('eventRegistration.attendee')
+            ->orderBy($request->input('sort_by', 'check_in_at'), $request->input('sort_order', 'asc'))
             ->paginate($request->input('per_page', 15));
 
         return AttendanceRecordResource::collection($records);
@@ -132,9 +133,9 @@ class AttendanceController extends Controller
                 'session_check_in_at' => 'datetime',
                 'session_check_out_at' => 'datetime',
             ])
-            ->when($status === 'present', fn ($q) => $q->whereIn('id', $checkedInRegistrationIds))
-            ->when($status === 'absent', fn ($q) => $q->whereNotIn('id', $checkedInRegistrationIds))
-            ->when($search !== '', fn ($q) => $q->whereHas('attendee', function ($query) use ($search) {
+            ->when($status === 'present', fn($q) => $q->whereIn('id', $checkedInRegistrationIds))
+            ->when($status === 'absent', fn($q) => $q->whereNotIn('id', $checkedInRegistrationIds))
+            ->when($search !== '', fn($q) => $q->whereHas('attendee', function ($query) use ($search) {
                 $query->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
             }))
@@ -142,7 +143,7 @@ class AttendanceController extends Controller
             ->paginate($request->input('per_page', 15));
 
         // Attach session status information to each registration
-        $registrations->each(fn ($reg) => $reg->setAttribute('session_has_started', $sessionHasStarted));
+        $registrations->each(fn($reg) => $reg->setAttribute('session_has_started', $sessionHasStarted));
 
         return EventSessionRosterEntryResource::collection($registrations)->additional([
             'event_id' => $event->id,

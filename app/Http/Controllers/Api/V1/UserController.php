@@ -36,6 +36,18 @@ class UserController extends Controller
             $query->where('organization_id', $request->user()->organization_id);
         }
 
+        if ($request->has('search')) {
+            $search = $request->input('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                    ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+
+        if ($request->has('role')) {
+            $query->where('role', $request->input('role'));
+        }
+
         return UserResource::collection($query->paginate($request->input('per_page', 10)));
     }
 

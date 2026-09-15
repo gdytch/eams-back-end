@@ -48,7 +48,7 @@ class Attendee extends Model
     {
         return collect([$first, $middle, $last])
             ->filter()
-            ->map(fn (string $part) => preg_replace('/\s+/', ' ', trim(mb_strtolower($part))))
+            ->map(fn(string $part) => preg_replace('/\s+/', ' ', trim(mb_strtolower($part))))
             ->implode(' ');
     }
 
@@ -108,7 +108,7 @@ class Attendee extends Model
     public function getPhotoUrlsAttribute()
     {
         return $this->photo_paths
-            ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [
+            ? collect($this->photo_paths)->mapWithKeys(fn($path, $key) => [
                 $key => Storage::disk('public')->url($path),
             ])->toArray()
             : null;
@@ -116,8 +116,8 @@ class Attendee extends Model
 
     public function getTerritoryAttribute()
     {
-        $unionName = $this->union ? $this->union->name.', ' : '';
-        $missionName = $this->mission ? $this->mission->name.', ' : '';
+        $unionName = $this->union ? $this->union->name . ', ' : '';
+        $missionName = $this->mission ? $this->mission->name . ', ' : '';
         $churchName = $this->church ? $this->church->name : '';
 
         return trim("{$unionName}{$missionName}{$churchName}");

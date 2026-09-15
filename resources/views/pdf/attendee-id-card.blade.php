@@ -72,7 +72,7 @@
     <div class="content">
         <div class="qr"><img src="{{ $qrImage }}" alt="QR code"></div>
         <div class="name" style="color: {{ $fontColor }}">{{ $attendeeName }}</div>
-        <div class="territory" style="color: {{ $fontColor }}">{{ $attendeeTerritory }}</div>
+        <div class="territory" style="color: {{ $fontColor }}">{{ $organizationName }}</div>
     </div>
 </body>
 

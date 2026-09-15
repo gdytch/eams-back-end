@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
 #[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'created_by', 'invite_token'])]
@@ -59,6 +60,11 @@ class Event extends Model
     public function sessions(): HasMany
     {
         return $this->hasMany(EventSession::class);
+    }
+
+    public function program(): HasOne
+    {
+        return $this->hasOne(EventProgram::class);
     }
 
     public function registrations(): HasMany

@@ -30,7 +30,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $attendee = $this->registration->attendee;
         $event = $this->registration->event;
 
-        $qrImage = 'data:image/svg+xml;base64,' . base64_encode(
+        $qrImage = 'data:image/svg+xml;base64,'.base64_encode(
             QrCode::format('svg')->size(300)->margin(0)->generate($this->registration->qr_token)
         );
 
@@ -81,7 +81,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
 
         $mimeType = Storage::disk('public')->mimeType($path);
 
-        return "data:{$mimeType};base64," . base64_encode(Storage::disk('public')->get($path));
+        return "data:{$mimeType};base64,".base64_encode(Storage::disk('public')->get($path));
     }
 
     /**
@@ -114,7 +114,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $process = new Process([
             'convert',
             '-density',
-            '600',
+            '900',
             '-quality',
             '90',
             '-format',
@@ -134,7 +134,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $page = 0;
 
         while (file_exists(sprintf($outputPattern, $page))) {
-            $imagePath = "{$pdfPath}/" . basename(sprintf($outputPattern, $page));
+            $imagePath = "{$pdfPath}/".basename(sprintf($outputPattern, $page));
             // Normalize to storage path (relative to storage/app)
             $imagePath = str_replace(Storage::disk('local')->path(''), '', sprintf($outputPattern, $page));
             $imagePaths[] = $imagePath;

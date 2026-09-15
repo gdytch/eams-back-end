@@ -38,6 +38,7 @@ class EventResource extends JsonResource
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
             'invite_token' => $this->invite_token,
+            'program' => EventProgramResource::make($this->whenLoaded('program')),
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\OrganizationLevel;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -27,6 +28,7 @@ class UpdateAttendeeRequest extends FormRequest
         }
 
         return [
+            'organization_level' => ['nullable', Rule::enum(OrganizationLevel::class)],
             'union_id' => ['nullable', Rule::exists('unions', 'id')->where('organization_id', $organizationId)],
             'mission_id' => ['nullable', Rule::exists('missions', 'id')->where('organization_id', $organizationId)],
             'church_id' => ['nullable', Rule::exists('churches', 'id')->where('organization_id', $organizationId)],

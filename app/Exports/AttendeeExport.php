@@ -25,6 +25,7 @@ class AttendeeExport implements FromCollection, ShouldAutoSize, WithEvents, With
                 'First Name' => $attendee->first_name,
                 'Middle Name' => $attendee->middle_name ?? '',
                 'Last Name' => $attendee->last_name,
+                'Organization Level' => $attendee->organization_level?->value ?? '',
                 'Union' => $attendee->union?->code ?? '',
                 'Mission' => $attendee->mission?->code ?? '',
                 'Church' => $attendee->church?->name ?? '',
@@ -41,6 +42,7 @@ class AttendeeExport implements FromCollection, ShouldAutoSize, WithEvents, With
             'First Name',
             'Middle Name',
             'Last Name',
+            'Organization Level',
             'Union',
             'Mission',
             'Church',
@@ -71,7 +73,7 @@ class AttendeeExport implements FromCollection, ShouldAutoSize, WithEvents, With
 
                 if ($data->count() > 0) {
                     $lastRow = $data->count() + 1;
-                    $range = "A1:I{$lastRow}";
+                    $range = "A1:J{$lastRow}";
                     $sheet->getStyle($range)->getBorders()->getBottom()->setBorderStyle(Border::BORDER_THIN);
                     $sheet->getStyle($range)->getBorders()->getTop()->setBorderStyle(Border::BORDER_THIN);
                     $sheet->getStyle($range)->getBorders()->getLeft()->setBorderStyle(Border::BORDER_THIN);

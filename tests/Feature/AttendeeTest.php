@@ -458,4 +458,77 @@ class AttendeeTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('event_stats.registration_count', 3);
     }
+
+    public function test_attendee_can_be_auto_registered_to_an_event_on_creation(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+            'auto_register' => true,
+            'event_id' => $event->id,
+        ]);
+
+        $response->assertCreated();
+        $attendeeId = $response->json('data.id');
+        $response->assertJsonPath('registration.event_id', $event->id);
+        $response->assertJsonPath('registration.attendee_id', $attendeeId);
+        $this->assertDatabaseHas('event_registrations', [
+            'event_id' => $event->id,
+            'attendee_id' => $attendeeId,
+        ]);
+    }
+
+    public function test_attendee_is_not_registered_when_auto_register_is_not_requested(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        Event::factory()->for($org)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'first_name' => 'Jane',
+            'last_name' => 'Smith',
+        ]);
+
+        $response->assertCreated();
+        $response->assertJsonPath('registration', null);
+        $this->assertDatabaseCount('event_registrations', 0);
+    }
+
+    public function test_auto_register_requires_an_event_id(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+            'auto_register' => true,
+        ]);
+
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors('event_id');
+    }
+
+    public function test_auto_register_event_must_belong_to_the_attendees_organization(): void
+    {
+        $org = Organization::factory()->create();
+        $otherOrg = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($otherOrg)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+            'auto_register' => true,
+            'event_id' => $event->id,
+        ]);
+
+        // Checker lacks access to an event outside their organization, so authorization fails first.
+        $response->assertForbidden();
+        $this->assertDatabaseCount('event_registrations', 0);
+    }
 }

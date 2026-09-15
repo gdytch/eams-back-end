@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OrganizationLevel;
 use App\Models\Concerns\BelongsToOrganization;
 use Database\Factories\AttendeeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -14,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-#[Fillable(['organization_id', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at'])]
+#[Fillable(['organization_id', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at'])]
 class Attendee extends Model
 {
     /** @use HasFactory<AttendeeFactory> */
@@ -23,6 +24,7 @@ class Attendee extends Model
     protected function casts(): array
     {
         return [
+            'organization_level' => OrganizationLevel::class,
             'photo_paths' => 'array',
             'invited_at' => 'datetime',
         ];
@@ -119,5 +121,17 @@ class Attendee extends Model
         $churchName = $this->church ? $this->church->name : '';
 
         return trim("{$unionName}{$missionName}{$churchName}");
+    }
+
+    /**
+     * The organization (union or mission) referenced by organization_level, if any.
+     */
+    public function getOrganizationLevelReferenceAttribute(): Union|Mission|null
+    {
+        return match ($this->organization_level) {
+            OrganizationLevel::Union => $this->union,
+            OrganizationLevel::Mission => $this->mission,
+            default => null,
+        };
     }
 }

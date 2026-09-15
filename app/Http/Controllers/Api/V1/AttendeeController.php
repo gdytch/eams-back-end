@@ -9,6 +9,9 @@ use App\Http\Requests\StoreAttendeeRequest;
 use App\Http\Requests\UpdateAttendeeRequest;
 use App\Http\Requests\UploadAttendeePhotoRequest;
 use App\Http\Resources\AttendeeResource;
+use App\Http\Resources\EventRegistrationResource;
+use App\Jobs\GenerateAttendeeIdCardJob;
+use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
@@ -18,6 +21,7 @@ use App\Services\ImageUploadService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -60,7 +64,9 @@ class AttendeeController extends Controller
     {
         $data = $request->validated();
         $override = (bool) ($data['override_duplicate'] ?? false);
-        unset($data['override_duplicate']);
+        $autoRegister = (bool) ($data['auto_register'] ?? false);
+        $eventId = $data['event_id'] ?? null;
+        unset($data['override_duplicate'], $data['auto_register'], $data['event_id']);
 
         if (! $override) {
             $duplicates = Attendee::matchingName($data['first_name'], $data['middle_name'] ?? null, $data['last_name'])->get();
@@ -75,13 +81,36 @@ class AttendeeController extends Controller
 
         $data['created_by'] = $request->user()->id;
 
-        $attendee = Attendee::create($data);
+        return DB::transaction(function () use ($data, $request, $autoRegister, $eventId) {
+            $attendee = Attendee::create($data);
 
-        AuditLog::record('attendee.created', $attendee);
+            AuditLog::record('attendee.created', $attendee);
 
-        $this->invitationService->sendIfEligible($attendee, $request->user());
+            $this->invitationService->sendIfEligible($attendee, $request->user());
 
-        return AttendeeResource::make($attendee)->response()->setStatusCode(201);
+            $registration = null;
+
+            if ($autoRegister && $eventId) {
+                $event = Event::findOrFail($eventId);
+
+                $registration = $event->registrations()->create([
+                    'attendee_id' => $attendee->id,
+                    'registered_by' => $request->user()->id,
+                ]);
+
+                AuditLog::record('event_registration.created', $registration, ['attendee_id' => $attendee->id]);
+
+                GenerateAttendeeIdCardJob::dispatch($registration);
+
+                if ($attendee->email_address) {
+                    Mail::to($attendee->email_address)->send(new EventRegistrationWelcomeMail($registration));
+                }
+            }
+
+            return AttendeeResource::make($attendee)
+                ->additional(['registration' => $registration ? EventRegistrationResource::make($registration) : null])
+                ->response()->setStatusCode(201);
+        });
     }
 
     /**
@@ -116,7 +145,7 @@ class AttendeeController extends Controller
 
             if ($registration !== null) {
                 $checkedInSessionIds = $registration->attendanceRecords
-                    ->filter(fn ($record) => $record->check_in_at !== null)
+                    ->filter(fn($record) => $record->check_in_at !== null)
                     ->pluck('event_session_id')
                     ->unique()
                     ->values()

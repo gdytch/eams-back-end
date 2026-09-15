@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventController;
+use App\Http\Controllers\Api\V1\EventProgramController;
+use App\Http\Controllers\Api\V1\EventProgramItemController;
 use App\Http\Controllers\Api\V1\EventRegistrationController;
 use App\Http\Controllers\Api\V1\EventSessionController;
 use App\Http\Controllers\Api\V1\MissionController;
@@ -88,6 +90,19 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('events/{event}/banner', [EventController::class, 'removeBanner']);
 
         Route::apiResource('events.sessions', EventSessionController::class);
+
+        Route::post('events/{event}/program', [EventProgramController::class, 'store']);
+        Route::get('events/{event}/program', [EventProgramController::class, 'show']);
+        Route::delete('events/{event}/program', [EventProgramController::class, 'destroy']);
+
+        Route::get('events/{event}/program/items', [EventProgramItemController::class, 'index']);
+        Route::post('events/{event}/program/items', [EventProgramItemController::class, 'store']);
+        Route::post('events/{event}/program/items/reorder', [EventProgramItemController::class, 'reorder']);
+        Route::get('events/{event}/program/items/{itemId}', [EventProgramItemController::class, 'show']);
+        Route::put('events/{event}/program/items/{itemId}', [EventProgramItemController::class, 'update']);
+        Route::delete('events/{event}/program/items/{itemId}', [EventProgramItemController::class, 'destroy']);
+        Route::post('events/{event}/program/items/{itemId}/photos', [EventProgramItemController::class, 'uploadPhoto']);
+        Route::delete('events/{event}/program/items/{itemId}/photos', [EventProgramItemController::class, 'removePhoto']);
 
         Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr']);
         Route::get('events/{event}/registrations/id-cards/bulk-download', [EventRegistrationController::class, 'bulkDownloadIdCards']);

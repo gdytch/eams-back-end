@@ -25,6 +25,7 @@ tags:
   - name: Attendees
   - name: Events
   - name: Event Sessions
+  - name: Event Program
   - name: Event Registrations
   - name: Attendance
   - name: Reports
@@ -1571,6 +1572,235 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
+  # ---------------------------------------------------------------- Event Program
+  /events/{event}/program:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [Event Program]
+      summary: Create a program for an event
+      description: Org Admin+ only. Fails with 409 if a program already exists for this event.
+      responses:
+        "201": { $ref: "#/components/responses/EventProgramItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Program already exists for this event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [Event Program]
+      summary: Get an event's program
+      responses:
+        "200": { $ref: "#/components/responses/EventProgramItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Event Program]
+      summary: Delete an event's program and all its items
+      description: Org Admin+ only. Cascades to delete all program items and their associated photos.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/program/items:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    get:
+      tags: [Event Program]
+      summary: List all items for a program
+      description: Ordered by date then start_time.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/EventProgramItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [Event Program]
+      summary: Create an item in a program
+      description: Org Admin+ only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order: { type: integer, description: "Display order (optional, defaults to 0)" }
+                date: { type: string, format: date }
+                start_time: { type: string, example: "09:00", description: "H:i format" }
+                end_time: { type: string, example: "10:00", description: "H:i format, optional" }
+                part_title: { type: string, maxLength: 255, nullable: true }
+                part_subtitle: { type: string, maxLength: 255, nullable: true }
+                part_description: { type: string, nullable: true }
+                participant_name: { type: string, maxLength: 255, nullable: true }
+                participant_description: { type: string, nullable: true }
+                part_remarks: { type: string, nullable: true }
+      responses:
+        "201": { $ref: "#/components/responses/EventProgramItemDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/program/items/reorder:
+    post:
+      tags: [Event Program]
+      summary: Reorder program items
+      description: Org Admin+ only. Updates the order of multiple program items.
+      parameters:
+        - $ref: "#/components/parameters/EventId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [id, order]
+                    properties:
+                      id: { type: integer, description: "Program item ID" }
+                      order: { type: integer, description: "New order value", minimum: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/EventProgramItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /events/{event}/program/items/{itemId}:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - name: itemId
+        in: path
+        required: true
+        description: Program item ID
+        schema: { type: integer }
+    get:
+      tags: [Event Program]
+      summary: Get a program item
+      responses:
+        "200": { $ref: "#/components/responses/EventProgramItemDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Event Program]
+      summary: Update a program item
+      description: Org Admin+ only. Supports partial updates; omitted fields are not changed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                order: { type: integer, description: "Display order" }
+                date: { type: string, format: date }
+                start_time: { type: string, example: "09:00" }
+                end_time: { type: string, example: "10:00" }
+                part_title: { type: string, maxLength: 255, nullable: true }
+                part_subtitle: { type: string, maxLength: 255, nullable: true }
+                part_description: { type: string, nullable: true }
+                participant_name: { type: string, maxLength: 255, nullable: true }
+                participant_description: { type: string, nullable: true }
+                part_remarks: { type: string, nullable: true }
+      responses:
+        "200": { $ref: "#/components/responses/EventProgramItemDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Event Program]
+      summary: Delete a program item
+      description: Org Admin+ only. Deletes associated photos.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/program/items/{itemId}/photos:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+      - name: itemId
+        in: path
+        required: true
+        description: Program item ID
+        schema: { type: integer }
+    post:
+      tags: [Event Program]
+      summary: Upload a photo to a program item
+      description: Org Admin+ only. Accepts base64-encoded data URLs or multipart form uploads. Supports PNG, JPEG, WebP. Generated as sm (small), md (medium), lg (large), and original sizes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [photo]
+              properties:
+                photo:
+                  type: string
+                  description: "Base64-encoded data URL (e.g., 'data:image/png;base64,...')"
+      responses:
+        "200": { $ref: "#/components/responses/EventProgramItemDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Event Program]
+      summary: Remove a photo from a program item by index
+      description: Org Admin+ only.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [index]
+              properties:
+                index:
+                  type: integer
+                  description: "Zero-based index of the photo in the item's photo array"
+      responses:
+        "200": { $ref: "#/components/responses/EventProgramItemDetail" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
   # ---------------------------------------------------------------- Event Registrations
   /events/{event}/registrations:
     parameters:
@@ -3018,6 +3248,42 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
+    EventProgram:
+      type: object
+      description: "Master program record for an event session, containing an ordered list of program items."
+      properties:
+        id: { type: integer }
+        event_id: { type: integer, description: "Foreign key to Event; one program per event." }
+        items:
+          type: array
+          description: "Program items for this session, only present when explicitly eager-loaded."
+          items: { $ref: "#/components/schemas/EventProgramItem" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    EventProgramItem:
+      type: object
+      description: "Individual program item: a talk, session, or participant entry within a program."
+      properties:
+        id: { type: integer }
+        event_program_id: { type: integer, description: "Foreign key to EventProgram." }
+        order: { type: integer, description: "Display order of the item (0-based)." }
+        date: { type: string, format: date, description: "Date of this program item." }
+        start_time: { type: string, example: "09:00", description: "Start time in H:i format." }
+        end_time: { type: string, example: "10:00", nullable: true, description: "End time in H:i format, optional." }
+        part_title: { type: string, nullable: true, maxLength: 255, description: "Title of this program segment." }
+        part_subtitle: { type: string, nullable: true, maxLength: 255, description: "Subtitle or secondary title." }
+        part_description: { type: string, nullable: true, description: "Description of the program segment." }
+        participant_name: { type: string, nullable: true, maxLength: 255, description: "Name of participant or speaker." }
+        participant_description: { type: string, nullable: true, description: "Bio or role of the participant." }
+        participant_photo_urls:
+          type: array
+          description: "URLs to participant photos (original size); derived from photo_paths."
+          items: { type: string, format: uri }
+        part_remarks: { type: string, nullable: true, description: "Additional remarks or notes." }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
     EventRegistration:
       type: object
       properties:
@@ -3424,6 +3690,24 @@ components:
             type: object
             properties:
               data: { $ref: "#/components/schemas/EventSession" }
+
+    EventProgramItem:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/EventProgram" }
+
+    EventProgramItemDetail:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data: { $ref: "#/components/schemas/EventProgramItem" }
 
     EventRegistrationItem:
       description: OK

@@ -1133,6 +1133,47 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
+  /attendees/export:
+    get:
+      tags: [Attendees]
+      summary: Export attendees as Excel or PDF
+      description: >
+        Export all attendees or filter by event registration. Returns a downloadable file
+        in the specified format with styled headers and formatting. Supports optional name search
+        and event_id filtering.
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema: { type: string, enum: [xlsx, pdf], default: xlsx }
+          description: Export file format (defaults to xlsx).
+        - name: event_id
+          in: query
+          required: false
+          schema: { type: integer }
+          description: If provided, exports only attendees registered to this event.
+        - name: search
+          in: query
+          required: false
+          schema: { type: string }
+          description: Optional name search filter (matches first, middle, last name).
+      responses:
+        "200":
+          description: File downloaded successfully
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+                description: Excel spreadsheet with styled headers and formatting
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+                description: PDF document with styled table
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
   /attendees/{attendee}:
     parameters:
       - $ref: "#/components/parameters/AttendeeId"

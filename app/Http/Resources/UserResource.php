@@ -31,6 +31,7 @@ class UserResource extends JsonResource
             'photo_urls' => $this->photo_urls,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
+            'attendee' => AttendeeResource::make($this->whenLoaded('attendee')),
         ];
     }
 }

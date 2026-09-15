@@ -110,20 +110,31 @@ class ReportController extends Controller
 
     /**
      * Export event attendance report in Excel or PDF format.
+     * Optional session_id query parameter to export only a specific session's attendance.
      */
     public function exportEventAttendance(Request $request, Event $event)
     {
         $this->authorize('view', $event);
 
         $format = $request->query('format', 'xlsx');
+        $sessionId = $request->query('session_id');
 
-        AuditLog::record('report.event_attendance_exported', $event, ['format' => $format]);
-
-        if ($format === 'pdf') {
-            return $this->exportEventAttendanceAsPdf($event);
+        $session = null;
+        if ($sessionId) {
+            $session = $event->sessions()->findOrFail($sessionId);
         }
 
-        return Excel::download(new EventAttendanceExport($event), "event-{$event->id}-attendance.xlsx");
+        AuditLog::record('report.event_attendance_exported', $event, ['format' => $format, 'session_id' => $sessionId]);
+
+        if ($format === 'pdf') {
+            return $this->exportEventAttendanceAsPdf($event, $session);
+        }
+
+        $filename = $sessionId
+            ? "event-{$event->id}-session-{$session->id}-attendance.xlsx"
+            : "event-{$event->id}-attendance.xlsx";
+
+        return Excel::download(new EventAttendanceExport($event, $session), $filename);
     }
 
     /**
@@ -253,38 +264,62 @@ class ReportController extends Controller
         ];
     }
 
-    private function exportEventAttendanceAsPdf(Event $event)
+    private function exportEventAttendanceAsPdf(Event $event, ?EventSession $session = null)
     {
         $registrations = $event->registrations()->with('attendee.union', 'attendee.mission', 'attendanceRecords')->get();
-        $overviewData = $registrations->map(fn($reg) => $this->mapRegistrationToRow($reg, $reg->attendanceRecords->first()));
 
-        // Prepare per-session summaries (not detailed rows to conserve memory)
-        $sessions = $event->sessions()->orderBy('session_date')->get();
+        if ($session) {
+            // Export only the specific session - include detailed roster
+            $sessions = collect([$session]);
+            $filename = "event-{$event->id}-session-{$session->id}-attendance.pdf";
+            $includeDetailedRoster = true;
+        } else {
+            // Export all sessions - summary only to avoid memory exhaustion
+            $sessions = $event->sessions()->orderBy('session_date')->get();
+            $filename = "event-{$event->id}-attendance.pdf";
+            $includeDetailedRoster = false;
+        }
+
+        // Prepare per-session summaries
         $sessionSummaries = [];
-        foreach ($sessions as $session) {
-            $checkedIn = $session->attendanceRecords()->whereNotNull('check_in_at')->count();
-            $checkedOut = $session->attendanceRecords()->whereNotNull('check_out_at')->count();
+        $sessionDetailedRosters = [];
+
+        foreach ($sessions as $sess) {
+            $checkedIn = $sess->attendanceRecords()->whereNotNull('check_in_at')->count();
+            $checkedOut = $sess->attendanceRecords()->whereNotNull('check_out_at')->count();
             $total = $registrations->count();
             $noShow = $total - $checkedIn;
 
             $sessionSummaries[] = [
-                'name' => $session->name,
-                'date' => $session->session_date->format('M d, Y'),
+                'name' => $sess->name,
+                'date' => $sess->session_date->format('M d, Y'),
                 'total_registered' => $total,
                 'checked_in' => $checkedIn,
                 'checked_out' => $checkedOut,
                 'no_show' => $noShow,
                 'check_in_rate' => $total > 0 ? round(($checkedIn / $total) * 100, 1) : 0,
             ];
+
+            // Only prepare detailed roster when viewing a single session
+            if ($includeDetailedRoster) {
+                $sessionRoster = $registrations->map(fn($reg) => $this->mapRegistrationToRow($reg, $reg->attendanceRecords->firstWhere('event_session_id', $sess->id)));
+
+                $sessionDetailedRosters[] = [
+                    'name' => $sess->name,
+                    'date' => $sess->session_date->format('M d, Y'),
+                    'registrations' => $sessionRoster->toArray(),
+                ];
+            }
         }
 
         $pdf = Pdf::loadView('pdf.event-attendance-report', [
             'event' => $event,
-            'registrations' => $overviewData,
             'sessionSummaries' => $sessionSummaries,
+            'sessionDetailedRosters' => $sessionDetailedRosters,
+            'includeDetailedRoster' => $includeDetailedRoster,
         ]);
 
-        return $pdf->download("event-{$event->id}-attendance.pdf");
+        return $pdf->download($filename);
     }
 
     private function mapRegistrationToRow($registration, $attendanceRecord): array

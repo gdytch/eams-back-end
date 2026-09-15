@@ -114,47 +114,48 @@
         </tbody>
     </table>
 
-    <h2>Detailed Attendance Roster (First Check-in Per Registrant)</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>First Name</th>
-                <th>Last Name</th>
-                <th>Union</th>
-                <th>Mission</th>
-                <th>Status</th>
-                <th>Method</th>
-                <th>Check-in</th>
-                <th>Check-out</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach ($registrations as $registration)
-                <tr>
-                    <td>{{ $registration['first_name'] }}</td>
-                    <td>{{ $registration['last_name'] }}</td>
-                    <td>{{ $registration['union'] }}</td>
-                    <td>{{ $registration['mission'] }}</td>
-                    <td>
-                        <span class="status-{{ strtolower(str_replace(' ', '-', $registration['status'])) }}">
-                            {{ $registration['status'] }}
-                        </span>
-                    </td>
-                    <td>{{ ucfirst($registration['method']) }}</td>
-                    <td>{{ $registration['check_in_at'] }}</td>
-                    <td>{{ $registration['check_out_at'] }}</td>
-                </tr>
-            @endforeach
-        </tbody>
-    </table>
-
-    <div class="subtitle">
-        Total Registrations: {{ $registrations->count() }}
-    </div>
-    <div class="subtitle">
-        For detailed per-session attendance records, please refer to the Excel export which includes separate sheets for
-        each session.
-    </div>
+    @if ($includeDetailedRoster)
+        @foreach ($sessionDetailedRosters as $sessionRoster)
+            <h2>Detailed Attendance Roster — {{ $sessionRoster['name'] }} ({{ $sessionRoster['date'] }})</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Union</th>
+                        <th>Mission</th>
+                        <th>Status</th>
+                        <th>Method</th>
+                        <th>Check-in</th>
+                        <th>Check-out</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($sessionRoster['registrations'] as $registration)
+                        <tr>
+                            <td>{{ $registration['first_name'] }}</td>
+                            <td>{{ $registration['last_name'] }}</td>
+                            <td>{{ $registration['union'] }}</td>
+                            <td>{{ $registration['mission'] }}</td>
+                            <td>
+                                <span class="status-{{ strtolower(str_replace(' ', '-', $registration['status'])) }}">
+                                    {{ $registration['status'] }}
+                                </span>
+                            </td>
+                            <td>{{ ucfirst($registration['method']) }}</td>
+                            <td>{{ $registration['check_in_at'] }}</td>
+                            <td>{{ $registration['check_out_at'] }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endforeach
+    @else
+        <div class="subtitle" style="margin-top: 20px;">
+            For detailed per-attendee records by session, please export the Excel format or request a specific session's
+            PDF.
+        </div>
+    @endif
 </body>
 
 </html>

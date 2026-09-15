@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Exports\AttendeeExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CheckAttendeeDuplicatesRequest;
 use App\Http\Requests\StoreAttendeeRequest;
@@ -10,12 +11,15 @@ use App\Http\Requests\UploadAttendeePhotoRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
+use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Services\AttendeeInvitationService;
 use App\Services\ImageUploadService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Maatwebsite\Excel\Facades\Excel;
 
 class AttendeeController extends Controller
 {
@@ -112,7 +116,7 @@ class AttendeeController extends Controller
 
             if ($registration !== null) {
                 $checkedInSessionIds = $registration->attendanceRecords
-                    ->filter(fn($record) => $record->check_in_at !== null)
+                    ->filter(fn ($record) => $record->check_in_at !== null)
                     ->pluck('event_session_id')
                     ->unique()
                     ->values()
@@ -243,5 +247,59 @@ class AttendeeController extends Controller
         AuditLog::record('attendee.photo_removed', $attendee);
 
         return AttendeeResource::make($attendee);
+    }
+
+    /**
+     * Export attendees in Excel or PDF format, optionally filtered by event_id.
+     */
+    public function export(Request $request)
+    {
+        $this->authorize('viewAny', Attendee::class);
+
+        $query = Attendee::query();
+
+        if ($search = trim((string) $request->string('search'))) {
+            $query->where(function ($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('middle_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%");
+            });
+        }
+
+        $eventId = $request->input('event_id');
+        if ($eventId) {
+            $query->whereHas('registrations', function ($q) use ($eventId) {
+                $q->where('event_id', $eventId);
+            });
+        }
+
+        $attendees = $query->with(['union', 'mission', 'church'])->orderBy('last_name')->orderBy('first_name')->get();
+        $format = $request->query('format', 'xlsx');
+
+        AuditLog::record('attendee.exported', null, ['format' => $format, 'event_id' => $eventId]);
+
+        if ($format === 'pdf') {
+            return $this->exportPdf($attendees, $eventId);
+        }
+
+        $export = new AttendeeExport($attendees);
+
+        return Excel::download($export, 'attendees.xlsx');
+    }
+
+    private function exportPdf($attendees, $eventId)
+    {
+        $eventName = null;
+        if ($eventId) {
+            $event = Event::find($eventId);
+            $eventName = $event?->name;
+        }
+
+        $pdf = Pdf::loadView('pdf.attendees-report', [
+            'attendees' => $attendees,
+            'eventName' => $eventName,
+        ]);
+
+        return $pdf->download('attendees.pdf');
     }
 }

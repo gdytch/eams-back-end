@@ -31,6 +31,8 @@ class EventSessionRosterEntryResource extends JsonResource
             ],
             'union' => $this->attendee->union?->name,
             'mission' => $this->attendee->mission?->name,
+            'union_code' => $this->attendee->union?->code,
+            'mission_code' => $this->attendee->mission?->code,
             'attendance_status' => $attendanceStatus,
             'check_in_at' => $this->session_check_in_at,
             'check_out_at' => $this->session_check_out_at,

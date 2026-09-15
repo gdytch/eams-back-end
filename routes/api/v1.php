@@ -50,7 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('download/id-card-template', function () {
         $filePath = storage_path('id-card-formats/format1.jpg');
-        if (!file_exists($filePath)) {
+        if (! file_exists($filePath)) {
             abort(404, 'ID card template not found.');
         }
 
@@ -74,6 +74,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('churches', ChurchController::class);
 
     Route::get('attendees/check-duplicates', [AttendeeController::class, 'checkDuplicates']);
+    Route::get('attendees/export', [AttendeeController::class, 'export']);
     Route::apiResource('attendees', AttendeeController::class);
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);
     Route::delete('attendees/{attendee}/photo', [AttendeeController::class, 'removePhoto']);

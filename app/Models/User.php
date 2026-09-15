@@ -80,6 +80,8 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function isAttendee(): bool
     {
+        if ($this->attendee())
+            return true;
         return $this->role === UserRole::Attendee;
     }
 

@@ -16,7 +16,7 @@ class AttendeeDashboardController extends Controller
      */
     public function index(Request $request)
     {
-        abort_unless($request->user()->isAttendee(), 403, 'You do not have permission to perform this action.');
+        abort_unless($request->user()->isAttendee() || $request->user()->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
         $user = $request->user();
         $attendee = Attendee::with(['union', 'mission', 'church'])->where('user_id', $user->id)->first();
@@ -45,14 +45,14 @@ class AttendeeDashboardController extends Controller
             ->get();
 
         [$upcomingRegistrations, $pastRegistrations] = $registrations->partition(
-            fn ($registration) => $registration->event->end_date->isFuture() || $registration->event->end_date->isToday()
+            fn($registration) => $registration->event->end_date->isFuture() || $registration->event->end_date->isToday()
         );
 
         // Sort upcoming events ascending (soonest first) and past events descending (most recent first).
-        $upcomingRegistrations = $upcomingRegistrations->sortBy(fn ($r) => $r->event->start_date);
-        $pastRegistrations = $pastRegistrations->sortByDesc(fn ($r) => $r->event->end_date);
+        $upcomingRegistrations = $upcomingRegistrations->sortBy(fn($r) => $r->event->start_date);
+        $pastRegistrations = $pastRegistrations->sortByDesc(fn($r) => $r->event->end_date);
 
-        $upcomingEvents = $upcomingRegistrations->map(fn ($registration) => [
+        $upcomingEvents = $upcomingRegistrations->map(fn($registration) => [
             'registration_id' => $registration->id,
             'event' => $registration->event,
             'qr_token' => $registration->qr_token,
@@ -61,7 +61,7 @@ class AttendeeDashboardController extends Controller
             'next_session' => $this->getNextSession($registration->event),
         ]);
 
-        $pastEvents = $pastRegistrations->map(fn ($registration) => [
+        $pastEvents = $pastRegistrations->map(fn($registration) => [
             'registration_id' => $registration->id,
             'event' => $registration->event,
             'attendance_summary' => [
@@ -70,8 +70,8 @@ class AttendeeDashboardController extends Controller
             ],
         ]);
 
-        $totalSessionsAttended = $registrations->sum(fn ($r) => $r->attendanceRecords->count());
-        $totalSessionsAvailable = $pastRegistrations->sum(fn ($r) => $r->event->sessions->count());
+        $totalSessionsAttended = $registrations->sum(fn($r) => $r->attendanceRecords->count());
+        $totalSessionsAvailable = $pastRegistrations->sum(fn($r) => $r->event->sessions->count());
         $attendanceRate = $totalSessionsAvailable > 0 ? round($totalSessionsAttended / $totalSessionsAvailable * 100, 1) : 0;
 
         $nextEvent = $upcomingEvents->first();
@@ -100,7 +100,7 @@ class AttendeeDashboardController extends Controller
      */
     public function registrations(Request $request): AnonymousResourceCollection
     {
-        abort_unless($request->user()->isAttendee(), 403, 'You do not have permission to perform this action.');
+        abort_unless($request->user()->isAttendee() || $request->user()->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
         $user = $request->user();
         $attendee = Attendee::where('user_id', $user->id)->firstOrFail();
@@ -119,8 +119,8 @@ class AttendeeDashboardController extends Controller
     private function getNextSession($event): ?array
     {
         $nextSession = $event->sessions
-            ->filter(fn ($session) => $session->startsAt()->isFuture() || $session->startsAt()->isToday())
-            ->sortBy(fn ($session) => $session->startsAt())
+            ->filter(fn($session) => $session->startsAt()->isFuture() || $session->startsAt()->isToday())
+            ->sortBy(fn($session) => $session->startsAt())
             ->first();
 
         if ($nextSession === null) {

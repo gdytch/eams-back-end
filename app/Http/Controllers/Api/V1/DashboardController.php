@@ -62,7 +62,7 @@ class DashboardController extends Controller
     {
         $organizations = Organization::all();
         $events = Event::query()->get();
-        $eventsQuery = fn () => Event::query();
+        $eventsQuery = fn() => Event::query();
         $usersByRole = User::query()->selectRaw('role, count(*) as count')->groupBy('role')->pluck('count', 'role');
         $upcomingEvents = $this->upcomingEvents($eventsQuery);
 
@@ -96,7 +96,7 @@ class DashboardController extends Controller
     {
         $organization = $user->organization;
         $events = Event::query()->get();
-        $eventsQuery = fn () => Event::query();
+        $eventsQuery = fn() => Event::query();
         $upcomingEvents = $this->upcomingEvents($eventsQuery);
 
         return [
@@ -133,8 +133,8 @@ class DashboardController extends Controller
     {
         $restricted = $user->accessibleEvents()->exists();
         $eventsQuery = $restricted
-            ? fn () => Event::query()->whereIn('id', $user->accessibleEvents()->pluck('events.id'))
-            : fn () => Event::query();
+            ? fn() => Event::query()->whereIn('id', $user->accessibleEvents()->pluck('events.id'))
+            : fn() => Event::query();
 
         $recentScans = AttendanceRecord::query()
             ->where('recorded_by', $user->id)
@@ -142,7 +142,7 @@ class DashboardController extends Controller
             ->latest('created_at')
             ->limit(10)
             ->get()
-            ->map(fn (AttendanceRecord $record) => [
+            ->map(fn(AttendanceRecord $record) => [
                 'id' => $record->id,
                 'attendee_name' => trim("{$record->eventRegistration->attendee->first_name} {$record->eventRegistration->attendee->last_name}"),
                 'event_id' => $record->eventRegistration->event->id,
@@ -173,7 +173,7 @@ class DashboardController extends Controller
     private function eventsSummary(Collection $events): array
     {
         $today = today();
-        $statusCounts = $events->countBy(fn (Event $event) => $event->status->value);
+        $statusCounts = $events->countBy(fn(Event $event) => $event->status->value);
 
         return [
             'total' => $events->count(),
@@ -181,8 +181,8 @@ class DashboardController extends Controller
             'published' => $statusCounts->get('published', 0),
             'completed' => $statusCounts->get('completed', 0),
             'cancelled' => $statusCounts->get('cancelled', 0),
-            'upcoming' => $events->filter(fn (Event $event) => $event->start_date >= $today && $event->status !== EventStatus::Cancelled)->count(),
-            'ongoing' => $events->filter(fn (Event $event) => $event->start_date <= $today && $event->end_date >= $today && $event->status !== EventStatus::Cancelled)->count(),
+            'upcoming' => $events->filter(fn(Event $event) => $event->start_date >= $today && $event->status !== EventStatus::Cancelled)->count(),
+            'ongoing' => $events->filter(fn(Event $event) => $event->start_date <= $today && $event->end_date >= $today && $event->status !== EventStatus::Cancelled)->count(),
         ];
     }
 
@@ -198,7 +198,7 @@ class DashboardController extends Controller
             ->orderBy('start_date')
             ->limit($limit)
             ->get()
-            ->map(fn (Event $event) => [
+            ->map(fn(Event $event) => [
                 'id' => $event->id,
                 'name' => $event->name,
                 'start_date' => $event->start_date->toDateString(),
@@ -224,13 +224,13 @@ class DashboardController extends Controller
             ->whereIn('event_id', $eventIds)
             ->whereDate('session_date', today())
             ->withCount([
-                'attendanceRecords as checked_in_count' => fn ($q) => $q->whereNotNull('check_in_at'),
-                'attendanceRecords as checked_out_count' => fn ($q) => $q->whereNotNull('check_out_at'),
+                'attendanceRecords as checked_in_count' => fn($q) => $q->whereNotNull('check_in_at'),
+                'attendanceRecords as checked_out_count' => fn($q) => $q->whereNotNull('check_out_at'),
             ])
-            ->with(['event' => fn ($q) => $q->withCount('registrations')])
+            ->with(['event' => fn($q) => $q->withCount('registrations')])
             ->orderBy('start_time')
             ->get()
-            ->map(fn (EventSession $session) => [
+            ->map(fn(EventSession $session) => [
                 'id' => $session->id,
                 'event_id' => $session->event_id,
                 'event_name' => $session->event->name,
@@ -287,9 +287,9 @@ class DashboardController extends Controller
         return $eventsQuery()
             ->with('registrations.attendee.union')
             ->get()
-            ->flatMap(fn (Event $event) => $event->registrations)
-            ->groupBy(fn (EventRegistration $registration) => (string) ($registration->attendee->union?->name ?? 'No Union'))
-            ->map(fn (Collection $registrations) => $registrations->count())
+            ->flatMap(fn(Event $event) => $event->registrations)
+            ->groupBy(fn(EventRegistration $registration) => (string) ($registration->attendee->union?->name ?? 'No Union'))
+            ->map(fn(Collection $registrations) => $registrations->count())
             ->all();
     }
 
@@ -301,9 +301,9 @@ class DashboardController extends Controller
         return $eventsQuery()
             ->with('registrations.attendee.mission')
             ->get()
-            ->flatMap(fn (Event $event) => $event->registrations)
-            ->groupBy(fn (EventRegistration $registration) => (string) ($registration->attendee->mission?->name ?? 'No Mission'))
-            ->map(fn (Collection $registrations) => $registrations->count())
+            ->flatMap(fn(Event $event) => $event->registrations)
+            ->groupBy(fn(EventRegistration $registration) => (string) ($registration->attendee->mission?->name ?? 'No Mission'))
+            ->map(fn(Collection $registrations) => $registrations->count())
             ->all();
     }
 
@@ -315,13 +315,13 @@ class DashboardController extends Controller
     private function topOrganizations(Collection $organizations, int $limit = 5): array
     {
         return $organizations
-            ->map(fn (Organization $organization) => [
+            ->map(fn(Organization $organization) => [
                 'organization_id' => $organization->id,
                 'organization_name' => $organization->name,
                 'total_events' => $organization->events()->count(),
                 'total_attendees' => $organization->attendees()->count(),
                 'total_registrations' => EventRegistration::query()
-                    ->whereHas('event', fn ($q) => $q->where('organization_id', $organization->id))
+                    ->whereHas('event', fn($q) => $q->where('organization_id', $organization->id))
                     ->count(),
             ])
             ->sortByDesc('total_registrations')
@@ -334,11 +334,11 @@ class DashboardController extends Controller
     {
         return AuditLog::query()
             ->with('user')
-            ->when($organizationId !== null, fn ($q) => $q->where('organization_id', $organizationId))
+            ->when($organizationId !== null, fn($q) => $q->where('organization_id', $organizationId))
             ->latest('created_at')
             ->limit($limit)
             ->get()
-            ->map(fn (AuditLog $log) => [
+            ->map(fn(AuditLog $log) => [
                 'id' => $log->id,
                 'action' => $log->action,
                 'user' => $log->user?->name,

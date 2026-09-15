@@ -21,6 +21,7 @@ class AttendeeDashboardResource extends JsonResource
             $profile = [
                 'id' => $attendee->id,
                 'organization_id' => $attendee->organization_id,
+                'organization_level' => $attendee->organization_level,
                 'union_id' => $attendee->union_id,
                 'mission_id' => $attendee->mission_id,
                 'first_name' => $attendee->first_name,
@@ -91,7 +92,7 @@ class AttendeeDashboardResource extends JsonResource
                     : null,
                 'id_card_font_color' => $event->id_card_font_color ?? '#000000',
                 'banner_urls' => $event->banner_paths
-                    ? collect($event->banner_paths)->mapWithKeys(fn ($path, $key) => [
+                    ? collect($event->banner_paths)->mapWithKeys(fn($path, $key) => [
                         $key => Storage::disk('public')->url($path),
                     ])->toArray()
                     : null,

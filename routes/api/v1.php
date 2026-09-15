@@ -37,6 +37,23 @@ Route::middleware('throttle:6,1')->group(function () {
         ->name('verification.verify');
 });
 
+Route::get('test', function () {
+    $event = \App\Models\Event::find(1);
+    $attendees = \App\Models\Attendee::all();
+    foreach ($attendees as $attendee) {
+        $registration = $event->registrations()->where('attendee_id', $attendee->id)->first();
+        if ($registration !== null) {
+            continue;
+        }
+
+        $registration = $event->registrations()->create([
+            'attendee_id' => $attendee->id,
+            'registered_by' => 1,
+        ]);
+    }
+    return response()->json(['message' => 'Test completed']);
+});
+
 Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'show']);
 Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');
 

@@ -31,7 +31,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $attendee = $this->registration->attendee;
         $event = $this->registration->event;
 
-        $qrImage = 'data:image/svg+xml;base64,' . base64_encode(
+        $qrImage = 'data:image/svg+xml;base64,'.base64_encode(
             QrCode::format('svg')->size(300)->margin(0)->generate($this->registration->qr_token)
         );
 
@@ -42,15 +42,14 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
             if ($attendee->organization_level === OrganizationLevel::Mission && $attendee->mission !== null) {
                 $organizationName = $attendee->mission->name;
             }
-        } else if ($attendee->mission) {
+        } elseif ($attendee->mission) {
             $organizationName = $attendee->mission->name;
         }
-
 
         $pdf = Pdf::loadView('pdf.attendee-id-card', [
             'qrImage' => $qrImage,
             'backgroundImage' => $backgroundImage,
-            'attendeeName' => trim("{$attendee->first_name} {$attendee->last_name}"),
+            'attendeeName' => strtoupper(trim("{$attendee->first_name} {$attendee->last_name}")),
             'organizationName' => $organizationName,
             'fontColor' => $fontColor,
         ])->setPaper([0, 0, 234, 342]); // 3.25in x 4.75in, in points (72pt per inch)
@@ -91,7 +90,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
 
         $mimeType = Storage::disk('public')->mimeType($path);
 
-        return "data:{$mimeType};base64," . base64_encode(Storage::disk('public')->get($path));
+        return "data:{$mimeType};base64,".base64_encode(Storage::disk('public')->get($path));
     }
 
     /**
@@ -144,7 +143,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $page = 0;
 
         while (file_exists(sprintf($outputPattern, $page))) {
-            $imagePath = "{$pdfPath}/" . basename(sprintf($outputPattern, $page));
+            $imagePath = "{$pdfPath}/".basename(sprintf($outputPattern, $page));
             // Normalize to storage path (relative to storage/app)
             $imagePath = str_replace(Storage::disk('local')->path(''), '', sprintf($outputPattern, $page));
             $imagePaths[] = $imagePath;

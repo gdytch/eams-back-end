@@ -15,6 +15,8 @@ use App\Http\Controllers\Api\V1\EventSessionController;
 use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PublicEventController;
+use App\Http\Controllers\Api\V1\PublicMissionController;
+use App\Http\Controllers\Api\V1\PublicUnionController;
 use App\Http\Controllers\Api\V1\ReportController;
 use App\Http\Controllers\Api\V1\SystemLogController;
 use App\Http\Controllers\Api\V1\UnionController;
@@ -39,6 +41,8 @@ Route::middleware('throttle:6,1')->group(function () {
 
 Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'show']);
 Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');
+Route::get('public/unions', [PublicUnionController::class, 'index']);
+Route::get('public/missions', [PublicMissionController::class, 'index']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('auth/logout', [AuthController::class, 'logout']);

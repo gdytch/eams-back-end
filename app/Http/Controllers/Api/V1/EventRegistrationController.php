@@ -46,6 +46,18 @@ class EventRegistrationController extends Controller
             });
         }
 
+        // Apply sorting
+        $sortBy = $request->input('sort_by', 'created_at');
+        $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
+
+        if ($sortBy === 'last_name') {
+            $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
+                ->orderBy('attendees.last_name', $sortOrder)
+                ->select('event_registrations.*');
+        } else {
+            $query->orderBy('created_at', 'desc');
+        }
+
         return EventRegistrationResource::collection($query->paginate($request->input('per_page', 10)));
     }
 

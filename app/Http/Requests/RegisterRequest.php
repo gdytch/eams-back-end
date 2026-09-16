@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Enums\OrganizationLevel;
 use App\Models\Attendee;
 use App\Models\Event;
 use Illuminate\Foundation\Http\FormRequest;
@@ -90,6 +91,10 @@ class RegisterRequest extends FormRequest
             ],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'invite_token' => ['nullable', 'string'],
+            'organization_id' => ['required', 'integer', 'exists:organizations,id'],
+            'union_id' => ['required', 'integer', Rule::exists('unions', 'id')->where('organization_id', $this->integer('organization_id'))],
+            'mission_id' => ['nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
+            'organization_level' => ['required', Rule::enum(OrganizationLevel::class)],
         ];
     }
 

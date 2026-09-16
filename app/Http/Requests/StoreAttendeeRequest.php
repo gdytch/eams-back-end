@@ -37,18 +37,18 @@ class StoreAttendeeRequest extends FormRequest
 
         return [
             'organization_id' => [
-                Rule::requiredIf(fn() => $this->user()->isSuperAdmin()),
+                Rule::requiredIf(fn () => $this->user()->isSuperAdmin()),
                 'nullable',
                 'exists:organizations,id',
             ],
-            'organization_level' => ['nullable', Rule::enum(OrganizationLevel::class)],
-            'union_id' => ['nullable', Rule::exists('unions', 'id')->where('organization_id', $organizationId)],
+            'organization_level' => ['required', Rule::enum(OrganizationLevel::class)],
+            'union_id' => ['required', Rule::exists('unions', 'id')->where('organization_id', $organizationId)],
             'mission_id' => ['nullable', Rule::exists('missions', 'id')->where('organization_id', $organizationId)],
             'church_id' => ['nullable', Rule::exists('churches', 'id')->where('organization_id', $organizationId)],
             'first_name' => ['required', 'string', 'max:100'],
             'auto_register' => ['sometimes', 'boolean'],
             'event_id' => [
-                Rule::requiredIf(fn() => $this->boolean('auto_register')),
+                Rule::requiredIf(fn () => $this->boolean('auto_register')),
                 'nullable',
                 Rule::exists('events', 'id')->where('organization_id', $organizationId),
             ],

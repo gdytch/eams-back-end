@@ -183,7 +183,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [first_name, last_name, email, password]
+              required: [first_name, last_name, email, password, password_confirmation]
               properties:
                 first_name: { type: string, maxLength: 100 }
                 middle_name: { type: string, maxLength: 100, nullable: true }
@@ -1072,6 +1072,20 @@ paths:
           in: query
           description: Matches against first, middle, and last name (partial, case-insensitive).
           schema: { type: string }
+        - name: sort_by
+          in: query
+          description: Field to sort by. Defaults to 'last_name'.
+          schema:
+            type: string
+            enum: [last_name]
+            default: last_name
+        - name: sort_order
+          in: query
+          description: Sort order, either 'asc' or 'desc'. Defaults to 'asc'.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
       responses:
         "200": { $ref: "#/components/responses/AttendeeList" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -1546,8 +1560,8 @@ paths:
       summary: List every registration for a session with its attendance status
       description: >
         Every registration for the event, each annotated with its attendance status for this
-        specific session. Sorted by check-in time ascending; registrations without a check-in
-        (absent) sort last. Paginated.
+        specific session. Defaults to sorted by check-in time ascending; registrations without
+        a check-in (absent) sort last. Paginated.
       parameters:
         - $ref: "#/components/parameters/Page"
         - name: per_page
@@ -1561,6 +1575,24 @@ paths:
             type: string
             enum: [all, present, absent]
             default: all
+        - name: search
+          in: query
+          description: Matches against the attendee's first and last name (partial, case-insensitive).
+          schema: { type: string }
+        - name: sort_by
+          in: query
+          description: Field to sort by. Defaults to 'session_check_in_at'.
+          schema:
+            type: string
+            enum: [session_check_in_at, attendee.last_name, last_name]
+            default: session_check_in_at
+        - name: sort_order
+          in: query
+          description: Sort order, either 'asc' or 'desc'. Defaults to 'asc'.
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
       responses:
         "200":
           description: OK
@@ -1814,6 +1846,7 @@ paths:
           in: query
           description: Matches against the registered attendee's first/last name.
           schema: { type: string }
+
       responses:
         "200": { $ref: "#/components/responses/EventRegistrationList" }
         "401": { $ref: "#/components/responses/Unauthenticated" }

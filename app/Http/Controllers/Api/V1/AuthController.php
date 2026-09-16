@@ -95,8 +95,7 @@ class AuthController extends Controller
                 ->filter()
                 ->implode(' '));
 
-            // Determine organization_id: inherit from attendee or event if available
-            $organizationId = $attendee?->organization_id ?? $event?->organization_id;
+            $organizationId = $data['organization_id'];
 
             // Mark email verified only if attendee email matches by personal token
             $emailVerifiedAt = null;
@@ -116,11 +115,15 @@ class AuthController extends Controller
                 'email_verified_at' => $emailVerifiedAt,
             ]);
 
-            // Link the user to the attendee and clear the invite token
+            // Link the user to the attendee and clear the invite token, or create a new attendee for self-registered users
             if ($attendee) {
                 $attendee->update([
                     'user_id' => $user->id,
                     'invite_token' => null,
+                    'organization_id' => $organizationId,
+                    'organization_level' => $data['organization_level'],
+                    'union_id' => $data['union_id'],
+                    'mission_id' => $data['mission_id'] ?? null,
                 ]);
 
                 if ($attendeeMatchMethod === 'personal_token') {
@@ -128,6 +131,21 @@ class AuthController extends Controller
                 } else {
                     AuditLog::record('attendee.email_merged', $attendee, ['user_id' => $user->id]);
                 }
+            } else {
+                // Self-registration: create a new attendee linked to this user
+                $attendee = Attendee::create([
+                    'user_id' => $user->id,
+                    'organization_id' => $organizationId,
+                    'organization_level' => $data['organization_level'],
+                    'union_id' => $data['union_id'],
+                    'mission_id' => $data['mission_id'] ?? null,
+                    'first_name' => $data['first_name'],
+                    'middle_name' => $data['middle_name'] ?? null,
+                    'last_name' => $data['last_name'],
+                    'email_address' => $data['email'],
+                ]);
+
+                AuditLog::record('attendee.self_registered', $attendee, ['user_id' => $user->id]);
             }
 
             // Only fire Registered event if email is not yet verified (needs verification flow)
@@ -245,8 +263,46 @@ class AuthController extends Controller
                             'user_id' => $user->id,
                             'invite_token' => null,
                         ]);
+                        if ($request->filled('organiztion_id')) {
+                            $attendeeToLink->update([
+                                'organization_id' => $request->validated('organization_id'),
+                            ]);
+                        }
+                        if ($request->filled('organization_level')) {
+                            $attendeeToLink->update([
+                                'organization_level' => $request->validated('organization_level'),
+                            ]);
+                        }
+                        if ($request->filled('union_id')) {
+                            $attendeeToLink->update([
+                                'union_id' => $request->validated('union_id'),
+                            ]);
+                        }
+                        if ($request->filled('mission_id')) {
+                            $attendeeToLink->update([
+                                'mission_id' => $request->validated('mission_id'),
+                            ]);
+                        }
 
                         AuditLog::record('attendee.sso_merged', $attendeeToLink, ['user_id' => $user->id]);
+                    } else {
+                        // Self-registration: create a new attendee linked to this user
+                        $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
+                        $firstName = Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@');
+                        $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
+                        $attendee = Attendee::create([
+                            'user_id' => $user->id,
+                            'organization_id' => $request->validated('organization_id'),
+                            'organization_level' => $request->validated('organization_level'),
+                            'union_id' => $request->validated('union_id'),
+                            'mission_id' => $request->validated('mission_id') ?? null,
+                            'first_name' => $firstName,
+                            'middle_name' => $data['middle_name'] ?? null,
+                            'last_name' => $lastName,
+                            'email_address' => $socialiteUser->getEmail(),
+                        ]);
+
+                        AuditLog::record('attendee.self_registered', $attendee, ['user_id' => $user->id]);
                     }
 
                     $wasNewUser = true;
@@ -267,6 +323,27 @@ class AuthController extends Controller
                                 'invite_token' => null,
                             ]);
 
+                            if ($request->filled('organiztion_id')) {
+                                $attendee->update([
+                                    'organization_id' => $request->validated('organization_id'),
+                                ]);
+                            }
+                            if ($request->filled('organization_level')) {
+                                $attendee->update([
+                                    'organization_level' => $request->validated('organization_level'),
+                                ]);
+                            }
+                            if ($request->filled('union_id')) {
+                                $attendee->update([
+                                    'union_id' => $request->validated('union_id'),
+                                ]);
+                            }
+                            if ($request->filled('mission_id')) {
+                                $attendee->update([
+                                    'mission_id' => $request->validated('mission_id'),
+                                ]);
+                            }
+
                             // Update user's organization_id if currently null
                             if ($user->organization_id === null) {
                                 $user->update(['organization_id' => $attendee->organization_id]);
@@ -274,6 +351,24 @@ class AuthController extends Controller
 
                             AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
                         }
+                    } else {
+                        // Self-registration: create a new attendee linked to this user
+                        $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
+                        $firstName = Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@');
+                        $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
+                        $attendee = Attendee::create([
+                            'user_id' => $user->id,
+                            'organization_id' => $request->validated('organization_id'),
+                            'organization_level' => $request->validated('organization_level'),
+                            'union_id' => $request->validated('union_id'),
+                            'mission_id' => $request->validated('mission_id') ?? null,
+                            'first_name' => $firstName,
+                            'middle_name' => $data['middle_name'] ?? null,
+                            'last_name' => $lastName,
+                            'email_address' => $socialiteUser->getEmail(),
+                        ]);
+
+                        AuditLog::record('attendee.self_registered', $attendee, ['user_id' => $user->id]);
                     }
                 }
 
@@ -310,6 +405,7 @@ class AuthController extends Controller
                 'token' => $user->createToken('api')->plainTextToken,
                 'user' => UserResource::make($user),
                 'is_new_user' => $wasNewUser,
+
             ], $wasNewUser ? 201 : 200);
         });
     }

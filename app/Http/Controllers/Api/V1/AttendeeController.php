@@ -52,7 +52,25 @@ class AttendeeController extends Controller
             });
         }
 
-        $query->with(['union', 'mission', 'church'])->orderBy('last_name')->orderBy('first_name');
+        $query->with(['union', 'mission', 'church']);
+
+        // Apply sorting
+        $sortBy = $request->input('sort_by', 'last_name');
+        $sortOrder = strtolower($request->input('sort_order', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        if (in_array($sortBy, ['last_name', 'organization_level'], true)) {
+
+            if ($sortBy === 'organization_level') {
+                $query->orderByRaw("CASE organization_level
+                    WHEN 'union' THEN 1
+                    WHEN 'mission' THEN 2
+                    ELSE 3 END {$sortOrder}");
+            } else {
+                $query->orderBy($sortBy, $sortOrder);
+            }
+        } else {
+            $query->orderBy('last_name', $sortOrder);
+        }
 
         return AttendeeResource::collection($query->paginate($request->input('per_page', 10)));
     }

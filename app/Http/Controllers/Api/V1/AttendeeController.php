@@ -118,9 +118,10 @@ class AttendeeController extends Controller
 
                 GenerateAttendeeIdCardJob::dispatch($registration);
 
-                if ($attendee->email_address) {
-                    Mail::to($attendee->email_address)->send(new EventRegistrationWelcomeMail($registration));
-                }
+                // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
+                // if ($attendee->email_address) {
+                //     Mail::to($attendee->email_address)->send(new EventRegistrationWelcomeMail($registration));
+                // }
             }
 
             return AttendeeResource::make($attendee)
@@ -219,6 +220,20 @@ class AttendeeController extends Controller
                     $lastName = isset($userUpdate['last_name']) ? $userUpdate['last_name'] : $attendee->user->last_name ?? '';
                     $userUpdate['name'] = trim(collect([$firstName, $middleName, $lastName])->filter()->implode(' '));
                     $attendee->user()->update($userUpdate);
+                }
+            }
+
+            // regenerate ID card if the attendee's name, union, mission, organization_leve has changed and they have an existing registration
+            if ($attendee->registrations()->exists() && (
+                isset($data['first_name']) ||
+                isset($data['middle_name']) ||
+                isset($data['last_name']) ||
+                isset($data['union_id']) ||
+                isset($data['mission_id']) ||
+                isset($data['organization_level'])
+            )) {
+                foreach ($attendee->registrations as $registration) {
+                    GenerateAttendeeIdCardJob::dispatch($registration);
                 }
             }
 

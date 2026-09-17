@@ -81,10 +81,11 @@ class PublicEventController extends Controller
                 GenerateAttendeeIdCardJob::dispatch($registration);
 
                 // Send welcome email if attendee has an email
-                $email = $attendee->email_address ?? $attendee->user?->email;
-                if ($email) {
-                    Mail::to($email)->send(new EventRegistrationWelcomeMail($registration));
-                }
+                // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
+                // $email = $attendee->email_address ?? $attendee->user?->email;
+                // if ($email) {
+                //     Mail::to($email)->send(new EventRegistrationWelcomeMail($registration));
+                // }
 
                 return EventRegistrationResource::make($registration->load('attendee'))
                     ->response()

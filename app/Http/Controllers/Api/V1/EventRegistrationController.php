@@ -54,6 +54,11 @@ class EventRegistrationController extends Controller
             $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
                 ->orderBy('attendees.last_name', $sortOrder)
                 ->select('event_registrations.*');
+        } else if ($sortBy === 'organization_level') {
+            $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
+                ->orderBy('attendees.union_id', $sortOrder)
+                ->orderBy('attendees.mission_id', $sortOrder)
+                ->select('event_registrations.*');
         } else {
             $query->orderBy('created_at', 'desc');
         }

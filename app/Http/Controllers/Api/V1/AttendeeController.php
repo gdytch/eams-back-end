@@ -61,10 +61,8 @@ class AttendeeController extends Controller
         if (in_array($sortBy, ['last_name', 'organization_level'], true)) {
 
             if ($sortBy === 'organization_level') {
-                $query->orderByRaw("CASE organization_level
-                    WHEN 'union' THEN 1
-                    WHEN 'mission' THEN 2
-                    ELSE 3 END {$sortOrder}");
+                $query->orderBy('union_id', $sortOrder)
+                    ->orderBy('mission_id', $sortOrder);
             } else {
                 $query->orderBy($sortBy, $sortOrder);
             }

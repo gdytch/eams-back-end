@@ -88,9 +88,24 @@ class AttendanceController extends Controller
 
         $records = AttendanceRecord::whereHas('eventRegistration', fn($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
-            ->with('eventRegistration.attendee')
-            ->orderBy($request->input('sort_by', 'check_in_at'), $request->input('sort_order', 'asc'))
-            ->paginate($request->input('per_page', 15));
+            ->with('eventRegistration.attendee');
+        if ($request->has('sort_by')) {
+            $sortBy = $request->input('sort_by');
+            $sortOrder = strtolower($request->input('sort_order', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+            if ($sortBy === 'last_name') {
+                $records->join('event_registrations', 'attendance_records.event_registration_id', '=', 'event_registrations.id')
+                    ->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
+                    ->orderBy('attendees.last_name', $sortOrder)
+                    ->select('attendance_records.*');
+            } else {
+                $records->orderBy('check_in_at', 'desc');
+            }
+        } else {
+            $records->orderBy('check_in_at', 'desc');
+        }
+
+        $records = $records->paginate($request->input('per_page', 15));
 
         return AttendanceRecordResource::collection($records);
     }

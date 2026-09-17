@@ -66,12 +66,9 @@
     <table>
         <thead>
             <tr>
-                <th>First Name</th>
-                <th>Middle Name</th>
-                <th>Last Name</th>
-                <th>Union</th>
-                <th>Mission</th>
-                <th>Church</th>
+                <th style="width: 1%">#</th>
+                <th>Name</th>
+                <th>Organization</th>
                 <th>Mobile No.</th>
                 <th>Email Address</th>
                 <th>Remarks</th>
@@ -80,12 +77,11 @@
         <tbody>
             @foreach ($attendees as $attendee)
                 <tr>
-                    <td>{{ $attendee->first_name }}</td>
-                    <td>{{ $attendee->middle_name ?? '' }}</td>
-                    <td>{{ $attendee->last_name }}</td>
-                    <td>{{ $attendee->union?->code ?? '' }}</td>
-                    <td>{{ $attendee->mission?->code ?? '' }}</td>
-                    <td>{{ $attendee->church?->name ?? '' }}</td>
+                    <td class="text-center">{{ $loop->iteration }}</td>
+                    <td> {{ $attendee->last_name }}, {{ $attendee->first_name }} {{ $attendee->middle_name ?? '' }}</td>
+                    <td>
+                        {{ $attendee->organization_name }}
+                    </td>
                     <td>{{ $attendee->mobile_no ?? '' }}</td>
                     <td>{{ $attendee->email_address ?? '' }}</td>
                     <td>{{ $attendee->remarks ?? '' }}</td>

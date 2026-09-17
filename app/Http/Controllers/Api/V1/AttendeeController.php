@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\OrganizationLevel;
 use App\Exports\AttendeeExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CheckAttendeeDuplicatesRequest;
@@ -337,7 +338,17 @@ class AttendeeController extends Controller
         $format = $request->query('format', 'xlsx');
 
         AuditLog::record('attendee.exported', null, ['format' => $format, 'event_id' => $eventId]);
-
+        $attendees->each(function ($attendee) {
+            $organizationName = $attendee->union?->code ?? '';
+            if ($attendee->organization_level !== null) {
+                if ($attendee->organization_level === OrganizationLevel::Mission && $attendee->mission !== null) {
+                    $organizationName = $attendee->mission->code;
+                }
+            } elseif ($attendee->mission) {
+                $organizationName = $attendee->mission->code;
+            }
+            $attendee->organization_name = $organizationName;
+        });
         if ($format === 'pdf') {
             return $this->exportPdf($attendees, $eventId);
         }
@@ -354,6 +365,8 @@ class AttendeeController extends Controller
             $event = Event::find($eventId);
             $eventName = $event?->name;
         }
+
+
 
         $pdf = Pdf::loadView('pdf.attendees-report', [
             'attendees' => $attendees,

@@ -35,7 +35,8 @@ RUN docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp && \
 
 # Configure PHP for 14MB upload limit (accommodates base64-encoded ~10MB images)
 RUN echo 'upload_max_filesize = 14M' >> /usr/local/etc/php/conf.d/uploads.ini && \
-    echo 'post_max_size = 14M' >> /usr/local/etc/php/conf.d/uploads.ini
+    echo 'post_max_size = 14M' >> /usr/local/etc/php/conf.d/uploads.ini && \
+    echo 'memory_limit = 1G' >> /usr/local/etc/php/conf.d/uploads.ini
 
 # Get latest Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer

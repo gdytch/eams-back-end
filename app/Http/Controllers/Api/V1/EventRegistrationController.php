@@ -398,7 +398,7 @@ class EventRegistrationController extends Controller
 
         GenerateIdCardGridDownloadJobV2::dispatch($download);
 
-        AuditLog::record('event_registration.id_card_grid_download_started', $event, [
+        AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
             'download_id' => $download->id,
             'registration_ids' => $registrationIds,
         ]);
@@ -428,9 +428,9 @@ class EventRegistrationController extends Controller
             'status' => 'pending',
         ]);
 
-        GenerateIdCardGridDownloadJob::dispatch($download);
+        GenerateIdCardGridDownloadJobV2::dispatch($download);
 
-        AuditLog::record('event_registration.id_card_grid_download_started', $event, [
+        AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
             'download_id' => $download->id,
             'registration_ids' => null,
         ]);

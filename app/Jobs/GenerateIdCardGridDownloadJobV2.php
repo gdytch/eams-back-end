@@ -21,9 +21,9 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
     /**
      * Number of pages rendered by DomPDF per batch.
      *
-     * 10 pages × 4 cards per page = 40 cards per batch.
+     * 5 pages × 4 cards per page = 20 cards per batch.
      */
-    private const PAGES_PER_BATCH = 10;
+    private const PAGES_PER_BATCH = 5;
 
     public function __construct(
         public IdCardGridDownload $download
@@ -390,7 +390,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                 "{$event->id}/id-card-grids";
 
             $batchDirectory =
-                "{$directory}/{$this->download->id}/batches";
+                "{$directory}/batches";
 
             if (! Storage::disk('local')->exists($batchDirectory)) {
                 Storage::disk('local')->makeDirectory(
@@ -451,10 +451,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
 
                 unset($pdfContent);
 
-                $batchPaths[] =
-                    Storage::disk('local')->path(
-                        $batchPath
-                    );
+                $batchPaths[] = $batchPath;
 
                 /*
                  * 40–90%
@@ -510,7 +507,17 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
              */
 
             $finalPath = "{$directory}/{$this->download->event->id}-merged.pdf";
+            foreach ($batchPaths as $batchPath) {
+                $exists = Storage::disk('local')->exists($batchPath);
 
+                Log::info('Generated batch PDF', [
+                    'path' => $batchPath,
+                    'exists' => $exists,
+                    'size' => $exists
+                        ? Storage::disk('local')->size($batchPath)
+                        : null,
+                ]);
+            }
 
             $finalPdfContent = $pdfMergeService->merge(
                 $batchPaths,

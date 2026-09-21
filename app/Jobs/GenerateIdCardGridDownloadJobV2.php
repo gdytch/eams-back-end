@@ -157,7 +157,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
 
             $allRegistrations = $query->get();
 
-            Log::info('IdCardGridDownloadJob: Processing registrations', [
+            Log::info('IdCardGridDownloadJobV2: Processing registrations', [
                 'event_id' => $event->id,
                 'download_id' => $this->download->id,
                 'count' => $allRegistrations->count(),
@@ -189,7 +189,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             )->values();
 
             Log::info(
-                'IdCardGridDownloadJob: Ready registrations found',
+                'IdCardGridDownloadJobV2: Ready registrations found',
                 [
                     'download_id' => $this->download->id,
                     'count' => $readyRegistrations->count(),
@@ -366,7 +366,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             }
 
             Log::info(
-                'IdCardGridDownloadJob: Pages prepared',
+                'IdCardGridDownloadJobV2: Pages prepared',
                 [
                     'download_id' => $this->download->id,
                     'registrations' => $readyRegistrations->count(),
@@ -408,7 +408,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                 $batchNumber = $batchIndex + 1;
 
                 Log::info(
-                    'IdCardGridDownloadJob: Generating PDF batch',
+                    'IdCardGridDownloadJobV2: Generating PDF batch',
                     [
                         'download_id' => $this->download->id,
                         'batch' => $batchNumber,
@@ -463,7 +463,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                 $this->updateProgress($progress);
 
                 Log::info(
-                    'IdCardGridDownloadJob: PDF batch completed',
+                    'IdCardGridDownloadJobV2: PDF batch completed',
                     [
                         'download_id' => $this->download->id,
                         'batch' => $batchNumber,
@@ -492,7 +492,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             $this->updateProgress(90);
 
             Log::info(
-                'IdCardGridDownloadJob: Starting PDF merge',
+                'IdCardGridDownloadJobV2: Starting PDF merge',
                 [
                     'download_id' => $this->download->id,
                     'batch_count' => count($batchPaths),
@@ -584,7 +584,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             );
 
             Log::info(
-                'IdCardGridDownloadJob: Completed successfully',
+                'IdCardGridDownloadJobV2: Completed successfully',
                 [
                     'download_id' => $this->download->id,
                     'pages' => $totalPages,
@@ -648,7 +648,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                  * Last resort.
                  */
                 Log::error(
-                    'IdCardGridDownloadJob: Failed to update status',
+                    'IdCardGridDownloadJobV2: Failed to update status',
                     [
                         'download_id' => $this->download->id,
                         'original_error' =>
@@ -680,7 +680,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                         ]);
                 } catch (Throwable $dbException) {
                     Log::error(
-                        'IdCardGridDownloadJob: Critical database failure',
+                        'IdCardGridDownloadJobV2: Critical database failure',
                         [
                             'download_id' =>
                             $this->download->id,
@@ -695,7 +695,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
              * Log the original exception with stack trace.
              */
             Log::error(
-                'IdCardGridDownloadJob: Job failed',
+                'IdCardGridDownloadJobV2: Job failed',
                 [
                     'download_id' => $this->download->id,
                     'error' => $e->getMessage(),

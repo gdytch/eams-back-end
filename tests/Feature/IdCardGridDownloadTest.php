@@ -217,6 +217,7 @@ class IdCardGridDownloadTest extends TestCase
 
         $response->assertOk();
         $response->assertHeader('content-type', 'application/zip');
+        $response->assertHeader('content-length', (string) strlen('fake zip content'));
         $response->assertDownload("event-{$event->id}-id-card-grid-batches.zip");
         $this->assertSame('fake zip content', $response->streamedContent());
         Storage::disk('local')->assertMissing('test-grid.zip');

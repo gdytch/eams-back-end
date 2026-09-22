@@ -511,7 +511,10 @@ class EventRegistrationController extends Controller
                 }
             },
             "event-{$event->id}-id-card-grid-batches.zip",
-            ['Content-Type' => 'application/zip']
+            [
+                'Content-Type' => 'application/zip',
+                'Content-Length' => $disk->size($filePath),
+            ]
         );
     }
 }

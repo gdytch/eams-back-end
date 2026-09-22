@@ -5,13 +5,17 @@ namespace Tests\Feature;
 use App\Enums\IdCardGridDownloadStatus;
 use App\Jobs\GenerateIdCardGridBatchJob;
 use App\Jobs\GenerateIdCardGridDownloadJob;
+use App\Jobs\MergeIdCardGridDownloadJob;
+use App\Jobs\PrepareIdCardGridDownloadJob;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\IdCardGridDownload;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\PdfMergeService;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -41,7 +45,7 @@ class IdCardGridDownloadTest extends TestCase
         $this->assertEquals('pending', $response->json('data.status'));
         $this->assertEquals([$reg1->id, $reg2->id], $response->json('data.registration_ids'));
 
-        Queue::assertPushed(GenerateIdCardGridDownloadJob::class);
+        Queue::assertPushed(PrepareIdCardGridDownloadJob::class);
 
         $download = IdCardGridDownload::first();
         $this->assertNotNull($download);
@@ -67,7 +71,7 @@ class IdCardGridDownloadTest extends TestCase
         $response->assertJsonStructure(['data' => ['id', 'event_id', 'status']]);
         $this->assertNull($response->json('data.registration_ids'));
 
-        Queue::assertPushed(GenerateIdCardGridDownloadJob::class);
+        Queue::assertPushed(PrepareIdCardGridDownloadJob::class);
 
         $download = IdCardGridDownload::first();
         $this->assertNull($download->registration_ids);
@@ -88,7 +92,7 @@ class IdCardGridDownloadTest extends TestCase
         );
 
         $response->assertForbidden();
-        Queue::assertNotPushed(GenerateIdCardGridDownloadJob::class);
+        Queue::assertNotPushed(PrepareIdCardGridDownloadJob::class);
     }
 
     public function test_start_grid_download_with_nonexistent_registration_ids_returns_404(): void
@@ -105,7 +109,7 @@ class IdCardGridDownloadTest extends TestCase
         );
 
         $response->assertNotFound();
-        Queue::assertNotPushed(GenerateIdCardGridDownloadJob::class);
+        Queue::assertNotPushed(PrepareIdCardGridDownloadJob::class);
     }
 
     public function test_start_grid_download_all_with_no_registrations_returns_404(): void
@@ -121,7 +125,7 @@ class IdCardGridDownloadTest extends TestCase
         );
 
         $response->assertNotFound();
-        Queue::assertNotPushed(GenerateIdCardGridDownloadJob::class);
+        Queue::assertNotPushed(PrepareIdCardGridDownloadJob::class);
     }
 
     public function test_show_grid_download_returns_current_status(): void
@@ -282,6 +286,83 @@ class IdCardGridDownloadTest extends TestCase
         Storage::disk('local')->assertExists(
             "{$event->id}/id-card-grids/{$download->id}/batches/batch-1.pdf"
         );
+    }
+
+    public function test_prepare_job_only_batches_the_selected_registrations(): void
+    {
+        Bus::fake();
+
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $selectedRegistration = EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($organization))
+            ->create(['id_card_images_path' => ['selected.jpg']]);
+        $unselectedRegistration = EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($organization))
+            ->create(['id_card_images_path' => ['unselected.jpg']]);
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'registration_ids' => [$selectedRegistration->id],
+            'status' => IdCardGridDownloadStatus::Pending,
+        ]);
+
+        (new PrepareIdCardGridDownloadJob($download->id))->handle();
+
+        $download->refresh();
+
+        $this->assertSame(1, $download->total_batches);
+        Bus::assertBatched(function ($batch) use ($selectedRegistration, $unselectedRegistration): bool {
+            $jobs = $batch->jobs;
+
+            return $jobs->count() === 1
+                && $jobs->first() instanceof GenerateIdCardGridBatchJob
+                && $jobs->first()->registrationIds === [$selectedRegistration->id]
+                && ! in_array($unselectedRegistration->id, $jobs->first()->registrationIds, true);
+        });
+    }
+
+    public function test_merge_job_writes_final_pdf_without_loading_merged_content(): void
+    {
+        Storage::fake('local');
+
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Processing,
+            'progress_percentage' => 90,
+            'total_batches' => 2,
+            'completed_batches' => 2,
+        ]);
+
+        $batchDirectory = "{$event->id}/id-card-grids/{$download->id}/batches";
+        $batchPaths = [
+            "{$batchDirectory}/batch-1.pdf",
+            "{$batchDirectory}/batch-2.pdf",
+        ];
+        $finalPath = "{$event->id}/id-card-grids/{$download->id}/final.pdf";
+
+        foreach ($batchPaths as $batchPath) {
+            Storage::disk('local')->put($batchPath, '%PDF batch');
+        }
+
+        $pdfMergeService = $this->mock(PdfMergeService::class);
+        $pdfMergeService->shouldReceive('mergeToFile')
+            ->once()
+            ->with($batchPaths, $finalPath, 'local')
+            ->andReturnUsing(function (array $paths, string $outputPath, string $disk): void {
+                Storage::disk($disk)->put($outputPath, '%PDF merged');
+            });
+
+        (new MergeIdCardGridDownloadJob($download->id))->handle($pdfMergeService);
+
+        $download->refresh();
+
+        $this->assertSame(IdCardGridDownloadStatus::Completed, $download->status);
+        $this->assertSame(100, $download->progress_percentage);
+        $this->assertSame($finalPath, $download->file_path);
+        Storage::disk('local')->assertExists($finalPath);
+        Storage::disk('local')->assertMissing($batchPaths);
     }
 
     public function test_job_marks_failed_when_no_ready_images(): void

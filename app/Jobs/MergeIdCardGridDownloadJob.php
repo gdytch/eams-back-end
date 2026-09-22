@@ -100,26 +100,17 @@ class MergeIdCardGridDownloadJob implements ShouldQueue
             $finalPath =
                 "{$directory}/final.pdf";
 
-            /*
-             * PdfMergeService expects storage-relative paths.
-             *
-             * Do NOT use Storage::path() here.
-             */
-            $mergedPdf = $pdfMergeService->merge(
+            $pdfMergeService->mergeToFile(
                 $batchPaths,
+                $finalPath,
                 'local'
             );
 
-            if (! $mergedPdf) {
+            if (! Storage::disk('local')->exists($finalPath)) {
                 throw new \RuntimeException(
-                    'PDF merge returned no content.'
+                    'Merged PDF was not created.'
                 );
             }
-
-            Storage::disk('local')->put(
-                $finalPath,
-                $mergedPdf
-            );
 
             $download->update([
                 'progress_percentage' => 98,

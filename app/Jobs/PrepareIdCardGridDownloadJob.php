@@ -54,9 +54,16 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
              *
              * Keep this query consistent with the existing V2 job.
              */
-            $registrations = $event->registrations()
-                ->with('attendee')
-                ->get();
+            $registrationsQuery = $event->registrations()->with('attendee');
+
+            if ($download->registration_ids !== null) {
+                $registrationsQuery->whereIn(
+                    'id',
+                    $download->registration_ids
+                );
+            }
+
+            $registrations = $registrationsQuery->get();
 
             Log::info('Preparing ID card grid download', [
                 'download_id' => $download->id,

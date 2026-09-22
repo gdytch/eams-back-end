@@ -85,16 +85,22 @@ class DatabaseSeeder extends Seeder
 
         Attendee::factory()
             ->recycle($organization)
-            ->count(100)
+            ->count(350)
             ->create(['created_by' => $checker->id])
             ->each(function (Attendee $attendee, int $index) use ($missions, $churches, $union, $event, $checker) {
                 $mission = $missions[$index % count($missions)];
                 $missionChurches = $churches[$mission->id];
                 $church = $missionChurches[$index % count($missionChurches)];
 
+                if ($index < 50) {
+                    $organizationLevel = 'union';
+                } else {
+                    $organizationLevel = 'mission';
+                }
                 $attendee->update([
                     'union_id' => $union->id,
                     'mission_id' => $mission->id,
+                    'organization_level' => $organizationLevel,
                     'church_id' => $church->id,
                     'mobile_no' => fake()->phoneNumber(),
                     'email_address' => fake()->unique()->safeEmail(),

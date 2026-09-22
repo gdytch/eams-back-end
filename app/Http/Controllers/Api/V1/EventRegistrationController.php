@@ -10,8 +10,7 @@ use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventRegistrationResource;
 use App\Http\Resources\IdCardGridDownloadResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
-use App\Jobs\GenerateIdCardGridDownloadJob;
-use App\Jobs\GenerateIdCardGridDownloadJobV2;
+use App\Jobs\PrepareIdCardGridDownloadJob;
 use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
@@ -60,6 +59,8 @@ class EventRegistrationController extends Controller
                 ->orderBy('attendees.union_id', $sortOrder)
                 ->orderBy('attendees.mission_id', $sortOrder)
                 ->select('event_registrations.*');
+        } elseif ($sortBy === 'registered_at') {
+            $query->orderBy('registered_at', $sortOrder);
         } else {
             $query->orderBy('created_at', 'desc');
         }
@@ -396,7 +397,9 @@ class EventRegistrationController extends Controller
             'status' => 'pending',
         ]);
 
-        GenerateIdCardGridDownloadJobV2::dispatch($download);
+        $download->refresh();
+
+        PrepareIdCardGridDownloadJob::dispatch($download->id);
 
         AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
             'download_id' => $download->id,
@@ -428,7 +431,9 @@ class EventRegistrationController extends Controller
             'status' => 'pending',
         ]);
 
-        GenerateIdCardGridDownloadJobV2::dispatch($download);
+        $download->refresh();
+
+        PrepareIdCardGridDownloadJob::dispatch($download->id);
 
         AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
             'download_id' => $download->id,

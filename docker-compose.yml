@@ -25,7 +25,7 @@ services:
     mem_limit: 1g
     environment:
       - TZ=Asia/Manila
-    command: php artisan queue:work --sleep=3 --tries=3 --timeout=600
+    command: php artisan queue:work --sleep=3 --tries=3 --timeout=600 --memory=1024
     restart: unless-stopped
     volumes:
       - .:/var/www

@@ -26,6 +26,8 @@ class IdCardGridDownloadFactory extends Factory
             'registration_ids' => null,
             'status' => IdCardGridDownloadStatus::Pending,
             'progress_percentage' => 0,
+            'total_batches' => 0,
+            'completed_batches' => 0,
             'file_path' => null,
             'failure_reason' => null,
             'completed_at' => null,

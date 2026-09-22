@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['event_id', 'requested_by', 'registration_ids', 'status', 'progress_percentage', 'file_path', 'failure_reason', 'completed_at'])]
+#[Fillable(['event_id', 'requested_by', 'registration_ids', 'status', 'progress_percentage', 'total_batches', 'completed_batches', 'file_path', 'failure_reason', 'completed_at'])]
 class IdCardGridDownload extends Model
 {
     /** @use HasFactory */
@@ -20,6 +20,8 @@ class IdCardGridDownload extends Model
             'registration_ids' => 'array',
             'status' => IdCardGridDownloadStatus::class,
             'progress_percentage' => 'integer',
+            'total_batches' => 'integer',
+            'completed_batches' => 'integer',
             'completed_at' => 'datetime',
         ];
     }

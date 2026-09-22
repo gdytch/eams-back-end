@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Enums\IdCardGridDownloadStatus;
+use App\Jobs\GenerateIdCardGridBatchJob;
 use App\Jobs\GenerateIdCardGridDownloadJob;
 use App\Models\Attendee;
 use App\Models\Event;
@@ -247,6 +248,40 @@ class IdCardGridDownloadTest extends TestCase
         $this->assertNotNull($download->completed_at);
         $this->assertNull($download->failure_reason);
         Storage::disk('local')->assertExists($download->file_path);
+    }
+
+    public function test_batch_job_tracks_completed_batches(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $registration = EventRegistration::factory()
+            ->for($event)
+            ->for(Attendee::factory()->for($org))
+            ->create();
+
+        $imagePath = "{$event->id}/images/image.jpg";
+        Storage::disk('local')->put($imagePath, 'fake image');
+        $registration->update(['id_card_images_path' => [$imagePath]]);
+
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'total_batches' => 1,
+        ]);
+
+        (new GenerateIdCardGridBatchJob(
+            $download->id,
+            1,
+            [$registration->id],
+        ))->handle();
+
+        $download->refresh();
+
+        $this->assertSame(1, $download->completed_batches);
+        $this->assertSame(90, $download->progress_percentage);
+        Storage::disk('local')->assertExists(
+            "{$event->id}/id-card-grids/{$download->id}/batches/batch-1.pdf"
+        );
     }
 
     public function test_job_marks_failed_when_no_ready_images(): void

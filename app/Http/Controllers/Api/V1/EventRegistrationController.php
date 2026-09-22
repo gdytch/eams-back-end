@@ -486,8 +486,30 @@ class EventRegistrationController extends Controller
             ], 422);
         }
 
-        return Storage::disk('local')->download(
-            $gridDownload->file_path,
+        $disk = Storage::disk('local');
+        $filePath = $gridDownload->file_path;
+
+        if ($filePath === null || ! $disk->exists($filePath)) {
+            return response()->json([
+                'message' => 'This ZIP download is no longer available.',
+            ], 404);
+        }
+
+        return response()->streamDownload(
+            function () use ($disk, $filePath): void {
+                $stream = $disk->readStream($filePath);
+
+                if ($stream === false) {
+                    throw new \RuntimeException('Unable to read ZIP archive.');
+                }
+
+                try {
+                    fpassthru($stream);
+                } finally {
+                    fclose($stream);
+                    $disk->delete($filePath);
+                }
+            },
             "event-{$event->id}-id-card-grid-batches.zip",
             ['Content-Type' => 'application/zip']
         );

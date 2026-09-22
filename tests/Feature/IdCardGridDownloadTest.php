@@ -218,6 +218,29 @@ class IdCardGridDownloadTest extends TestCase
         $response->assertOk();
         $response->assertHeader('content-type', 'application/zip');
         $response->assertDownload("event-{$event->id}-id-card-grid-batches.zip");
+        $this->assertSame('fake zip content', $response->streamedContent());
+        Storage::disk('local')->assertMissing('test-grid.zip');
+    }
+
+    public function test_download_grid_file_returns_404_after_the_zip_has_been_deleted(): void
+    {
+        Storage::fake('local');
+
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->completed()->for($event)->create([
+            'file_path' => 'deleted-grid.zip',
+        ]);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}/file"
+        );
+
+        $response->assertNotFound();
+        $response->assertJson([
+            'message' => 'This ZIP download is no longer available.',
+        ]);
     }
 
     public function test_job_generates_pdf_and_completes_successfully(): void

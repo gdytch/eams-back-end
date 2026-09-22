@@ -127,9 +127,9 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $process = new Process([
             'convert',
             '-density',
-            '900',
+            '600',
             '-quality',
-            '90',
+            '80',
             '-format',
             'jpg',
             $pdfFullPath,

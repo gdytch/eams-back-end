@@ -22,10 +22,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: ams_queue
-    mem_limit: 1g
+    mem_limit: 1400m
     environment:
       - TZ=Asia/Manila
-    command: php artisan queue:work --sleep=3 --tries=3 --timeout=600 --memory=1024
+    command: php artisan queue:work --sleep=3 --tries=3 --timeout=600 --memory=1400
     restart: unless-stopped
     volumes:
       - .:/var/www

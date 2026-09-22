@@ -18,6 +18,8 @@ class AttendeeDashboardController extends Controller
     {
 
         $user = $request->user();
+        abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
+
         $attendee = Attendee::with(['union', 'mission', 'church'])->where('user_id', $user->id)->first();
 
         if ($attendee === null) {
@@ -44,14 +46,14 @@ class AttendeeDashboardController extends Controller
             ->get();
 
         [$upcomingRegistrations, $pastRegistrations] = $registrations->partition(
-            fn($registration) => $registration->event->end_date->isFuture() || $registration->event->end_date->isToday()
+            fn ($registration) => $registration->event->end_date->isFuture() || $registration->event->end_date->isToday()
         );
 
         // Sort upcoming events ascending (soonest first) and past events descending (most recent first).
-        $upcomingRegistrations = $upcomingRegistrations->sortBy(fn($r) => $r->event->start_date);
-        $pastRegistrations = $pastRegistrations->sortByDesc(fn($r) => $r->event->end_date);
+        $upcomingRegistrations = $upcomingRegistrations->sortBy(fn ($r) => $r->event->start_date);
+        $pastRegistrations = $pastRegistrations->sortByDesc(fn ($r) => $r->event->end_date);
 
-        $upcomingEvents = $upcomingRegistrations->map(fn($registration) => [
+        $upcomingEvents = $upcomingRegistrations->map(fn ($registration) => [
             'registration_id' => $registration->id,
             'event' => $registration->event,
             'qr_token' => $registration->qr_token,
@@ -60,17 +62,17 @@ class AttendeeDashboardController extends Controller
             'next_session' => $this->getNextSession($registration->event),
         ]);
 
-        $pastEvents = $pastRegistrations->map(fn($registration) => [
+        $pastEvents = $pastRegistrations->map(fn ($registration) => [
             'registration_id' => $registration->id,
             'event' => $registration->event,
             'attendance_summary' => [
                 'sessions_total' => $registration->event->sessions->count(),
-                'sessions_attended' => $registration->attendanceRecords->count(),
+                'sessions_attended' => $registration->attendanceRecords->whereNotNull('check_in_at')->whereIn('event_session_id', $registration->event->sessions->modelKeys())->unique('event_session_id')->count(),
             ],
         ]);
 
-        $totalSessionsAttended = $registrations->sum(fn($r) => $r->attendanceRecords->count());
-        $totalSessionsAvailable = $pastRegistrations->sum(fn($r) => $r->event->sessions->count());
+        $totalSessionsAttended = $pastEvents->sum('attendance_summary.sessions_attended');
+        $totalSessionsAvailable = $pastRegistrations->sum(fn ($r) => $r->event->sessions->count());
         $attendanceRate = $totalSessionsAvailable > 0 ? round($totalSessionsAttended / $totalSessionsAvailable * 100, 1) : 0;
 
         $nextEvent = $upcomingEvents->first();
@@ -118,8 +120,8 @@ class AttendeeDashboardController extends Controller
     private function getNextSession($event): ?array
     {
         $nextSession = $event->sessions
-            ->filter(fn($session) => $session->startsAt()->isFuture() || $session->startsAt()->isToday())
-            ->sortBy(fn($session) => $session->startsAt())
+            ->filter(fn ($session) => $session->startsAt()->isFuture() || $session->startsAt()->isToday())
+            ->sortBy(fn ($session) => $session->startsAt())
             ->first();
 
         if ($nextSession === null) {

@@ -589,4 +589,26 @@ class AttendeeDashboardTest extends TestCase
         $this->assertCount(1, $data);
         $this->assertEquals($registration1->id, $data[0]['id']);
     }
+
+    public function test_attendance_rate_only_counts_checked_in_sessions_of_past_events(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->create();
+        $past = Event::factory()->for($organization)->create(['start_date' => today()->subDays(3), 'end_date' => today()->subDay()]);
+        $upcoming = Event::factory()->for($organization)->create(['start_date' => today(), 'end_date' => today()->addDay()]);
+        $pastRegistration = EventRegistration::factory()->for($past)->for($attendee)->create();
+        $upcomingRegistration = EventRegistration::factory()->for($upcoming)->for($attendee)->create();
+        $sessions = EventSession::factory()->for($past)->count(2)->create();
+        AttendanceRecord::factory()->for($pastRegistration)->for($sessions[0], 'eventSession')->create(['check_in_at' => now()]);
+        AttendanceRecord::factory()->for($pastRegistration)->for($sessions[1], 'eventSession')->create(['check_in_at' => null]);
+        AttendanceRecord::factory()->for($upcomingRegistration)->for(EventSession::factory()->for($upcoming), 'eventSession')->create(['check_in_at' => now()]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk();
+        $data = $this->extractResponseData($response->json());
+        $this->assertEquals(1, $data['stats']['total_sessions_attended']);
+        $this->assertEquals(2, $data['stats']['total_sessions_available']);
+        $this->assertEquals(50, $data['stats']['attendance_rate']);
+        $this->assertEquals(1, $data['past_events'][0]['attendance_summary']['sessions_attended']);
+    }
 }

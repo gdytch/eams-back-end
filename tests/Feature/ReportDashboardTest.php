@@ -53,8 +53,9 @@ class ReportDashboardTest extends TestCase
             'latest_event',
             'next_upcoming_event',
             'attendance_rate_trend',
-            'breakdown_by_union',
-            'breakdown_by_mission',
+            'registrations_by_organization_level',
+            'registration_summary',
+            'registration_trend',
         ]);
     }
 

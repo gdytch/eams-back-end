@@ -91,8 +91,9 @@ class DashboardTest extends TestCase
             'upcoming_events',
             'today_sessions',
             'attendance_rate_trend',
-            'breakdown_by_union',
-            'breakdown_by_mission',
+            'registrations_by_organization_level',
+            'registration_summary',
+            'registration_trend',
             'recent_activity',
         ]);
         $response->assertJsonPath('organization.id', $org1->id);

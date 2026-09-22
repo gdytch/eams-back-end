@@ -33,11 +33,7 @@ abstract class AttendanceSheetExport implements FromCollection, ShouldAutoSize, 
             'First Name',
             'Middle Name',
             'Last Name',
-            'Union',
-            'Mission',
-            'Church',
-            'Mobile No.',
-            'Email Address',
+            'Organization Level Code',
             'Status',
             'Method',
             'Check-in Time',
@@ -68,7 +64,7 @@ abstract class AttendanceSheetExport implements FromCollection, ShouldAutoSize, 
                 // Apply borders to all cells and style header row
                 if ($data->count() > 0) {
                     $lastRow = $data->count() + 1;
-                    $range = "A1:M{$lastRow}";
+                    $range = "A1:I{$lastRow}";
                     $sheet->getStyle($range)->getBorders()->getBottom()->setBorderStyle(Border::BORDER_THIN);
                     $sheet->getStyle($range)->getBorders()->getTop()->setBorderStyle(Border::BORDER_THIN);
                     $sheet->getStyle($range)->getBorders()->getLeft()->setBorderStyle(Border::BORDER_THIN);
@@ -78,12 +74,12 @@ abstract class AttendanceSheetExport implements FromCollection, ShouldAutoSize, 
                 // Freeze pane at row 2
                 $sheet->freezePane('A2');
 
-                // Color-code Status column (I) based on value
+                // Color-code Status column (E) based on value
                 $dataStartRow = 2;
                 $dataEndRow = $data->count() + 1;
 
                 for ($row = $dataStartRow; $row <= $dataEndRow; $row++) {
-                    $statusCell = $sheet->getCell("I{$row}");
+                    $statusCell = $sheet->getCell("E{$row}");
                     $status = $statusCell->getValue();
 
                     $bgColor = match ($status) {

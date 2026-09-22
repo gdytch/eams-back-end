@@ -52,38 +52,30 @@ class DatabaseSeeder extends Seeder
         $churches = [];
         foreach ($missions as $mission) {
             $churches[$mission->id] = [
-                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'Central '.$mission->name.' Church']),
-                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'District '.$mission->name.' Church']),
+                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'Central ' . $mission->name . ' Church']),
+                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'District ' . $mission->name . ' Church']),
             ];
         }
+
+        $event = Event::factory()->for($organization)->create([
+            'created_by' => $orgAdmin->id,
+            'start_date' => Carbon::now()->subMonths(2)->format('Y-m-d'),
+            'end_date' => Carbon::now()->subMonths(2)->addDays(2)->format('Y-m-d'),
+        ]);
+
+        $event = Event::factory()->for($organization)->create([
+            'created_by' => $orgAdmin->id,
+            'start_date' => Carbon::now()->subMonths(1)->format('Y-m-d'),
+            'end_date' => Carbon::now()->subMonths(1)->addDays(3)->format('Y-m-d'),
+        ]);
+
 
         $event = Event::factory()->for($organization)->create([
             'name' => 'Annual Convention 2027',
             'created_by' => $orgAdmin->id,
         ]);
 
-        $startDate = Carbon::parse($event->start_date);
-        $endDate = Carbon::parse($event->end_date);
-        $day = 1;
-        while (! $startDate->isAfter($endDate)) {
-            EventSession::factory()->for($event)->create([
-                'name' => "Day {$day} Morning Session",
-                'session_date' => $startDate->toDateString(),
-                'start_time' => '08:00:00',
-                'end_time' => '12:00:00',
-            ]);
-
-            EventSession::factory()->for($event)->create([
-                'name' => "Day {$day} Afternoon Session",
-                'session_date' => $startDate->toDateString(),
-                'start_time' => '13:00:00',
-                'end_time' => '17:00:00',
-            ]);
-            $startDate->addDay();
-            $day++;
-        }
-
-        Attendee::factory()
+        $attendees = Attendee::factory()
             ->recycle($organization)
             ->count(350)
             ->create(['created_by' => $checker->id])
@@ -106,11 +98,37 @@ class DatabaseSeeder extends Seeder
                     'email_address' => fake()->unique()->safeEmail(),
                     'remarks' => fake()->optional(0.7)->sentence(),
                 ]);
+            });
 
+        $events = Event::all();
+        foreach ($events as $event) {
+            $startDate = Carbon::parse($event->start_date);
+            $endDate = Carbon::parse($event->end_date);
+            $day = 1;
+            while (! $startDate->isAfter($endDate)) {
+                EventSession::factory()->for($event)->create([
+                    'name' => "Day {$day} Morning Session",
+                    'session_date' => $startDate->toDateString(),
+                    'start_time' => '08:00:00',
+                    'end_time' => '12:00:00',
+                ]);
+
+                EventSession::factory()->for($event)->create([
+                    'name' => "Day {$day} Afternoon Session",
+                    'session_date' => $startDate->toDateString(),
+                    'start_time' => '13:00:00',
+                    'end_time' => '17:00:00',
+                ]);
+                $startDate->addDay();
+                $day++;
+            }
+
+            foreach ($attendees as $attendee) {
                 EventRegistration::factory()->for($event)->for($attendee)->create([
                     'registered_by' => $checker->id,
                 ]);
-            });
+            }
+        }
 
         $this->call(AttendanceRecordSeeder::class);
     }

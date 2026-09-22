@@ -163,6 +163,7 @@ class DashboardController extends Controller
             'accessible_events_count' => $eventsQuery()->count(),
             'upcoming_events' => $this->upcomingEvents($eventsQuery),
             'today_sessions' => $this->todaySessions($eventsQuery),
+            'attendance_rate_trend' => $this->attendanceRateTrend($eventsQuery),
             'my_scan_stats' => [
                 'today' => AttendanceRecord::query()->where('recorded_by', $user->id)->whereDate('created_at', today())->count(),
                 'total' => AttendanceRecord::query()->where('recorded_by', $user->id)->count(),
@@ -250,7 +251,7 @@ class DashboardController extends Controller
     }
 
     /**
-     * Check-in rate for the last N completed events, ordered by end_date descending.
+     * Average session attendance rate for the last N completed events, ordered by end_date descending.
      *
      * @param  Closure(): Builder<Event>  $eventsQuery
      */
@@ -263,21 +264,30 @@ class DashboardController extends Controller
             ->get()
             ->map(function (Event $event) {
                 $registered = $event->registrations()->count();
-                $checkedIn = $event->registrations()
+                $uniqueCheckedIn = $event->registrations()
                     ->whereExists(function ($q) {
                         $q->selectRaw(1)
                             ->from('attendance_records')
                             ->whereColumn('attendance_records.event_registration_id', 'event_registrations.id')
                             ->whereNotNull('check_in_at');
                     })->count();
+                $sessions = $event->sessions()->count();
+                $sessionCheckIns = AttendanceRecord::query()
+                    ->whereHas('eventRegistration', fn ($query) => $query->where('event_id', $event->id))
+                    ->whereNotNull('check_in_at')
+                    ->count();
+                $opportunities = $registered * $sessions;
 
                 return [
                     'event_id' => $event->id,
                     'event_name' => $event->name,
                     'end_date' => $event->end_date->toDateString(),
                     'registered' => $registered,
-                    'checked_in' => $checkedIn,
-                    'rate' => $registered > 0 ? round($checkedIn / $registered * 100, 1) : 0,
+                    'checked_in' => $uniqueCheckedIn,
+                    'sessions' => $sessions,
+                    'session_check_ins' => $sessionCheckIns,
+                    'coverage_rate' => $registered > 0 ? round($uniqueCheckedIn / $registered * 100, 1) : 0,
+                    'rate' => $opportunities > 0 ? round($sessionCheckIns / $opportunities * 100, 1) : 0,
                 ];
             })
             ->all();

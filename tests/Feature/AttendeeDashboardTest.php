@@ -611,4 +611,50 @@ class AttendeeDashboardTest extends TestCase
         $this->assertEquals(50, $data['stats']['attendance_rate']);
         $this->assertEquals(1, $data['past_events'][0]['attendance_summary']['sessions_attended']);
     }
+
+    public function test_attendee_can_view_session_attendance_for_a_registered_event(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->create();
+        $event = Event::factory()->for($organization)->create();
+        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $sessions = EventSession::factory()->for($event)->count(3)->create();
+        AttendanceRecord::factory()
+            ->for($registration)
+            ->for($sessions[0], 'eventSession')
+            ->create(['check_in_at' => now(), 'check_out_at' => now()->addHour()]);
+        AttendanceRecord::factory()
+            ->for($registration)
+            ->for($sessions[1], 'eventSession')
+            ->create(['check_in_at' => null]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/attendance")
+            ->assertOk()
+            ->assertJsonPath('event.id', $event->id)
+            ->assertJsonPath('registration_id', $registration->id)
+            ->assertJsonPath('stats.total_sessions', 3)
+            ->assertJsonPath('stats.sessions_present', 1)
+            ->assertJsonPath('stats.sessions_absent', 2)
+            ->assertJsonPath('stats.attendance_rate', 33.3);
+
+        $sessionsById = collect($response->json('sessions'))->keyBy('id');
+        $this->assertSame('present', $sessionsById[$sessions[0]->id]['status']);
+        $this->assertNotNull($sessionsById[$sessions[0]->id]['check_in_at']);
+        $this->assertSame('absent', $sessionsById[$sessions[1]->id]['status']);
+        $this->assertSame('absent', $sessionsById[$sessions[2]->id]['status']);
+    }
+
+    public function test_attendee_cannot_view_attendance_for_an_event_they_are_not_registered_for(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        Attendee::factory()->for($organization)->for($user)->create();
+        $event = Event::factory()->for($organization)->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/attendance")
+            ->assertNotFound();
+    }
 }

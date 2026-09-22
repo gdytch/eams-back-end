@@ -134,4 +134,22 @@ class Attendee extends Model
             default => null,
         };
     }
+
+    public function getOrganizationLevelNameAttribute(): ?string
+    {
+        return match ($this->organization_level) {
+            OrganizationLevel::Union => $this->union?->name,
+            OrganizationLevel::Mission => $this->mission?->name,
+            default => null,
+        };
+    }
+
+    public function getOrganizationLevelCodeAttribute(): ?string
+    {
+        return match ($this->organization_level) {
+            OrganizationLevel::Union => $this->union?->code,
+            OrganizationLevel::Mission => $this->mission?->code,
+            default => null,
+        };
+    }
 }

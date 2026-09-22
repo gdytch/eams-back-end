@@ -45,6 +45,106 @@ class ReportController extends Controller
     }
 
     /**
+     * Get a dashboard scoped to one event, including per-organization check-in performance.
+     */
+    public function eventDashboard(Event $event)
+    {
+        $this->authorize('view', $event);
+
+        $insights = $this->registrationInsights->build(
+            Event::query()->whereKey($event->id)
+        );
+        $registrations = $event->registrations()
+            ->with([
+                'attendee.union',
+                'attendee.mission',
+                'attendanceRecords' => fn ($query) => $query
+                    ->whereNotNull('check_in_at')
+                    ->orderBy('check_in_at'),
+            ])
+            ->get();
+
+        $checkedIn = $registrations->filter(fn ($registration) => $registration->attendanceRecords->isNotEmpty())->count();
+        $checkedOut = $event->registrations()
+            ->whereHas('attendanceRecords', fn ($query) => $query->whereNotNull('check_out_at'))
+            ->count();
+        $registrationCount = $registrations->count();
+        $organizationRows = collect($insights['registrations_by_organization_level']);
+
+        $sessions = $event->sessions()
+            ->withCount([
+                'attendanceRecords as checked_in_count' => fn ($query) => $query->whereNotNull('check_in_at'),
+                'attendanceRecords as checked_out_count' => fn ($query) => $query->whereNotNull('check_out_at'),
+            ])
+            ->orderBy('session_date')
+            ->orderBy('start_time')
+            ->get();
+        $attendanceRateTrend = $this->eventOrganizationAttendanceRateTrend(
+            $sessions,
+            $registrations,
+            $organizationRows
+        );
+        $attendanceByOrganization = collect($attendanceRateTrend['series'])->keyBy('key');
+        $totalSessionCheckIns = $sessions->sum('checked_in_count');
+        $sessionAttendanceOpportunities = $registrationCount * $sessions->count();
+
+        $dashboard = [
+            'event' => [
+                'id' => $event->id,
+                'name' => $event->name,
+                'start_date' => $event->start_date->toDateString(),
+                'end_date' => $event->end_date->toDateString(),
+                'venue' => $event->venue,
+                'status' => $event->status,
+            ],
+            'attendance' => [
+                'registered' => $registrationCount,
+                'checked_in' => $checkedIn,
+                'checked_out' => $checkedOut,
+                'not_checked_in' => $registrationCount - $checkedIn,
+                'attendance_rate' => $sessionAttendanceOpportunities > 0
+                    ? round($totalSessionCheckIns / $sessionAttendanceOpportunities * 100, 1)
+                    : 0,
+                'check_in_rate' => $registrationCount > 0 ? round($checkedIn / $registrationCount * 100, 1) : 0,
+                'check_out_rate' => $registrationCount > 0 ? round($checkedOut / $registrationCount * 100, 1) : 0,
+            ],
+            'sessions' => [
+                'total' => $sessions->count(),
+                'completed' => $sessions->filter(fn (EventSession $session) => $session->endsAt()->isPast())->count(),
+                'upcoming' => $sessions->filter(fn (EventSession $session) => $session->startsAt()->isFuture())->count(),
+                'items' => $sessions->map(fn (EventSession $session) => [
+                    'id' => $session->id,
+                    'name' => $session->name,
+                    'session_date' => $session->session_date->toDateString(),
+                    'start_time' => $session->start_time,
+                    'end_time' => $session->end_time,
+                    'checked_in' => $session->checked_in_count,
+                    'checked_out' => $session->checked_out_count,
+                    'attendance_rate' => $registrationCount > 0
+                        ? round($session->checked_in_count / $registrationCount * 100, 1)
+                        : 0,
+                ])->all(),
+            ],
+            'top_check_ins_by_organization' => $organizationRows
+                ->map(fn (array $organization) => [
+                    ...$organization,
+                    'check_ins' => $attendanceByOrganization->get($organization['key'])['total_check_ins'] ?? 0,
+                    'attendance_rate' => $attendanceByOrganization->get($organization['key'])['overall_rate'] ?? 0,
+                    'unique_attendees' => $organization['checked_in'],
+                ])
+                ->sortByDesc('attendance_rate')
+                ->values()
+                ->all(),
+            'attendance_rate_trend' => $attendanceRateTrend,
+            ...$insights,
+        ];
+
+        AuditLog::record('report.event_dashboard_viewed', $event);
+
+        return response()->json($dashboard);
+    }
+
+    /**
      * Get attendance summary for a specific event (per-session + overall totals).
      * Also includes a paginated list of attendance records for display in a table.
      */
@@ -565,5 +665,73 @@ class ReportController extends Controller
                 'rate' => $totalRegistered > 0 ? round($totalCheckedIn / $totalRegistered * 100, 1) : 0,
             ];
         })->toArray();
+    }
+
+    /**
+     * Build per-session attendance rates for every represented union or mission.
+     */
+    private function eventOrganizationAttendanceRateTrend($sessions, $registrations, $organizations): array
+    {
+        $labels = $sessions->map(fn (EventSession $session) => [
+            'session_id' => $session->id,
+            'name' => $session->name,
+            'session_date' => $session->session_date->toDateString(),
+            'start_time' => $session->start_time,
+        ])->all();
+        $sessionIndexes = $sessions->mapWithKeys(
+            fn (EventSession $session, int $index) => [$session->id => $index]
+        );
+
+        $series = $organizations->map(function (array $organization) use ($labels): array {
+            return [
+                'key' => $organization['key'],
+                'organization_name' => $organization['organization_name'],
+                'organization_level' => $organization['organization_level'],
+                'registrations' => $organization['registrations'],
+                'overall_rate' => 0,
+                'total_check_ins' => 0,
+                'checked_in' => array_fill(0, count($labels), 0),
+            ];
+        })->keyBy('key');
+
+        foreach ($registrations as $registration) {
+            $level = $registration->attendee?->organization_level?->value ?? 'unassigned';
+            $organizationId = match ($level) {
+                'union' => $registration->attendee?->union_id,
+                'mission' => $registration->attendee?->mission_id,
+                default => null,
+            };
+            $key = $level.':'.($organizationId ?? 'unassigned');
+
+            foreach ($registration->attendanceRecords as $attendanceRecord) {
+                $index = $sessionIndexes->get($attendanceRecord->event_session_id);
+
+                if ($index !== null && $series->has($key)) {
+                    $row = $series->get($key);
+                    $row['checked_in'][$index]++;
+                    $row['total_check_ins']++;
+                    $series->put($key, $row);
+                }
+            }
+        }
+
+        return [
+            'granularity' => 'session',
+            'labels' => $labels,
+            'series' => $series->values()->map(function (array $row): array {
+                $opportunities = $row['registrations'] * count($row['checked_in']);
+                $row['overall_rate'] = $opportunities > 0
+                    ? round($row['total_check_ins'] / $opportunities * 100, 1)
+                    : 0;
+                $row['data'] = array_map(
+                    fn (int $checkedIn): float|int => $row['registrations'] > 0
+                        ? round($checkedIn / $row['registrations'] * 100, 1)
+                        : 0,
+                    $row['checked_in']
+                );
+
+                return $row;
+            })->all(),
+        ];
     }
 }

@@ -120,6 +120,33 @@ class DashboardTest extends TestCase
         $response->assertJsonPath('today_sessions.0.checked_in', 1);
     }
 
+    public function test_dashboard_attendance_rate_uses_session_attendance_opportunities(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->state(['status' => 'completed'])->create();
+        $firstSession = EventSession::factory()->for($event)->create();
+        $secondSession = EventSession::factory()->for($event)->create();
+        $attendees = Attendee::factory()->for($org)->count(2)->create();
+        $registrations = $attendees->map(
+            fn (Attendee $attendee) => EventRegistration::factory()->for($event)->for($attendee)->create()
+        );
+
+        AttendanceRecord::factory()->for($registrations[0])->for($firstSession)->create();
+        AttendanceRecord::factory()->for($registrations[1])->for($firstSession)->create();
+        AttendanceRecord::factory()->for($registrations[0])->for($secondSession)->create();
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->getJson('/api/v1/dashboard');
+
+        $response->assertOk()
+            ->assertJsonPath('attendance_rate_trend.0.event_id', $event->id)
+            ->assertJsonPath('attendance_rate_trend.0.registered', 2)
+            ->assertJsonPath('attendance_rate_trend.0.sessions', 2)
+            ->assertJsonPath('attendance_rate_trend.0.session_check_ins', 3)
+            ->assertJsonPath('attendance_rate_trend.0.coverage_rate', 100)
+            ->assertJsonPath('attendance_rate_trend.0.rate', 75);
+    }
+
     public function test_checker_dashboard_has_no_access_restriction_by_default(): void
     {
         $org = Organization::factory()->create();
@@ -137,6 +164,7 @@ class DashboardTest extends TestCase
             'accessible_events_count',
             'upcoming_events',
             'today_sessions',
+            'attendance_rate_trend',
             'my_scan_stats',
             'recent_scans',
         ]);

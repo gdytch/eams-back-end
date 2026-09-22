@@ -50,6 +50,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::middleware('throttle:6,1')->post('auth/email/verification-notification', [AuthController::class, 'resendVerification']);
     Route::get('attendee/dashboard', [AttendeeDashboardController::class, 'index']);
     Route::get('attendee/registrations', [AttendeeDashboardController::class, 'registrations']);
+    Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
     Route::get('dashboard', [DashboardController::class, 'index']);
 
     Route::get('reports/dashboard', [ReportController::class, 'globalDashboard']);
@@ -127,6 +128,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('events/{event}/reports/attendance-summary', [ReportController::class, 'eventAttendanceSummary']);
         Route::get('events/{event}/reports/attendance-summary/export', [ReportController::class, 'exportEventAttendance']);
+        Route::get('events/{event}/reports/dashboard', [ReportController::class, 'eventDashboard']);
     });
 
     Route::post('attendance/scan', [AttendanceController::class, 'scan']);

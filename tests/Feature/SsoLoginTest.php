@@ -7,6 +7,7 @@ use App\Enums\UserRole;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Models\User;
 use App\Models\UserIdentity;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -243,6 +244,116 @@ class SsoLoginTest extends TestCase
             ->where('provider', 'google')
             ->get();
         $this->assertCount(1, $identities);
+    }
+
+    #[Test]
+    public function existing_user_can_login_when_legacy_client_sends_null_territory_fields(): void
+    {
+        $user = User::factory()->create();
+        UserIdentity::create([
+            'user_id' => $user->id,
+            'provider' => 'google',
+            'provider_id' => 'google-null-territory',
+            'email' => $user->email,
+        ]);
+
+        $socialiteUser = $this->createSocialiteUser('google', 'google-null-territory', $user->email, $user->name);
+
+        Socialite::shouldReceive('driver')
+            ->with('google')
+            ->andReturn($mock = \Mockery::mock())
+            ->once();
+
+        $mock->shouldReceive('stateless')
+            ->andReturnSelf()
+            ->once();
+
+        $mock->shouldReceive('userFromToken')
+            ->with('valid_token')
+            ->andReturn($socialiteUser)
+            ->once();
+
+        $response = $this->postJson('/api/v1/auth/sso/google', [
+            'token' => 'valid_token',
+            'organization_id' => null,
+            'organization_level' => null,
+            'union_id' => null,
+            'mission_id' => null,
+        ]);
+
+        $response->assertOk();
+        $response->assertJson(['is_new_user' => false]);
+    }
+
+    #[Test]
+    public function existing_user_login_without_territory_does_not_create_attendee(): void
+    {
+        $user = User::factory()->create(['email' => 'staff@example.com']);
+        $socialiteUser = $this->createSocialiteUser('google', 'google-staff', $user->email, $user->name);
+
+        Socialite::shouldReceive('driver')
+            ->with('google')
+            ->andReturn($mock = \Mockery::mock())
+            ->once();
+
+        $mock->shouldReceive('stateless')
+            ->andReturnSelf()
+            ->once();
+
+        $mock->shouldReceive('userFromToken')
+            ->with('valid_token')
+            ->andReturn($socialiteUser)
+            ->once();
+
+        $response = $this->postJson('/api/v1/auth/sso/google', [
+            'token' => 'valid_token',
+        ]);
+
+        $response->assertOk();
+        $response->assertJson(['is_new_user' => false]);
+        $this->assertDatabaseMissing('attendees', ['user_id' => $user->id]);
+    }
+
+    #[Test]
+    public function unregistered_user_can_self_register_with_sso_territory(): void
+    {
+        $organization = Organization::factory()->create();
+        $union = Union::factory()->for($organization)->create();
+        $socialiteUser = $this->createSocialiteUser('google', 'google-self-register', 'self-register@example.com', 'Self Register');
+
+        Socialite::shouldReceive('driver')
+            ->with('google')
+            ->andReturn($mock = \Mockery::mock())
+            ->once();
+
+        $mock->shouldReceive('stateless')
+            ->andReturnSelf()
+            ->once();
+
+        $mock->shouldReceive('userFromToken')
+            ->with('valid_token')
+            ->andReturn($socialiteUser)
+            ->once();
+
+        $response = $this->postJson('/api/v1/auth/sso/google', [
+            'token' => 'valid_token',
+            'organization_id' => $organization->id,
+            'organization_level' => 'union',
+            'union_id' => $union->id,
+            'mission_id' => null,
+        ]);
+
+        $response->assertCreated();
+        $response->assertJson(['is_new_user' => true]);
+
+        $user = User::where('email', 'self-register@example.com')->firstOrFail();
+        $this->assertDatabaseHas('attendees', [
+            'user_id' => $user->id,
+            'organization_id' => $organization->id,
+            'organization_level' => 'union',
+            'union_id' => $union->id,
+            'mission_id' => null,
+        ]);
     }
 
     #[Test]

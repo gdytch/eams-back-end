@@ -176,18 +176,19 @@ class AuthController extends Controller
 
     public function sso(SsoLoginRequest $request, string $provider): JsonResponse
     {
+        $data = $request->validated();
         $ssoProvider = SsoProvider::tryFrom($provider);
         abort_if($ssoProvider === null, 404);
 
         try {
-            $socialiteUser = Socialite::driver($ssoProvider->value)->stateless()->userFromToken($request->validated('token'));
+            $socialiteUser = Socialite::driver($ssoProvider->value)->stateless()->userFromToken($data['token']);
         } catch (Throwable) {
             return response()->json(['message' => 'Unable to verify SSO token.'], 401);
         }
 
         abort_if(blank($socialiteUser->getEmail()), 422, 'Email permission is required to sign in.');
 
-        return DB::transaction(function () use ($socialiteUser, $ssoProvider, $request) {
+        return DB::transaction(function () use ($data, $socialiteUser, $ssoProvider, $request) {
             $providerId = $socialiteUser->getId();
 
             // Try to find existing identity
@@ -230,15 +231,22 @@ class AuthController extends Controller
                         }
                     }
 
-                    // Validate: either attendee exists or valid invite token provided
-                    if ($attendee === null && $inviteEvent === null && $inviteAttendee === null) {
+                    $hasRegistrationTerritory = $request->filled('organization_id')
+                        && $request->filled('organization_level')
+                        && $request->filled('union_id');
+
+                    // Validate: either attendee exists, a valid invite was provided, or the registration dialog supplied a territory
+                    if ($attendee === null && $inviteEvent === null && $inviteAttendee === null && ! $hasRegistrationTerritory) {
                         throw ValidationException::withMessages([
                             'email' => 'This email is not registered. Please contact your administrator.',
                         ]);
                     }
 
-                    // Resolve organization: prioritize attendee, then invite (event or attendee)
-                    $organizationId = $attendee?->organization_id ?? $inviteAttendee?->organization_id ?? $inviteEvent?->organization_id;
+                    // Resolve organization: prioritize attendee, then invite (event or attendee), then self-registration territory
+                    $organizationId = $attendee?->organization_id
+                        ?? $inviteAttendee?->organization_id
+                        ?? $inviteEvent?->organization_id
+                        ?? $data['organization_id'];
 
                     // Create new user
                     $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
@@ -263,7 +271,7 @@ class AuthController extends Controller
                             'user_id' => $user->id,
                             'invite_token' => null,
                         ]);
-                        if ($request->filled('organiztion_id')) {
+                        if ($request->filled('organization_id')) {
                             $attendeeToLink->update([
                                 'organization_id' => $request->validated('organization_id'),
                             ]);
@@ -292,10 +300,10 @@ class AuthController extends Controller
                         $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
                         $attendee = Attendee::create([
                             'user_id' => $user->id,
-                            'organization_id' => $request->validated('organization_id'),
-                            'organization_level' => $request->validated('organization_level'),
-                            'union_id' => $request->validated('union_id'),
-                            'mission_id' => $request->validated('mission_id') ?? null,
+                            'organization_id' => $organizationId,
+                            'organization_level' => $data['organization_level'] ?? null,
+                            'union_id' => $data['union_id'] ?? null,
+                            'mission_id' => $data['mission_id'] ?? null,
                             'first_name' => $firstName,
                             'middle_name' => $data['middle_name'] ?? null,
                             'last_name' => $lastName,
@@ -323,7 +331,7 @@ class AuthController extends Controller
                                 'invite_token' => null,
                             ]);
 
-                            if ($request->filled('organiztion_id')) {
+                            if ($request->filled('organization_id')) {
                                 $attendee->update([
                                     'organization_id' => $request->validated('organization_id'),
                                 ]);
@@ -351,17 +359,21 @@ class AuthController extends Controller
 
                             AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
                         }
-                    } else {
+                    } elseif (
+                        $request->filled('organization_id')
+                        && $request->filled('organization_level')
+                        && $request->filled('union_id')
+                    ) {
                         // Self-registration: create a new attendee linked to this user
                         $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
                         $firstName = Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@');
                         $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
                         $attendee = Attendee::create([
                             'user_id' => $user->id,
-                            'organization_id' => $request->validated('organization_id'),
-                            'organization_level' => $request->validated('organization_level'),
-                            'union_id' => $request->validated('union_id'),
-                            'mission_id' => $request->validated('mission_id') ?? null,
+                            'organization_id' => $data['organization_id'],
+                            'organization_level' => $data['organization_level'],
+                            'union_id' => $data['union_id'],
+                            'mission_id' => $data['mission_id'] ?? null,
                             'first_name' => $firstName,
                             'middle_name' => $data['middle_name'] ?? null,
                             'last_name' => $lastName,

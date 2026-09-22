@@ -134,7 +134,7 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
             /*
              * Laravel coordinates the jobs for us.
              *
-             * The merge job is dispatched ONLY after every batch
+             * The archive job is dispatched ONLY after every batch
              * completes successfully.
              */
             Bus::batch($jobs)

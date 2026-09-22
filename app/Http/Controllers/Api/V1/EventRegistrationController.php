@@ -54,7 +54,7 @@ class EventRegistrationController extends Controller
             $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
                 ->orderBy('attendees.last_name', $sortOrder)
                 ->select('event_registrations.*');
-        } else if ($sortBy === 'organization_level') {
+        } elseif ($sortBy === 'organization_level') {
             $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
                 ->orderBy('attendees.union_id', $sortOrder)
                 ->orderBy('attendees.mission_id', $sortOrder)
@@ -173,8 +173,8 @@ class EventRegistrationController extends Controller
         $registrations = $query->get();
 
         // dompdf cannot render inline <svg> elements, so embed the QR as a base64 data URI <img> instead.
-        $qrImages = $registrations->mapWithKeys(fn(EventRegistration $registration) => [
-            $registration->id => 'data:image/svg+xml;base64,' . base64_encode(
+        $qrImages = $registrations->mapWithKeys(fn (EventRegistration $registration) => [
+            $registration->id => 'data:image/svg+xml;base64,'.base64_encode(
                 QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token)
             ),
         ]);
@@ -255,7 +255,7 @@ class EventRegistrationController extends Controller
         // Collect valid ID card paths (filter out missing or not yet generated cards)
         $pdfPaths = $registrations
             ->filter(
-                fn(EventRegistration $reg) => $reg->id_card_path !== null &&
+                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
                     Storage::disk('local')->exists($reg->id_card_path)
             )
             ->pluck('id_card_path')
@@ -301,7 +301,7 @@ class EventRegistrationController extends Controller
         // Collect valid ID card paths (filter out missing or not yet generated cards)
         $pdfPaths = $registrations
             ->filter(
-                fn(EventRegistration $reg) => $reg->id_card_path !== null &&
+                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
                     Storage::disk('local')->exists($reg->id_card_path)
             )
             ->pluck('id_card_path')
@@ -366,7 +366,7 @@ class EventRegistrationController extends Controller
     }
 
     /**
-     * Start a background job to generate a grid PDF of ID card images for specified registrations.
+     * Start a background job to generate batch PDFs of ID card images for specified registrations.
      * Returns a download batch ID; use GET /id-cards/grid-download/{id} to poll status,
      * then GET /id-cards/grid-download/{id}/file to download once completed.
      */
@@ -410,7 +410,7 @@ class EventRegistrationController extends Controller
     }
 
     /**
-     * Start a background job to generate a grid PDF of ID card images for all registrations.
+     * Start a background job to generate batch PDFs of ID card images for all registrations.
      * Returns a download batch ID; use GET /id-cards/grid-download/{id} to poll status,
      * then GET /id-cards/grid-download/{id}/file to download once completed.
      */
@@ -444,7 +444,7 @@ class EventRegistrationController extends Controller
     }
 
     /**
-     * Check the status of a grid PDF download batch.
+     * Check the status of a grid ZIP download batch.
      */
     public function showIdCardGridDownload(Event $event, IdCardGridDownload $gridDownload)
     {
@@ -460,7 +460,7 @@ class EventRegistrationController extends Controller
     }
 
     /**
-     * Download the completed grid PDF of ID card images.
+     * Download the completed ZIP containing the grid PDF batches.
      * Returns 202 if still processing, 422 if generation failed.
      */
     public function downloadIdCardGridDownload(Event $event, IdCardGridDownload $gridDownload)
@@ -475,7 +475,7 @@ class EventRegistrationController extends Controller
 
         if ($gridDownload->status->value === 'pending' || $gridDownload->status->value === 'processing') {
             return response()->json([
-                'message' => 'Grid PDF is still being generated. Check back shortly.',
+                'message' => 'Grid ZIP is still being generated. Check back shortly.',
                 'status' => $gridDownload->status->value,
             ], 202);
         }
@@ -488,7 +488,8 @@ class EventRegistrationController extends Controller
 
         return Storage::disk('local')->download(
             $gridDownload->file_path,
-            "event-{$event->id}-id-card-grid.pdf"
+            "event-{$event->id}-id-card-grid-batches.zip",
+            ['Content-Type' => 'application/zip']
         );
     }
 }

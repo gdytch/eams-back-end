@@ -4,39 +4,37 @@ namespace App\Jobs;
 
 use App\Enums\IdCardGridDownloadStatus;
 use App\Models\IdCardGridDownload;
-use App\Services\PdfMergeService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Throwable;
+use ZipArchive;
 
 class MergeIdCardGridDownloadJob implements ShouldQueue
 {
     use Dispatchable, Queueable;
 
-    /**
-     * Merging can take some time.
-     */
     public int $timeout = 600;
 
     public int $tries = 3;
+
+    public bool $failOnTimeout = true;
 
     public function __construct(
         public int $downloadId,
     ) {}
 
-    public function handle(
-        PdfMergeService $pdfMergeService
-    ): void {
+    public function handle(): void
+    {
         $download = IdCardGridDownload::with('event')
             ->findOrFail($this->downloadId);
 
         $event = $download->event;
 
         try {
-            Log::info('Starting ID card grid PDF merge', [
+            Log::info('Starting ID card grid ZIP archive', [
                 'download_id' => $download->id,
                 'event_id' => $event->id,
                 'total_batches' => $download->total_batches,
@@ -87,36 +85,84 @@ class MergeIdCardGridDownloadJob implements ShouldQueue
 
             if (empty($batchPaths)) {
                 throw new \RuntimeException(
-                    'No batch PDFs were found to merge.'
+                    'No batch PDFs were found to archive.'
                 );
             }
 
-            /*
-             * Final PDF.
-             *
-             * Use download ID instead of event ID to prevent
-             * collisions between multiple downloads.
-             */
-            $finalPath =
-                "{$directory}/final.pdf";
+            $finalPath = "{$directory}/id-card-grid-batches.zip";
+            $temporaryPath = "{$finalPath}.tmp";
+            $disk = Storage::disk('local');
 
-            $pdfMergeService->mergeToFile(
-                $batchPaths,
-                $finalPath,
-                'local'
+            $download->update([
+                'progress_percentage' => 95,
+            ]);
+
+            Log::info('Creating ID card grid ZIP archive', [
+                'download_id' => $download->id,
+                'batch_count' => count($batchPaths),
+            ]);
+
+            $disk->delete($temporaryPath);
+
+            $archive = new ZipArchive;
+            $openResult = $archive->open(
+                $disk->path($temporaryPath),
+                ZipArchive::CREATE | ZipArchive::OVERWRITE
             );
 
-            if (! Storage::disk('local')->exists($finalPath)) {
+            if ($openResult !== true) {
                 throw new \RuntimeException(
-                    'Merged PDF was not created.'
+                    "Unable to create ZIP archive (error {$openResult})."
                 );
+            }
+
+            try {
+                foreach ($batchPaths as $batchPath) {
+                    $archiveEntry = basename($batchPath);
+
+                    if (! $archive->addFile(
+                        $disk->path($batchPath),
+                        $archiveEntry
+                    )) {
+                        throw new \RuntimeException(
+                            "Unable to add batch PDF to ZIP archive: {$batchPath}"
+                        );
+                    }
+
+                    if (! $archive->setCompressionName($archiveEntry, ZipArchive::CM_STORE)) {
+                        throw new \RuntimeException(
+                            "Unable to configure batch PDF in ZIP archive: {$batchPath}"
+                        );
+                    }
+                }
+
+                if (! $archive->close()) {
+                    throw new \RuntimeException('Unable to finalize ZIP archive.');
+                }
+            } catch (Throwable $e) {
+                $archive->close();
+                $disk->delete($temporaryPath);
+
+                throw $e;
+            }
+
+            if (! $disk->exists($temporaryPath) || $disk->size($temporaryPath) === 0) {
+                throw new \RuntimeException(
+                    'ZIP archive was not created.'
+                );
+            }
+
+            $disk->delete($finalPath);
+
+            if (! $disk->move($temporaryPath, $finalPath)) {
+                throw new \RuntimeException('Unable to move the ZIP archive into place.');
             }
 
             $download->update([
                 'progress_percentage' => 98,
             ]);
 
-            Log::info('ID card grid PDF merged', [
+            Log::info('ID card grid ZIP archive created', [
                 'download_id' => $download->id,
                 'final_path' => $finalPath,
                 'size' => Storage::disk('local')
@@ -167,7 +213,7 @@ class MergeIdCardGridDownloadJob implements ShouldQueue
             );
         } catch (Throwable $e) {
             Log::error(
-                'Failed merging ID card grid PDFs',
+                'Failed archiving ID card grid PDFs',
                 [
                     'download_id' => $download->id,
                     'error' => $e->getMessage(),
@@ -182,5 +228,23 @@ class MergeIdCardGridDownloadJob implements ShouldQueue
 
             throw $e;
         }
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        $failureReason = $exception?->getMessage()
+            ?? 'The ZIP archive worker stopped unexpectedly.';
+
+        IdCardGridDownload::query()
+            ->whereKey($this->downloadId)
+            ->update([
+                'status' => IdCardGridDownloadStatus::Failed,
+                'failure_reason' => $failureReason,
+            ]);
+
+        Log::error('ID card grid archive job failed permanently', [
+            'download_id' => $this->downloadId,
+            'error' => $failureReason,
+        ]);
     }
 }

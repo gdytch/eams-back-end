@@ -13,12 +13,12 @@ use App\Models\EventRegistration;
 use App\Models\IdCardGridDownload;
 use App\Models\Organization;
 use App\Models\User;
-use App\Services\PdfMergeService;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
+use ZipArchive;
 
 class IdCardGridDownloadTest extends TestCase
 {
@@ -176,7 +176,7 @@ class IdCardGridDownloadTest extends TestCase
 
         $response->assertStatus(202);
         $response->assertJson([
-            'message' => 'Grid PDF is still being generated. Check back shortly.',
+            'message' => 'Grid ZIP is still being generated. Check back shortly.',
             'status' => 'processing',
         ]);
     }
@@ -198,7 +198,7 @@ class IdCardGridDownloadTest extends TestCase
         ]);
     }
 
-    public function test_download_grid_file_returns_pdf_when_completed(): void
+    public function test_download_grid_file_returns_zip_when_completed(): void
     {
         Storage::fake('local');
 
@@ -206,17 +206,18 @@ class IdCardGridDownloadTest extends TestCase
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
         $download = IdCardGridDownload::factory()->completed()->for($event)->create([
-            'file_path' => 'test-grid.pdf',
+            'file_path' => 'test-grid.zip',
         ]);
 
-        Storage::disk('local')->put('test-grid.pdf', 'fake pdf content');
+        Storage::disk('local')->put('test-grid.zip', 'fake zip content');
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->getJson(
             "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}/file"
         );
 
         $response->assertOk();
-        $response->assertHeader('content-type', 'application/pdf');
+        $response->assertHeader('content-type', 'application/zip');
+        $response->assertDownload("event-{$event->id}-id-card-grid-batches.zip");
     }
 
     public function test_job_generates_pdf_and_completes_successfully(): void
@@ -322,7 +323,7 @@ class IdCardGridDownloadTest extends TestCase
         });
     }
 
-    public function test_merge_job_writes_final_pdf_without_loading_merged_content(): void
+    public function test_finalization_job_archives_batch_pdfs(): void
     {
         Storage::fake('local');
 
@@ -340,21 +341,13 @@ class IdCardGridDownloadTest extends TestCase
             "{$batchDirectory}/batch-1.pdf",
             "{$batchDirectory}/batch-2.pdf",
         ];
-        $finalPath = "{$event->id}/id-card-grids/{$download->id}/final.pdf";
+        $finalPath = "{$event->id}/id-card-grids/{$download->id}/id-card-grid-batches.zip";
 
         foreach ($batchPaths as $batchPath) {
             Storage::disk('local')->put($batchPath, '%PDF batch');
         }
 
-        $pdfMergeService = $this->mock(PdfMergeService::class);
-        $pdfMergeService->shouldReceive('mergeToFile')
-            ->once()
-            ->with($batchPaths, $finalPath, 'local')
-            ->andReturnUsing(function (array $paths, string $outputPath, string $disk): void {
-                Storage::disk($disk)->put($outputPath, '%PDF merged');
-            });
-
-        (new MergeIdCardGridDownloadJob($download->id))->handle($pdfMergeService);
+        (new MergeIdCardGridDownloadJob($download->id))->handle();
 
         $download->refresh();
 
@@ -363,6 +356,33 @@ class IdCardGridDownloadTest extends TestCase
         $this->assertSame($finalPath, $download->file_path);
         Storage::disk('local')->assertExists($finalPath);
         Storage::disk('local')->assertMissing($batchPaths);
+
+        $archive = new ZipArchive;
+        $this->assertTrue($archive->open(Storage::disk('local')->path($finalPath)));
+        $this->assertSame('%PDF batch', $archive->getFromName('batch-1.pdf'));
+        $this->assertSame('%PDF batch', $archive->getFromName('batch-2.pdf'));
+        $this->assertSame(ZipArchive::CM_STORE, $archive->statName('batch-1.pdf')['comp_method']);
+        $this->assertTrue($archive->close());
+    }
+
+    public function test_merge_job_marks_download_failed_after_permanent_failure(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Processing,
+            'progress_percentage' => 95,
+        ]);
+        $job = new MergeIdCardGridDownloadJob($download->id);
+
+        $job->failed(new \RuntimeException('Archive process timed out.'));
+
+        $download->refresh();
+
+        $this->assertTrue($job->failOnTimeout);
+        $this->assertSame(600, $job->timeout);
+        $this->assertSame(IdCardGridDownloadStatus::Failed, $download->status);
+        $this->assertSame('Archive process timed out.', $download->failure_reason);
     }
 
     public function test_job_marks_failed_when_no_ready_images(): void

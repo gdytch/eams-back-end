@@ -85,8 +85,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('churches', ChurchController::class);
 
     Route::get('attendees/check-duplicates', [AttendeeController::class, 'checkDuplicates']);
+    Route::get('attendees/duplicates', [AttendeeController::class, 'duplicates']);
+    Route::post('attendees/duplicates/merge', [AttendeeController::class, 'mergeDuplicates']);
+    Route::post('attendees/duplicates/dismiss', [AttendeeController::class, 'dismissDuplicates']);
     Route::get('attendees/export', [AttendeeController::class, 'export']);
-    Route::apiResource('attendees', AttendeeController::class);
+    Route::get('attendees/{attendeeId}', [AttendeeController::class, 'showById'])->whereNumber('attendeeId');
+    Route::apiResource('attendees', AttendeeController::class)->except('show');
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);
     Route::delete('attendees/{attendee}/photo', [AttendeeController::class, 'removePhoto']);
 

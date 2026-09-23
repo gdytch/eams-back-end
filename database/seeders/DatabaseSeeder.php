@@ -100,6 +100,29 @@ class DatabaseSeeder extends Seeder
                 ]);
             });
 
+        // Seed reviewable duplicate groups for the admin duplicate-resolution screen.
+        $duplicateMission = $missions[0];
+        $duplicateChurch = $churches[$duplicateMission->id][0];
+        $duplicateAttendees = collect([
+            ['first_name' => 'Demo', 'last_name' => 'Duplicate'],
+            ['first_name' => 'demo', 'last_name' => '  duplicate '],
+            ['first_name' => 'Sample', 'last_name' => 'Duplicate'],
+            ['first_name' => 'sample', 'last_name' => 'duplicate'],
+        ])->map(function (array $name) use ($organization, $checker, $union, $duplicateMission, $duplicateChurch) {
+            return Attendee::factory()->for($organization)->create([
+                ...$name,
+                'middle_name' => null,
+                'organization_level' => 'mission',
+                'union_id' => $union->id,
+                'mission_id' => $duplicateMission->id,
+                'church_id' => $duplicateChurch->id,
+                'mobile_no' => null,
+                'email_address' => null,
+                'created_by' => $checker->id,
+            ]);
+        });
+        $attendees = $attendees->concat($duplicateAttendees);
+
         $events = Event::all();
         foreach ($events as $event) {
             $startDate = Carbon::parse($event->start_date);

@@ -44,6 +44,7 @@ class UpdateAttendeeRequest extends FormRequest
                 $usersEmailRule,
             ],
             'remarks' => ['nullable', 'string'],
+            'override_duplicate' => ['sometimes', 'boolean'],
         ];
     }
 

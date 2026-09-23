@@ -14,21 +14,27 @@ use App\Http\Resources\EventRegistrationResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
+use App\Models\AttendeeDuplicateDismissal;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Services\AttendeeInvitationService;
+use App\Services\AttendeeDuplicateMergeService;
 use App\Services\ImageUploadService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use DomainException;
 use Maatwebsite\Excel\Facades\Excel;
 
 class AttendeeController extends Controller
 {
-    public function __construct(private AttendeeInvitationService $invitationService) {}
+    public function __construct(
+        private AttendeeInvitationService $invitationService,
+        private AttendeeDuplicateMergeService $duplicateMergeService,
+    ) {}
 
     /**
      * Display a listing of the resource.
@@ -90,7 +96,10 @@ class AttendeeController extends Controller
         unset($data['override_duplicate'], $data['auto_register'], $data['event_id']);
 
         if (! $override) {
-            $duplicates = Attendee::matchingName($data['first_name'], $data['middle_name'] ?? null, $data['last_name'])->get();
+            $organizationId = $data['organization_id'] ?? $request->user()->organization_id;
+            $duplicates = Attendee::matchingName($data['first_name'], $data['middle_name'] ?? null, $data['last_name'])
+                ->where('organization_id', $organizationId)
+                ->get();
 
             if ($duplicates->isNotEmpty()) {
                 return response()->json([
@@ -140,6 +149,8 @@ class AttendeeController extends Controller
      */
     public function checkDuplicates(CheckAttendeeDuplicatesRequest $request)
     {
+        $this->authorize('viewAny', Attendee::class);
+
         $duplicates = Attendee::matchingName(
             $request->validated('first_name'),
             $request->validated('middle_name'),
@@ -150,10 +161,145 @@ class AttendeeController extends Controller
     }
 
     /**
+     * Return active, unresolved exact-name duplicate groups for review.
+     */
+    public function duplicates(Request $request)
+    {
+        $this->authorizeDuplicateResolution($request);
+
+        $perPage = min(max($request->integer('per_page', 10), 1), 50);
+        $page = max($request->integer('page', 1), 1);
+        $groupQuery = Attendee::query()
+            ->select('organization_id', 'normalized_name', DB::raw('COUNT(*) as attendee_count'))
+            ->groupBy('organization_id', 'normalized_name')
+            ->havingRaw('COUNT(*) > 1')
+            ->orderBy('normalized_name');
+
+        if ($request->user()->isSuperAdmin() && $request->filled('organization_id')) {
+            $groupQuery->where('organization_id', $request->integer('organization_id'));
+        }
+
+        $groups = $groupQuery->get()->filter(function ($group) {
+            $attendeeIds = Attendee::query()
+                ->where('organization_id', $group->organization_id)
+                ->where('normalized_name', $group->normalized_name)
+                ->pluck('id');
+
+            return ! $this->allPairsDismissed($group->organization_id, $group->normalized_name, $attendeeIds);
+        })->values();
+
+        $pageGroups = $groups->slice(($page - 1) * $perPage, $perPage)->values();
+        $organizationNames = DB::table('organizations')
+            ->whereIn('id', $pageGroups->pluck('organization_id')->unique())
+            ->pluck('name', 'id');
+        $data = $pageGroups->map(function ($group) use ($request, $organizationNames) {
+            $attendees = Attendee::query()
+                ->where('organization_id', $group->organization_id)
+                ->where('normalized_name', $group->normalized_name)
+                ->with(['union', 'mission', 'church', 'registrations.event', 'registrations.attendanceRecords'])
+                ->orderBy('created_at')
+                ->get();
+
+            $members = $attendees->map(function (Attendee $attendee) use ($request) {
+                $attendee->setAttribute('duplicate_registration_count', $attendee->registrations->count());
+                $attendee->setAttribute('duplicate_attendance_count', $attendee->registrations->sum(fn ($registration) => $registration->attendanceRecords->count()));
+                $attendee->setAttribute('duplicate_event_names', $attendee->registrations->pluck('event.name')->filter()->unique()->values()->all());
+                $attendee->setAttribute('duplicate_has_linked_account', $attendee->user_id !== null);
+
+                return (new AttendeeResource($attendee))->resolve($request);
+            });
+
+            return [
+                'organization_id' => $group->organization_id,
+                'organization_name' => $organizationNames->get($group->organization_id),
+                'normalized_name' => $group->normalized_name,
+                'attendee_count' => $attendees->count(),
+                'attendees' => $members,
+                'has_account_conflict' => $attendees->whereNotNull('user_id')->pluck('user_id')->unique()->count() > 1,
+            ];
+        });
+
+        return response()->json([
+            'data' => $data,
+            'meta' => [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $groups->count(),
+                'last_page' => max((int) ceil($groups->count() / $perPage), 1),
+            ],
+        ]);
+    }
+
+    public function dismissDuplicates(Request $request)
+    {
+        $this->authorizeDuplicateResolution($request);
+        $data = $request->validate(['attendee_ids' => ['required', 'array', 'min:2'], 'attendee_ids.*' => ['integer', 'distinct']]);
+        $attendees = $this->activeDuplicateAttendees($data['attendee_ids']);
+        $fingerprint = $this->duplicateFingerprint($attendees->first()->normalized_name);
+
+        foreach ($attendees as $index => $first) {
+            foreach ($attendees->slice($index + 1) as $second) {
+                [$oneId, $twoId] = collect([$first->id, $second->id])->sort()->values()->all();
+                AttendeeDuplicateDismissal::query()->firstOrCreate([
+                    'organization_id' => $first->organization_id,
+                    'attendee_one_id' => $oneId,
+                    'attendee_two_id' => $twoId,
+                    'name_fingerprint' => $fingerprint,
+                ], [
+                    'dismissed_by' => $request->user()->id,
+                    'dismissed_at' => now(),
+                ]);
+            }
+        }
+
+        AuditLog::record('attendee_duplicates.dismissed', $attendees->first(), ['attendee_ids' => $attendees->pluck('id')->all()]);
+
+        return response()->noContent();
+    }
+
+    public function mergeDuplicates(Request $request)
+    {
+        $this->authorizeDuplicateResolution($request);
+        $data = $request->validate([
+            'primary_attendee_id' => ['required', 'integer'],
+            'duplicate_attendee_ids' => ['required', 'array', 'min:1'],
+            'duplicate_attendee_ids.*' => ['integer', 'distinct'],
+        ]);
+
+        if (in_array($data['primary_attendee_id'], $data['duplicate_attendee_ids'], true)) {
+            return response()->json(['message' => 'Primary attendee cannot also be a duplicate source.'], 422);
+        }
+
+        try {
+            $this->activeDuplicateAttendees([$data['primary_attendee_id'], ...$data['duplicate_attendee_ids']]);
+            $attendee = $this->duplicateMergeService->merge(
+                $request->user(),
+                $data['primary_attendee_id'],
+                $data['duplicate_attendee_ids'],
+            );
+        } catch (DomainException $exception) {
+            return response()->json(['message' => $exception->getMessage()], 409);
+        }
+
+        return AttendeeResource::make($attendee);
+    }
+
+    /**
      * Display the specified resource.
      */
-    public function show(Request $request, Attendee $attendee)
+    public function showById(Request $request, int $attendeeId)
     {
+        $attendee = Attendee::withoutGlobalScopes()->findOrFail($attendeeId);
+        $mergedFromId = null;
+        if ($attendee->merged_into_id !== null) {
+            $mergedFromId = $attendee->id;
+            $attendee = Attendee::query()->findOrFail($attendee->merged_into_id);
+        }
+
+        if (! $request->user()->isSuperAdmin() && $request->user()->organization_id !== $attendee->organization_id) {
+            abort(404);
+        }
+
         $this->authorize('view', $attendee);
         $attendee->load('union', 'mission', 'church');
         $eventStats = null;
@@ -192,7 +338,10 @@ class AttendeeController extends Controller
             }
         }
 
-        return AttendeeResource::make($attendee)->additional(['event_stats' => $eventStats]);
+        return AttendeeResource::make($attendee)->additional([
+            'event_stats' => $eventStats,
+            'merged_from_id' => $mergedFromId,
+        ]);
     }
 
     /**
@@ -201,6 +350,32 @@ class AttendeeController extends Controller
     public function update(UpdateAttendeeRequest $request, Attendee $attendee)
     {
         $data = $request->validated();
+        $override = (bool) ($data['override_duplicate'] ?? false);
+        unset($data['override_duplicate']);
+
+        $nameChanged = array_key_exists('first_name', $data)
+            || array_key_exists('middle_name', $data)
+            || array_key_exists('last_name', $data);
+        if ($nameChanged && ! $override) {
+            $firstName = $data['first_name'] ?? $attendee->first_name;
+            $middleName = array_key_exists('middle_name', $data) ? $data['middle_name'] : $attendee->middle_name;
+            $lastName = $data['last_name'] ?? $attendee->last_name;
+            $normalizedName = Attendee::normalizeName($firstName, $middleName, $lastName);
+
+            if ($normalizedName !== $attendee->normalized_name) {
+                $duplicates = Attendee::matchingName($firstName, $middleName, $lastName)
+                    ->where('organization_id', $attendee->organization_id)
+                    ->whereKeyNot($attendee->id)
+                    ->get();
+
+                if ($duplicates->isNotEmpty()) {
+                    return response()->json([
+                        'message' => 'Potential duplicate attendees found. Pass override_duplicate=true to update anyway.',
+                        'duplicates' => AttendeeResource::collection($duplicates),
+                    ], 409);
+                }
+            }
+        }
 
         return DB::transaction(function () use ($attendee, $data) {
             $attendee->update($data);
@@ -254,6 +429,10 @@ class AttendeeController extends Controller
     public function destroy(Attendee $attendee)
     {
         $this->authorize('delete', $attendee);
+
+        if (Attendee::withoutGlobalScopes()->where('merged_into_id', $attendee->id)->exists()) {
+            return response()->json(['message' => 'Cannot delete an attendee with merged source records.'], 409);
+        }
 
         AuditLog::record('attendee.deleted', $attendee);
 
@@ -376,5 +555,59 @@ class AttendeeController extends Controller
         ]);
 
         return $pdf->download('attendees.pdf');
+    }
+
+    private function authorizeDuplicateResolution(Request $request): void
+    {
+        abort_unless($request->user()->isSuperAdmin() || $request->user()->isOrgAdmin(), 403);
+    }
+
+    /** @param array<int, int|string> $attendeeIds */
+    private function activeDuplicateAttendees(array $attendeeIds)
+    {
+        $ids = collect($attendeeIds)->map(fn ($id) => (int) $id)->unique()->values();
+        $attendees = Attendee::query()->whereIn('id', $ids)->get();
+
+        if ($attendees->count() !== $ids->count()) {
+            abort(404);
+        }
+
+        if ($attendees->pluck('organization_id')->unique()->count() !== 1
+            || $attendees->pluck('normalized_name')->unique()->count() !== 1) {
+            abort(422, 'Attendees must be active duplicates from one organization.');
+        }
+
+        return $attendees->sortBy('id')->values();
+    }
+
+    private function allPairsDismissed(int $organizationId, string $normalizedName, $attendeeIds): bool
+    {
+        $ids = collect($attendeeIds)->map(fn ($id) => (int) $id)->sort()->values();
+        if ($ids->count() < 2) {
+            return false;
+        }
+
+        $dismissed = AttendeeDuplicateDismissal::query()
+            ->where('organization_id', $organizationId)
+            ->where('name_fingerprint', $this->duplicateFingerprint($normalizedName))
+            ->get()
+            ->mapWithKeys(fn (AttendeeDuplicateDismissal $dismissal) => [
+                "{$dismissal->attendee_one_id}:{$dismissal->attendee_two_id}" => true,
+            ]);
+
+        foreach ($ids as $index => $firstId) {
+            foreach ($ids->slice($index + 1) as $secondId) {
+                if (! $dismissed->has("{$firstId}:{$secondId}")) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private function duplicateFingerprint(string $normalizedName): string
+    {
+        return hash('sha256', $normalizedName);
     }
 }

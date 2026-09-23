@@ -34,6 +34,10 @@ class AttendeeResource extends JsonResource
             'church' => ChurchResource::make($this->whenLoaded('church')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
+            'registration_count' => $this->when(isset($this->duplicate_registration_count), $this->duplicate_registration_count),
+            'attendance_count' => $this->when(isset($this->duplicate_attendance_count), $this->duplicate_attendance_count),
+            'event_names' => $this->when(isset($this->duplicate_event_names), $this->duplicate_event_names),
+            'has_linked_account' => $this->when(isset($this->duplicate_has_linked_account), $this->duplicate_has_linked_account),
         ];
     }
 }

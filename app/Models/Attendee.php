@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-#[Fillable(['organization_id', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at'])]
+#[Fillable(['organization_id', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at', 'merged_into_id', 'merged_by', 'merged_at'])]
 class Attendee extends Model
 {
     /** @use HasFactory<AttendeeFactory> */
@@ -27,11 +27,16 @@ class Attendee extends Model
             'organization_level' => OrganizationLevel::class,
             'photo_paths' => 'array',
             'invited_at' => 'datetime',
+            'merged_at' => 'datetime',
         ];
     }
 
     protected static function booted(): void
     {
+        static::addGlobalScope('active', function (Builder $builder) {
+            $builder->whereNull($builder->getModel()->qualifyColumn('merged_at'));
+        });
+
         static::saving(function (self $attendee) {
             $attendee->normalized_name = static::normalizeName(
                 $attendee->first_name,
@@ -98,6 +103,16 @@ class Attendee extends Model
     public function registrations(): HasMany
     {
         return $this->hasMany(EventRegistration::class);
+    }
+
+    public function mergedInto(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'merged_into_id');
+    }
+
+    public function mergedSources(): HasMany
+    {
+        return $this->hasMany(self::class, 'merged_into_id');
     }
 
     public function getFullNameAttribute()

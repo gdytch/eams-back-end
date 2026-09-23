@@ -5,6 +5,10 @@ namespace Tests\Feature;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
+use App\Models\EventProgram;
+use App\Models\EventProgramDay;
+use App\Models\EventProgramItem;
+use App\Models\EventProgramSection;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
@@ -656,5 +660,104 @@ class AttendeeDashboardTest extends TestCase
         $this->actingAs($user, 'sanctum')
             ->getJson("/api/v1/attendee/events/{$event->id}/attendance")
             ->assertNotFound();
+    }
+
+    public function test_unauthenticated_user_cannot_access_event_program(): void
+    {
+        $event = Event::factory()->create();
+
+        $this->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertUnauthorized();
+    }
+
+    public function test_non_attendee_user_cannot_access_event_program(): void
+    {
+        $checker = User::factory()->checker()->create();
+        $event = Event::factory()->create(['organization_id' => $checker->organization_id]);
+
+        $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertForbidden();
+    }
+
+    public function test_attendee_without_linked_record_cannot_access_event_program(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertNotFound();
+    }
+
+    public function test_attendee_cannot_access_program_for_unregistered_event(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        Attendee::factory()->for($organization)->for($user)->create();
+        $event = Event::factory()->for($organization)->create();
+        EventProgram::factory()->for($event)->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertNotFound();
+    }
+
+    public function test_registered_attendee_receives_not_found_when_event_has_no_program(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->create();
+        $event = Event::factory()->for($organization)->create();
+        EventRegistration::factory()->for($event)->for($attendee)->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertNotFound();
+    }
+
+    public function test_registered_attendee_can_view_nested_event_program(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->create();
+        $event = Event::factory()->for($organization)->create();
+        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $program = EventProgram::factory()->for($event)->create([
+            'title' => 'Annual Gathering',
+            'description' => 'A full day together.',
+        ]);
+        $day = EventProgramDay::factory()->create([
+            'event_program_id' => $program->id,
+            'title' => 'Opening Day',
+            'date' => '2026-09-22',
+        ]);
+        $section = EventProgramSection::factory()->create([
+            'event_program_day_id' => $day->id,
+            'title' => 'Morning Session',
+        ]);
+        EventProgramItem::factory()->create([
+            'event_program_id' => $program->id,
+            'event_program_section_id' => $section->id,
+            'part_title' => 'Keynote',
+            'participant_name' => 'Alex Rivera',
+            'participant_description' => 'Guest Speaker',
+            'photo_paths' => [['original' => 'program/alex-rivera.jpg']],
+        ]);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertOk()
+            ->assertJsonPath('data.title', 'Annual Gathering')
+            ->assertJsonPath('data.days.0.title', 'Opening Day')
+            ->assertJsonPath('data.days.0.sections.0.title', 'Morning Session')
+            ->assertJsonPath('data.days.0.sections.0.items.0.title', 'Keynote')
+            ->assertJsonPath('data.days.0.sections.0.items.0.participant_name', 'Alex Rivera')
+            ->assertJsonPath('data.days.0.sections.0.items.0.designation', 'Guest Speaker');
+
+        $this->assertNotEmpty(
+            $response->json('data.days.0.sections.0.items.0.participant_photo_urls.0')
+        );
     }
 }

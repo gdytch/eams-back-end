@@ -16,6 +16,11 @@ class EventProgramItemResource extends JsonResource
     {
         return [
             'id' => $this->id,
+            'title' => $this->part_title,
+            'designation' => $this->participant_description,
+            'details' => $this->part_description,
+            'sort_order' => $this->order,
+            'attendee_id' => $this->attendee_id,
             'event_program_id' => $this->event_program_id,
             'order' => $this->order,
             'date' => $this->date?->toDateString(),

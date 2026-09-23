@@ -11,6 +11,7 @@ use App\Http\Requests\UploadEventProgramItemPhotoRequest;
 use App\Http\Resources\EventProgramItemResource;
 use App\Models\AuditLog;
 use App\Models\Event;
+use App\Services\EventProgramService;
 use App\Services\ImageUploadService;
 use Illuminate\Support\Facades\Storage;
 
@@ -45,7 +46,7 @@ class EventProgramItemController extends Controller
             return response()->json(['message' => 'No program found for this event.'], 404);
         }
 
-        $item = $program->items()->create($request->validated());
+        $item = app(EventProgramService::class)->saveLegacyItem($program, $request->validated());
 
         AuditLog::record('event_program_item.created', $item);
 
@@ -83,7 +84,7 @@ class EventProgramItemController extends Controller
 
         $item = $program->items()->findOrFail($itemId);
 
-        $item->update($request->validated());
+        app(EventProgramService::class)->saveLegacyItem($program, $request->validated(), $item);
 
         AuditLog::record('event_program_item.updated', $item);
 

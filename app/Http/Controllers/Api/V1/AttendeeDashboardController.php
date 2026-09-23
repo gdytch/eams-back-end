@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\AttendeeDashboardResource;
+use App\Http\Resources\EventProgramResource;
 use App\Http\Resources\EventRegistrationResource;
 use App\Models\Attendee;
 use App\Models\Event;
@@ -172,6 +173,26 @@ class AttendeeDashboardController extends Controller
             ],
             'sessions' => $sessionRows->values(),
         ]);
+    }
+
+    /**
+     * Show the program for one event registered to the authenticated attendee.
+     */
+    public function program(Request $request, Event $event): EventProgramResource
+    {
+        $user = $request->user();
+        abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
+
+        $attendee = Attendee::where('user_id', $user->id)->firstOrFail();
+        abort_unless(
+            $attendee->registrations()->where('event_id', $event->id)->exists(),
+            404,
+            'Registration not found.'
+        );
+
+        $program = $event->program()->with('days.sections.items')->firstOrFail();
+
+        return EventProgramResource::make($program);
     }
 
     /**

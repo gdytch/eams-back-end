@@ -17,6 +17,6 @@ class StoreEventProgramRequest extends FormRequest
      */
     public function rules(): array
     {
-        return [];
+        return ['title' => ['nullable', 'string', 'max:255'], 'description' => ['nullable', 'string', 'max:10000']];
     }
 }

@@ -39,6 +39,10 @@ class AttendeeController extends Controller
 
         $query = Attendee::query();
 
+        if ($organizationId = $request->integer('organization_id')) {
+            $query->where('organization_id', $organizationId);
+        }
+
         if ($search = trim((string) $request->string('search'))) {
             $query->where(function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
@@ -163,7 +167,7 @@ class AttendeeController extends Controller
 
             if ($registration !== null) {
                 $checkedInSessionIds = $registration->attendanceRecords
-                    ->filter(fn($record) => $record->check_in_at !== null)
+                    ->filter(fn ($record) => $record->check_in_at !== null)
                     ->pluck('event_session_id')
                     ->unique()
                     ->values()
@@ -365,8 +369,6 @@ class AttendeeController extends Controller
             $event = Event::find($eventId);
             $eventName = $event?->name;
         }
-
-
 
         $pdf = Pdf::loadView('pdf.attendees-report', [
             'attendees' => $attendees,

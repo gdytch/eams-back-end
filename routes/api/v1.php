@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventController;
+use App\Http\Controllers\Api\V1\EventProgramBuilderController;
 use App\Http\Controllers\Api\V1\EventProgramController;
 use App\Http\Controllers\Api\V1\EventProgramItemController;
 use App\Http\Controllers\Api\V1\EventRegistrationController;
@@ -15,6 +16,7 @@ use App\Http\Controllers\Api\V1\EventSessionController;
 use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PublicEventController;
+use App\Http\Controllers\Api\V1\PublicEventProgramController;
 use App\Http\Controllers\Api\V1\PublicMissionController;
 use App\Http\Controllers\Api\V1\PublicUnionController;
 use App\Http\Controllers\Api\V1\ReportController;
@@ -40,6 +42,7 @@ Route::middleware('throttle:6,1')->group(function () {
 });
 
 Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'show']);
+Route::get('public/programs/{publicSlug}', [PublicEventProgramController::class, 'show']);
 Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');
 Route::get('public/unions', [PublicUnionController::class, 'index']);
 Route::get('public/missions', [PublicMissionController::class, 'index']);
@@ -51,6 +54,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendee/dashboard', [AttendeeDashboardController::class, 'index']);
     Route::get('attendee/registrations', [AttendeeDashboardController::class, 'registrations']);
     Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
+    Route::get('attendee/events/{event}/program', [AttendeeDashboardController::class, 'program']);
     Route::get('dashboard', [DashboardController::class, 'index']);
 
     Route::get('reports/dashboard', [ReportController::class, 'globalDashboard']);
@@ -95,6 +99,16 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('events/{event}/banner', [EventController::class, 'removeBanner']);
 
         Route::apiResource('events.sessions', EventSessionController::class);
+
+        Route::put('events/{event}/program', [EventProgramBuilderController::class, 'metadata']);
+        Route::prefix('events/{event}/program/builder/{kind}')->whereIn('kind', ['days', 'sections', 'parts'])->group(function () {
+            $controller = EventProgramBuilderController::class;
+            Route::post('/', [$controller, 'store']);
+            Route::put('order', [$controller, 'reorder']);
+            Route::put('{node}', [$controller, 'update'])->whereNumber('node');
+            Route::delete('{node}', [$controller, 'destroy'])->whereNumber('node');
+            Route::post('{node}/duplicate', [$controller, 'duplicate'])->whereNumber('node');
+        });
 
         Route::post('events/{event}/program', [EventProgramController::class, 'store']);
         Route::get('events/{event}/program', [EventProgramController::class, 'show']);

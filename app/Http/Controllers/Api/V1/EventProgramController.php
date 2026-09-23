@@ -20,7 +20,7 @@ class EventProgramController extends Controller
             return response()->json(['message' => 'A program already exists for this event.'], 409);
         }
 
-        $program = $event->program()->create();
+        $program = $event->program()->create($request->validated());
 
         AuditLog::record('event_program.created', $program);
 
@@ -40,7 +40,7 @@ class EventProgramController extends Controller
             return response()->json(['message' => 'No program found for this event.'], 404);
         }
 
-        return EventProgramResource::make($program->load('items'));
+        return EventProgramResource::make($program->load('items', 'days.sections.items'));
     }
 
     /**

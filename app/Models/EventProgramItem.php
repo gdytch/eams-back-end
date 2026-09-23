@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\Storage;
 
-#[Fillable(['event_program_id', 'order', 'date', 'start_time', 'end_time', 'part_title', 'part_subtitle', 'part_description', 'participant_name', 'participant_description', 'photo_paths', 'part_remarks'])]
+#[Fillable(['event_program_section_id', 'attendee_id', 'event_program_id', 'order', 'date', 'start_time', 'end_time', 'part_title', 'part_subtitle', 'part_description', 'participant_name', 'participant_description', 'photo_paths', 'part_remarks'])]
 class EventProgramItem extends Model
 {
     /** @use HasFactory<EventProgramItemFactory> */
@@ -21,6 +21,16 @@ class EventProgramItem extends Model
             'date' => 'date',
             'photo_paths' => 'array',
         ];
+    }
+
+    public function section(): BelongsTo
+    {
+        return $this->belongsTo(EventProgramSection::class, 'event_program_section_id');
+    }
+
+    public function attendee(): BelongsTo
+    {
+        return $this->belongsTo(Attendee::class);
     }
 
     public function program(): BelongsTo

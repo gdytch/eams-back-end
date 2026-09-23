@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\PublicEventProgramController;
 use App\Http\Controllers\Api\V1\PublicMissionController;
 use App\Http\Controllers\Api\V1\PublicUnionController;
 use App\Http\Controllers\Api\V1\ReportController;
+use App\Http\Controllers\Api\V1\SpeakerController;
 use App\Http\Controllers\Api\V1\SystemLogController;
 use App\Http\Controllers\Api\V1\UnionController;
 use App\Http\Controllers\Api\V1\UserController;
@@ -55,6 +56,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendee/registrations', [AttendeeDashboardController::class, 'registrations']);
     Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
     Route::get('attendee/events/{event}/program', [AttendeeDashboardController::class, 'program']);
+    Route::get('attendee/events/{eventId}/speakers', [AttendeeDashboardController::class, 'speakers'])->whereNumber('eventId');
     Route::get('dashboard', [DashboardController::class, 'index']);
 
     Route::get('reports/dashboard', [ReportController::class, 'globalDashboard']);
@@ -101,6 +103,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('events/{event}/id-card-background', [EventController::class, 'removeIdCardBackground']);
         Route::post('events/{event}/banner', [EventController::class, 'uploadBanner']);
         Route::delete('events/{event}/banner', [EventController::class, 'removeBanner']);
+        Route::put('events/{event}/speaker-settings', [SpeakerController::class, 'updateSettings']);
+        Route::post('events/{event}/speakers/{speaker}/photo', [SpeakerController::class, 'uploadPhoto']);
+        Route::apiResource('events.speakers', SpeakerController::class)->except(['show']);
 
         Route::apiResource('events.sessions', EventSessionController::class);
 

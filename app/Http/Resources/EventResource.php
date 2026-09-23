@@ -35,6 +35,7 @@ class EventResource extends JsonResource
                     $key => Storage::disk('public')->url($path),
                 ])->toArray()
                 : null,
+            'speakers_public' => $this->speakers_public,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
             'invite_token' => $this->invite_token,

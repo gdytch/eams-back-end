@@ -39,6 +39,9 @@ class PublicEventProgramResource extends JsonResource
                             'details' => $item->part_description,
                             'participant_name' => $item->participant_name,
                             'participant_photo_urls' => $item->participant_photo_urls,
+                            'speaker' => $event->speakers_public && $item->relationLoaded('speaker') && $item->speaker
+                                ? PublicSpeakerResource::make($item->speaker)
+                                : null,
                             'start_time' => $item->start_time,
                             'end_time' => $item->end_time,
                         ])->values(),

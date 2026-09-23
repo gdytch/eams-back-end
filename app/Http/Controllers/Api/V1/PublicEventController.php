@@ -105,7 +105,7 @@ class PublicEventController extends Controller
     {
         $event = Event::withoutGlobalScopes()
             ->where('invite_token', $inviteToken)
-            ->with(['organization', 'sessions', 'program.items'])
+            ->with(['organization', 'sessions', 'program.items', 'speakers.programItems'])
             ->firstOrFail();
 
         abort_unless($event->status === EventStatus::Published, 404);

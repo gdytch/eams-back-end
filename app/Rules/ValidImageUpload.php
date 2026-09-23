@@ -14,6 +14,15 @@ class ValidImageUpload implements ValidationRule
 
     private const ALLOWED_MIMES = ['image/png', 'image/jpeg'];
 
+    /** @var array<int, string> */
+    private array $allowedMimes;
+
+    /** @param array<int, string>|null $allowedMimes */
+    public function __construct(?array $allowedMimes = null)
+    {
+        $this->allowedMimes = $allowedMimes ?? self::ALLOWED_MIMES;
+    }
+
     /**
      * Run the validation rule.
      *
@@ -49,8 +58,8 @@ class ValidImageUpload implements ValidationRule
         $mime = finfo_buffer($finfo, $binary);
         finfo_close($finfo);
 
-        if (! in_array($mime, self::ALLOWED_MIMES, true)) {
-            $fail('The '.$attribute.' must be a PNG or JPEG image.');
+        if (! in_array($mime, $this->allowedMimes, true)) {
+            $fail('The '.$attribute.' must be a '.($this->allowedMimes === ['image/png'] ? 'PNG' : 'PNG or JPEG').' image.');
 
             return;
         }

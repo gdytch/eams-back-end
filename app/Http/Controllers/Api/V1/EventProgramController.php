@@ -40,7 +40,7 @@ class EventProgramController extends Controller
             return response()->json(['message' => 'No program found for this event.'], 404);
         }
 
-        return EventProgramResource::make($program->load('items', 'days.sections.items'));
+        return EventProgramResource::make($program->load('items.speaker', 'days.sections.items.speaker'));
     }
 
     /**

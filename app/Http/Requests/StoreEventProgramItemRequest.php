@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreEventProgramItemRequest extends FormRequest
 {
@@ -31,6 +32,7 @@ class StoreEventProgramItemRequest extends FormRequest
             'part_subtitle' => ['nullable', 'string', 'max:255'],
             'part_description' => ['nullable', 'string'],
             'participant_name' => ['nullable', 'string', 'max:255'],
+            'speaker_id' => ['nullable', 'integer', Rule::exists('speakers', 'id')->where('event_id', $this->route('event')->id)],
             'participant_description' => ['nullable', 'string'],
             'part_remarks' => ['nullable', 'string'],
         ];

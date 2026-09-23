@@ -7,6 +7,7 @@ use App\Models\EventProgram;
 use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
+use App\Models\Speaker;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -47,6 +48,13 @@ class EventProgramService
                         $data[$column] = $data[$input];
                         unset($data[$input]);
                     }
+                }
+                if (array_key_exists('speaker_id', $data) && $data['speaker_id']) {
+                    $speaker = Speaker::query()
+                        ->whereBelongsTo($program->event)
+                        ->findOrFail($data['speaker_id']);
+                    $data['participant_name'] = $speaker->name;
+                    $data['participant_description'] = $speaker->designation;
                 }
             }
             if ($id !== null) {
@@ -138,6 +146,13 @@ class EventProgramService
     {
         return DB::transaction(function () use ($program, $data, $item) {
             EventProgram::whereKey($program->id)->lockForUpdate()->firstOrFail();
+            if (array_key_exists('speaker_id', $data) && $data['speaker_id']) {
+                $speaker = Speaker::query()
+                    ->whereBelongsTo($program->event)
+                    ->findOrFail($data['speaker_id']);
+                $data['participant_name'] = $speaker->name;
+                $data['participant_description'] = $speaker->designation;
+            }
             $date = array_key_exists('date', $data) ? $data['date'] : $item?->date?->toDateString();
             $date ??= $program->event->start_date?->toDateString() ?? $program->created_at->toDateString();
             if (! $item?->event_program_section_id || $item->section->day->date->toDateString() !== $date) {

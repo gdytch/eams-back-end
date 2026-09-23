@@ -73,7 +73,12 @@ class DatabaseSeeder extends Seeder
         $event = Event::factory()->for($organization)->create([
             'name' => 'Annual Convention 2027',
             'created_by' => $orgAdmin->id,
+            'start_date' => '2027-06-25',
+            'end_date' => '2027-06-26',
         ]);
+
+        $this->call(SpeakerSeeder::class);
+        $this->call(EventProgramSeeder::class);
 
         $attendees = Attendee::factory()
             ->recycle($organization)

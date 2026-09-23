@@ -61,6 +61,7 @@ class SaveEventProgramNodeRequest extends FormRequest
         }
         if ($kind === 'parts') {
             $rules['participant_name'] = ['nullable', 'string', 'max:255'];
+            $rules['speaker_id'] = ['nullable', 'integer', Rule::exists('speakers', 'id')->where('event_id', $this->route('event')->id)];
             $rules['attendee_id'] = ['nullable', 'integer', Rule::exists('attendees', 'id')->where('organization_id', $this->route('event')->organization_id)];
             $rules['designation'] = ['nullable', 'string', 'max:10000'];
             $rules['details'] = ['nullable', 'string', 'max:10000'];

@@ -14,7 +14,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
-#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'created_by', 'invite_token'])]
+#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'speakers_public', 'created_by', 'invite_token'])]
 class Event extends Model
 {
     /** @use HasFactory<EventFactory> */
@@ -54,6 +54,7 @@ class Event extends Model
             'requires_check_out' => 'boolean',
             'check_in_window_minutes' => 'integer',
             'banner_paths' => 'array',
+            'speakers_public' => 'boolean',
         ];
     }
 
@@ -70,6 +71,11 @@ class Event extends Model
     public function registrations(): HasMany
     {
         return $this->hasMany(EventRegistration::class);
+    }
+
+    public function speakers(): HasMany
+    {
+        return $this->hasMany(Speaker::class)->orderBy('name')->orderBy('id');
     }
 
     public function gridDownloads(): HasMany

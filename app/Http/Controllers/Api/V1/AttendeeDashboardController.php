@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\AttendeeDashboardResource;
 use App\Http\Resources\EventProgramResource;
 use App\Http\Resources\EventRegistrationResource;
+use App\Http\Resources\SpeakerResource;
 use App\Models\Attendee;
 use App\Models\Event;
 use Illuminate\Http\JsonResponse;
@@ -107,7 +108,7 @@ class AttendeeDashboardController extends Controller
         abort_unless($request->user()->isAttendee() || $request->user()->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
         $user = $request->user();
-        $attendee = Attendee::where('user_id', $user->id)->firstOrFail();
+        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
 
         $registrations = $attendee->registrations()
             ->with(['event', 'attendanceRecords'])
@@ -190,9 +191,21 @@ class AttendeeDashboardController extends Controller
             'Registration not found.'
         );
 
-        $program = $event->program()->with('days.sections.items')->firstOrFail();
+        $program = $event->program()->with('days.sections.items.speaker')->firstOrFail();
 
         return EventProgramResource::make($program);
+    }
+
+    public function speakers(Request $request, int $eventId): AnonymousResourceCollection
+    {
+        $user = $request->user();
+        abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
+
+        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
+        $event = Event::withoutGlobalScopes()->findOrFail($eventId);
+        abort_unless($attendee->registrations()->where('event_id', $event->id)->exists(), 404, 'Registration not found.');
+
+        return SpeakerResource::collection($event->speakers()->with('programItems')->get());
     }
 
     /**

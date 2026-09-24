@@ -14,7 +14,9 @@ class PublicMissionController extends Controller
      */
     public function index(Request $request)
     {
-        $missions = Mission::query()->get(['id', 'name', 'code']);
+        $missions = Mission::query()
+            ->when($request->filled('union_id'), fn ($query) => $query->where('union_id', $request->integer('union_id')))
+            ->get(['id', 'name', 'code']);
 
         return JsonResource::collection($missions);
     }

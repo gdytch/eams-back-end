@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AttendeeController;
 use App\Http\Controllers\Api\V1\AttendeeDashboardController;
+use App\Http\Controllers\Api\V1\AttendeeQrClaimController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChurchController;
@@ -32,6 +33,17 @@ Route::middleware('throttle:10,1')->group(function () {
     Route::post('auth/sso/{provider}', [AuthController::class, 'sso']);
     Route::get('auth/invite/{token}', [AuthController::class, 'showInvite']);
     Route::post('auth/accept-invite', [AuthController::class, 'acceptInvite']);
+});
+
+Route::prefix('public/attendee-claims')->middleware('throttle:10,1')->group(function () {
+    Route::post('status', [AttendeeQrClaimController::class, 'status']);
+    Route::post('verify', [AttendeeQrClaimController::class, 'verify']);
+});
+
+Route::prefix('public/attendee-claims')->middleware('throttle:6,1')->group(function () {
+    Route::post('email-code', [AttendeeQrClaimController::class, 'sendEmailCode']);
+    Route::post('verify-email-code', [AttendeeQrClaimController::class, 'verifyEmailCode']);
+    Route::post('complete', [AttendeeQrClaimController::class, 'complete']);
 });
 
 Route::middleware('throttle:6,1')->group(function () {

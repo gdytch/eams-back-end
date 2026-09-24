@@ -16,8 +16,10 @@ use App\Http\Resources\UserResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
+use App\Models\EventRegistration;
 use App\Models\User;
 use App\Models\UserIdentity;
+use App\Services\AttendeeQrClaimService;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\JsonResponse;
@@ -174,7 +176,7 @@ class AuthController extends Controller
         ]);
     }
 
-    public function sso(SsoLoginRequest $request, string $provider): JsonResponse
+    public function sso(SsoLoginRequest $request, string $provider, AttendeeQrClaimService $claims): JsonResponse
     {
         $data = $request->validated();
         $ssoProvider = SsoProvider::tryFrom($provider);
@@ -187,6 +189,10 @@ class AuthController extends Controller
         }
 
         abort_if(blank($socialiteUser->getEmail()), 422, 'Email permission is required to sign in.');
+
+        if ($request->filled('claim_token')) {
+            return $this->claimWithSso($request->validated('claim_token'), $socialiteUser, $ssoProvider, $claims);
+        }
 
         return DB::transaction(function () use ($data, $socialiteUser, $ssoProvider, $request) {
             $providerId = $socialiteUser->getId();
@@ -420,6 +426,80 @@ class AuthController extends Controller
 
             ], $wasNewUser ? 201 : 200);
         });
+    }
+
+    private function claimWithSso(string $claimToken, $socialiteUser, SsoProvider $provider, AttendeeQrClaimService $claims): JsonResponse
+    {
+        $claim = $claims->claim($claimToken);
+        if ($claim === null) {
+            throw ValidationException::withMessages(['claim_token' => 'Your verification session has expired. Scan your ID card again.']);
+        }
+
+        $result = DB::transaction(function () use ($claim, $socialiteUser, $provider) {
+            $registration = EventRegistration::query()->lockForUpdate()->find($claim['registration_id']);
+            if ($registration === null) {
+                throw ValidationException::withMessages(['claim_token' => 'Your verification session is no longer available.']);
+            }
+
+            $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($registration->attendee_id);
+            if ($attendee === null || $attendee->user_id !== null) {
+                throw ValidationException::withMessages(['claim_token' => 'This attendee already has an account.']);
+            }
+
+            $email = strtolower($socialiteUser->getEmail());
+            if (filled($attendee->email_address) && strtolower($attendee->email_address) !== $email) {
+                throw ValidationException::withMessages(['email' => 'Use the email address saved with your attendee record. You can ask the event coordinator for assistance.']);
+            }
+
+            if (blank($attendee->email_address) && (! ($claim['email_verified'] ?? false) || strtolower($claim['email'] ?? '') !== $email)) {
+                throw ValidationException::withMessages(['email' => 'Verify this email before continuing with SSO.']);
+            }
+
+            if (User::withoutGlobalScopes()->where('email', $email)->exists()) {
+                throw ValidationException::withMessages(['email' => 'This email address already has an account.']);
+            }
+
+            if (UserIdentity::query()->where('provider', $provider->value)->where('provider_id', $socialiteUser->getId())->exists()) {
+                throw ValidationException::withMessages(['email' => 'This SSO account is already linked to another user.']);
+            }
+
+            $user = User::create([
+                'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
+                'email' => $email,
+                'password' => Hash::make(Str::random(40)),
+                'first_name' => $attendee->first_name,
+                'middle_name' => $attendee->middle_name,
+                'last_name' => $attendee->last_name,
+                'role' => UserRole::Attendee,
+                'organization_id' => $attendee->organization_id,
+                'email_verified_at' => now(),
+            ]);
+
+            $attendee->update([
+                'user_id' => $user->id,
+                'email_address' => $email,
+                'invite_token' => null,
+            ]);
+
+            UserIdentity::create([
+                'user_id' => $user->id,
+                'provider' => $provider->value,
+                'provider_id' => $socialiteUser->getId(),
+                'email' => $email,
+            ]);
+
+            AuditLog::record('attendee.qr_claimed_sso', $attendee, ['user_id' => $user->id, 'provider' => $provider->value]);
+
+            return [
+                'token' => $user->createToken('api')->plainTextToken,
+                'user' => UserResource::make($user->load('attendee')),
+                'is_new_user' => true,
+            ];
+        });
+
+        $claims->forgetClaim($claimToken);
+
+        return response()->json($result, 201);
     }
 
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse

@@ -40,7 +40,7 @@ class EventProgramItem extends Model
 
     public function program(): BelongsTo
     {
-        return $this->belongsTo(EventProgram::class);
+        return $this->belongsTo(EventProgram::class, 'event_program_id');
     }
 
     public function getParticipantPhotoUrlsAttribute(): ?array

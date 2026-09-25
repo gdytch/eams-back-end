@@ -85,9 +85,15 @@ class AttendanceController extends Controller
     public function forSession(Request $request, Event $event, EventSession $session)
     {
         $this->authorize('view', $session);
+        abort_unless($session->event_id === $event->id, 404);
 
-        $records = AttendanceRecord::whereHas('eventRegistration', fn($q) => $q->where('event_id', $event->id))
+        $input = $request->validate([
+            'record_id' => ['sometimes', 'integer', 'min:1'],
+        ]);
+
+        $records = AttendanceRecord::whereHas('eventRegistration', fn ($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
+            ->when(isset($input['record_id']), fn ($query) => $query->whereKey($input['record_id']))
             ->with('eventRegistration.attendee');
         if ($request->has('sort_by')) {
             $sortBy = $request->input('sort_by');
@@ -148,9 +154,9 @@ class AttendanceController extends Controller
                 'session_check_in_at' => 'datetime',
                 'session_check_out_at' => 'datetime',
             ])
-            ->when($status === 'present', fn($q) => $q->whereIn('id', $checkedInRegistrationIds))
-            ->when($status === 'absent', fn($q) => $q->whereNotIn('id', $checkedInRegistrationIds))
-            ->when($search !== '', fn($q) => $q->whereHas('attendee', function ($query) use ($search) {
+            ->when($status === 'present', fn ($q) => $q->whereIn('id', $checkedInRegistrationIds))
+            ->when($status === 'absent', fn ($q) => $q->whereNotIn('id', $checkedInRegistrationIds))
+            ->when($search !== '', fn ($q) => $q->whereHas('attendee', function ($query) use ($search) {
                 $query->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
             }))
@@ -158,7 +164,7 @@ class AttendanceController extends Controller
             ->paginate($request->input('per_page', 15));
 
         // Attach session status information to each registration
-        $registrations->each(fn($reg) => $reg->setAttribute('session_has_started', $sessionHasStarted));
+        $registrations->each(fn ($reg) => $reg->setAttribute('session_has_started', $sessionHasStarted));
 
         return EventSessionRosterEntryResource::collection($registrations)->additional([
             'event_id' => $event->id,

@@ -18,15 +18,15 @@ use App\Models\AttendeeDuplicateDismissal;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
-use App\Services\AttendeeInvitationService;
 use App\Services\AttendeeDuplicateMergeService;
+use App\Services\AttendeeInvitationService;
 use App\Services\ImageUploadService;
 use Barryvdh\DomPDF\Facade\Pdf;
+use DomainException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
-use DomainException;
 use Maatwebsite\Excel\Facades\Excel;
 
 class AttendeeController extends Controller
@@ -296,7 +296,9 @@ class AttendeeController extends Controller
             $attendee = Attendee::query()->findOrFail($attendee->merged_into_id);
         }
 
-        if (! $request->user()->isSuperAdmin() && $request->user()->organization_id !== $attendee->organization_id) {
+        if (! $request->user()->isSuperAdmin()
+            && $request->user()->organization_id !== $attendee->organization_id
+            && $attendee->user_id !== $request->user()->id) {
             abort(404);
         }
 
@@ -338,10 +340,121 @@ class AttendeeController extends Controller
             }
         }
 
-        return AttendeeResource::make($attendee)->additional([
+        $additional = [
             'event_stats' => $eventStats,
             'merged_from_id' => $mergedFromId,
-        ]);
+        ];
+
+        if ($request->query('include') === 'dashboard') {
+            $additional['profile_dashboard'] = $this->profileDashboard($request, $attendee);
+        }
+
+        return AttendeeResource::make($attendee)->additional($additional);
+    }
+
+    private function profileDashboard(Request $request, Attendee $attendee): array
+    {
+        $attendee->loadMissing('user');
+        $account = $attendee->user;
+        $viewer = $request->user();
+        $registrationQuery = $attendee->registrations()
+            ->with(['event.sessions', 'attendanceRecords'])
+            ->whereHas('event')
+            ->orderByDesc('registered_at');
+
+        if (! $viewer->isSuperAdmin() && ! $viewer->isAttendee()) {
+            $registrationQuery->whereHas('event', fn ($query) => $query->where('organization_id', $viewer->organization_id));
+        }
+
+        if ($viewer->isChecker()) {
+            $accessibleEventIds = $viewer->accessibleEvents()->pluck('events.id');
+            if ($accessibleEventIds->isNotEmpty()) {
+                $registrationQuery->whereIn('event_id', $accessibleEventIds);
+            }
+        }
+
+        $registrations = $registrationQuery->get()
+            ->map(function (EventRegistration $registration) {
+                $event = $registration->event;
+                $completedSessionIds = $event->sessions
+                    ->filter(fn ($session) => $session->endsAt()->isPast())
+                    ->pluck('id');
+                $attendedSessions = $registration->attendanceRecords
+                    ->whereNotNull('check_in_at')
+                    ->pluck('event_session_id')
+                    ->unique()
+                    ->intersect($completedSessionIds)
+                    ->count();
+                $completedSessions = $completedSessionIds->count();
+                $attendanceBySession = $registration->attendanceRecords->keyBy('event_session_id');
+                $sessionRows = $event->sessions
+                    ->sortBy(fn ($session) => $session->session_date->toDateString().' '.$session->start_time)
+                    ->values()
+                    ->map(function ($session) use ($attendanceBySession) {
+                        $attendance = $attendanceBySession->get($session->id);
+
+                        return [
+                            'id' => $session->id,
+                            'name' => $session->name,
+                            'description' => $session->description,
+                            'session_date' => $session->session_date?->toDateString(),
+                            'start_time' => $session->start_time,
+                            'end_time' => $session->end_time,
+                            'status' => $attendance?->check_in_at !== null
+                                ? 'present'
+                                : ($session->endsAt()->isPast() ? 'absent' : 'upcoming'),
+                            'check_in_at' => $attendance?->check_in_at,
+                            'check_out_at' => $attendance?->check_out_at,
+                            'method' => $attendance?->method,
+                        ];
+                    });
+
+                return [
+                    'id' => $registration->id,
+                    'registered_at' => $registration->registered_at,
+                    'event' => [
+                        'id' => $event->id,
+                        'name' => $event->name,
+                        'start_date' => $event->start_date?->toDateString(),
+                        'end_date' => $event->end_date?->toDateString(),
+                        'venue' => $event->venue,
+                        'status' => $event->status,
+                    ],
+                    'attendance' => [
+                        'sessions_total' => $event->sessions->count(),
+                        'completed_sessions' => $completedSessions,
+                        'attended_sessions' => $attendedSessions,
+                        'absent_sessions' => $completedSessions - $attendedSessions,
+                        'rate' => $completedSessions > 0
+                            ? round($attendedSessions / $completedSessions * 100, 1)
+                            : null,
+                        'sessions' => $sessionRows->all(),
+                    ],
+                ];
+            });
+
+        $completedSessions = $registrations->sum(fn (array $registration) => $registration['attendance']['completed_sessions']);
+        $attendedSessions = $registrations->sum(fn (array $registration) => $registration['attendance']['attended_sessions']);
+
+        return [
+            'account' => [
+                'linked' => $account !== null,
+                'email' => $account?->email,
+                'email_verified' => $account?->hasVerifiedEmail(),
+                'invite_status' => ($account?->invite_token ?? $attendee->invite_token) !== null
+                    ? 'pending'
+                    : (($account?->invited_at ?? $attendee->invited_at) !== null ? 'accepted' : null),
+            ],
+            'registrations' => $registrations->all(),
+            'stats' => [
+                'registration_count' => $registrations->count(),
+                'completed_sessions' => $completedSessions,
+                'attended_sessions' => $attendedSessions,
+                'attendance_rate' => $completedSessions > 0
+                    ? round($attendedSessions / $completedSessions * 100, 1)
+                    : null,
+            ],
+        ];
     }
 
     /**

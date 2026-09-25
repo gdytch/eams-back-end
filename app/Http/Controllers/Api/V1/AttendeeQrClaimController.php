@@ -47,7 +47,7 @@ class AttendeeQrClaimController extends Controller
         }
 
         if (! $claims->matches($registration->attendee, $data['first_name'], $data['last_name'], $data['union_id'], $data['mission_id'])) {
-            throw ValidationException::withMessages(['details' => 'We could not verify those details. Information does not match our records.']);
+            throw ValidationException::withMessages(['details' => 'We could not verify those details. Information provided does not match our records. QR code may belong to someone else.']);
         }
 
         $claimToken = $claims->createClaim($registration);

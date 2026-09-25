@@ -51,7 +51,7 @@ class Attendee extends Model
      */
     public static function normalizeName(?string $first, ?string $middle, ?string $last): string
     {
-        return collect([$first, $middle, $last])
+        return collect([$first, $last])
             ->filter()
             ->map(fn(string $part) => preg_replace('/\s+/', ' ', trim(mb_strtolower($part))))
             ->implode(' ');

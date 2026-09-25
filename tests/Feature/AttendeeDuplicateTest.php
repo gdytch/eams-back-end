@@ -11,6 +11,7 @@ use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
@@ -69,6 +70,61 @@ class AttendeeDuplicateTest extends TestCase
         $response->assertOk();
         $this->assertCount(1, $response->json('data'));
         $this->assertSame(1, Attendee::count());
+    }
+
+    public function test_different_middle_names_still_match_and_can_be_merged(): void
+    {
+        Queue::fake();
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $first = Attendee::factory()->for($org)->create([
+            'first_name' => 'Maria', 'middle_name' => 'Lopez', 'last_name' => 'Santos',
+        ]);
+        $second = Attendee::factory()->for($org)->create([
+            'first_name' => 'maria', 'middle_name' => 'Reyes', 'last_name' => 'santos',
+        ]);
+
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/check-duplicates?'.http_build_query([
+            'first_name' => 'Maria', 'middle_name' => 'Garcia', 'last_name' => 'Santos',
+        ]))->assertOk()->assertJsonCount(2, 'data');
+
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()->assertJsonPath('meta.total', 1);
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees/duplicates/merge', [
+            'primary_attendee_id' => $first->id,
+            'duplicate_attendee_ids' => [$second->id],
+        ])->assertOk();
+    }
+
+    public function test_name_key_backfill_keeps_existing_duplicate_dismissals(): void
+    {
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $first = Attendee::factory()->for($org)->create([
+            'first_name' => 'Maria', 'middle_name' => 'Lopez', 'last_name' => 'Santos',
+        ]);
+        $second = Attendee::factory()->for($org)->create([
+            'first_name' => 'Maria', 'middle_name' => 'Lopez', 'last_name' => 'Santos',
+        ]);
+        DB::table('attendees')->whereIn('id', [$first->id, $second->id])
+            ->update(['normalized_name' => 'maria lopez santos']);
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees/duplicates/dismiss', [
+            'attendee_ids' => [$first->id, $second->id],
+        ])->assertNoContent();
+
+        $migration = require database_path('migrations/2026_09_25_000000_exclude_middle_name_from_attendee_duplicate_key.php');
+        $migration->up();
+
+        $this->assertDatabaseHas('attendees', ['id' => $first->id, 'normalized_name' => 'maria santos']);
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()->assertJsonPath('meta.total', 0);
+
+        $migration->down();
+        $this->assertDatabaseHas('attendees', ['id' => $first->id, 'normalized_name' => 'maria lopez santos']);
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()->assertJsonPath('meta.total', 0);
     }
 
     public function test_admin_can_review_dismiss_and_reopen_duplicate_group(): void

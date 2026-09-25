@@ -348,6 +348,89 @@ class AttendeeTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('data.id', $attendee->id);
         $response->assertJsonPath('event_stats', null);
+        $response->assertJsonMissingPath('profile_dashboard');
+    }
+
+    public function test_profile_dashboard_shows_account_and_completed_session_attendance(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $account = User::factory()->attendee()->unverified()->create();
+        $attendee = Attendee::factory()->for($org)->for($account, 'user')->create();
+        $event = Event::factory()->for($org)->create();
+        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $attended = EventSession::factory()->for($event)->create(['session_date' => now()->subDays(2)]);
+        EventSession::factory()->for($event)->create(['session_date' => now()->subDay()]);
+        EventSession::factory()->for($event)->create(['session_date' => now()->addDay()]);
+        AttendanceRecord::factory()->for($registration)->for($attended, 'eventSession')
+            ->create(['check_in_at' => now()->subDays(2)]);
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/attendees/{$attendee->id}?include=dashboard");
+
+        $response->assertOk()
+            ->assertJsonPath('profile_dashboard.account.linked', true)
+            ->assertJsonPath('profile_dashboard.account.email', $account->email)
+            ->assertJsonPath('profile_dashboard.account.email_verified', false)
+            ->assertJsonPath('profile_dashboard.stats.registration_count', 1)
+            ->assertJsonPath('profile_dashboard.stats.completed_sessions', 2)
+            ->assertJsonPath('profile_dashboard.stats.attended_sessions', 1)
+            ->assertJsonPath('profile_dashboard.stats.attendance_rate', 50)
+            ->assertJsonPath('profile_dashboard.registrations.0.event.id', $event->id)
+            ->assertJsonPath('profile_dashboard.registrations.0.attendance.sessions_total', 3)
+            ->assertJsonPath('profile_dashboard.registrations.0.attendance.rate', 50)
+            ->assertJsonMissingPath('profile_dashboard.registrations.0.qr_token');
+    }
+
+    public function test_profile_dashboard_empty_state_and_pending_invitation(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $attendee = Attendee::factory()->for($org)->create(['invite_token' => 'pending-invite']);
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/attendees/{$attendee->id}?include=dashboard");
+
+        $response->assertOk()
+            ->assertJsonPath('profile_dashboard.account.linked', false)
+            ->assertJsonPath('profile_dashboard.account.invite_status', 'pending')
+            ->assertJsonPath('profile_dashboard.registrations', [])
+            ->assertJsonPath('profile_dashboard.stats.attendance_rate', null);
+    }
+
+    public function test_profile_dashboard_only_shows_events_the_viewer_can_access(): void
+    {
+        $org = Organization::factory()->create();
+        $otherOrg = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $attendee = Attendee::factory()->for($org)->create();
+        $allowed = Event::factory()->for($org)->create();
+        $restricted = Event::factory()->for($org)->create();
+        $foreign = Event::factory()->for($otherOrg)->create();
+        $checker->accessibleEvents()->sync([$allowed->id]);
+        EventRegistration::factory()->for($allowed)->for($attendee)->create();
+        EventRegistration::factory()->for($restricted)->for($attendee)->create();
+        EventRegistration::factory()->for($foreign)->for($attendee)->create();
+
+        $response = $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/attendees/{$attendee->id}?include=dashboard");
+
+        $response->assertOk()
+            ->assertJsonPath('profile_dashboard.stats.registration_count', 1)
+            ->assertJsonCount(1, 'profile_dashboard.registrations')
+            ->assertJsonPath('profile_dashboard.registrations.0.event.id', $allowed->id);
+    }
+
+    public function test_profile_dashboard_rejects_attendee_from_another_organization(): void
+    {
+        $viewerOrg = Organization::factory()->create();
+        $attendeeOrg = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($viewerOrg)->create();
+        $attendee = Attendee::factory()->for($attendeeOrg)->create();
+
+        $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/attendees/{$attendee->id}?include=dashboard")
+            ->assertNotFound();
     }
 
     public function test_show_returns_null_event_stats_for_unregistered_attendee(): void

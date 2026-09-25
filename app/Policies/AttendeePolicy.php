@@ -14,7 +14,9 @@ class AttendeePolicy
 
     public function view(User $user, Attendee $attendee): bool
     {
-        return $user->isSuperAdmin() || $user->organization_id === $attendee->organization_id;
+        return $user->isSuperAdmin()
+            || ($user->isAttendee() && $attendee->user_id === $user->id)
+            || $user->organization_id === $attendee->organization_id;
     }
 
     public function create(User $user): bool

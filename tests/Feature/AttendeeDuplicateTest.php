@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\Attendee;
 use App\Models\AttendanceRecord;
+use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
@@ -125,10 +125,12 @@ class AttendeeDuplicateTest extends TestCase
         $this->assertDatabaseHas('attendees', ['id' => $source->id, 'merged_into_id' => $primary->id]);
         $this->assertDatabaseHas('event_registrations', ['id' => $registration->id, 'attendee_id' => $primary->id]);
 
-        $this->actingAs($admin, 'sanctum')->getJson("/api/v1/attendees/{$source->id}")
+        $this->actingAs($admin, 'sanctum')->getJson("/api/v1/attendees/{$source->id}?include=dashboard")
             ->assertOk()
             ->assertJsonPath('data.id', $primary->id)
-            ->assertJsonPath('merged_from_id', $source->id);
+            ->assertJsonPath('merged_from_id', $source->id)
+            ->assertJsonPath('profile_dashboard.stats.registration_count', 1)
+            ->assertJsonPath('profile_dashboard.registrations.0.id', $registration->id);
     }
 
     public function test_name_changing_update_warns_and_override_allows_it(): void

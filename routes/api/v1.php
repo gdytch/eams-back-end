@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\EventProgramController;
 use App\Http\Controllers\Api\V1\EventProgramItemController;
 use App\Http\Controllers\Api\V1\EventRegistrationController;
 use App\Http\Controllers\Api\V1\EventSessionController;
+use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\PublicEventController;
@@ -61,6 +62,7 @@ Route::get('public/unions', [PublicUnionController::class, 'index']);
 Route::get('public/missions', [PublicMissionController::class, 'index']);
 
 Route::middleware('auth:sanctum')->group(function () {
+    Route::get('search', GlobalSearchController::class)->middleware('throttle:60,1');
     Route::post('auth/logout', [AuthController::class, 'logout']);
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::middleware('throttle:6,1')->post('auth/email/verification-notification', [AuthController::class, 'resendVerification']);

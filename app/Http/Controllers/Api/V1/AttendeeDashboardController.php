@@ -111,7 +111,7 @@ class AttendeeDashboardController extends Controller
         $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
 
         $registrations = $attendee->registrations()
-            ->with(['event', 'attendanceRecords'])
+            ->with(['event' => fn ($query) => $query->withoutGlobalScopes(), 'attendanceRecords'])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -121,12 +121,13 @@ class AttendeeDashboardController extends Controller
     /**
      * Show the authenticated attendee's session attendance for one registered event.
      */
-    public function attendance(Request $request, Event $event): JsonResponse
+    public function attendance(Request $request, int $event): JsonResponse
     {
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::where('user_id', $user->id)->firstOrFail();
+        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
+        $event = Event::withoutGlobalScopes()->findOrFail($event);
         $registration = $attendee->registrations()
             ->where('event_id', $event->id)
             ->with(['attendanceRecords' => fn ($query) => $query->whereNotNull('check_in_at')])
@@ -149,6 +150,7 @@ class AttendeeDashboardController extends Controller
                 'start_time' => $session->start_time,
                 'end_time' => $session->end_time,
                 'status' => $attendance === null ? 'absent' : 'present',
+                'attendance_record_id' => $attendance?->id,
                 'check_in_at' => $attendance?->check_in_at,
                 'check_out_at' => $attendance?->check_out_at,
             ];
@@ -179,12 +181,13 @@ class AttendeeDashboardController extends Controller
     /**
      * Show the program for one event registered to the authenticated attendee.
      */
-    public function program(Request $request, Event $event): EventProgramResource
+    public function program(Request $request, int $event): EventProgramResource
     {
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::where('user_id', $user->id)->firstOrFail();
+        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
+        $event = Event::withoutGlobalScopes()->findOrFail($event);
         abort_unless(
             $attendee->registrations()->where('event_id', $event->id)->exists(),
             404,

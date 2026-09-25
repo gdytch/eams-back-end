@@ -6,13 +6,13 @@ use App\Enums\OrganizationLevel;
 use App\Models\Concerns\BelongsToOrganization;
 use Database\Factories\AttendeeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 #[Fillable(['organization_id', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at', 'merged_into_id', 'merged_by', 'merged_at'])]
@@ -40,7 +40,6 @@ class Attendee extends Model
         static::saving(function (self $attendee) {
             $attendee->normalized_name = static::normalizeName(
                 $attendee->first_name,
-                $attendee->middle_name,
                 $attendee->last_name,
             );
         });
@@ -49,7 +48,7 @@ class Attendee extends Model
     /**
      * Normalize a name for duplicate comparison: trim, lowercase, collapse whitespace.
      */
-    public static function normalizeName(?string $first, ?string $middle, ?string $last): string
+    public static function normalizeName(?string $first, ?string $last): string
     {
         return collect([$first, $last])
             ->filter()
@@ -69,10 +68,16 @@ class Attendee extends Model
         return $token;
     }
 
-    #[Scope]
-    protected function matchingName(Builder $query, ?string $first, ?string $middle, ?string $last): Builder
+    public static function matchingName(?string $first, ?string $last, ?int $organizationId = null, ?int $exceptId = null): Collection
     {
-        return $query->where('normalized_name', static::normalizeName($first, $middle, $last));
+        $name = static::normalizeName($first, $last);
+
+        return static::query()
+            ->when($organizationId, fn (Builder $query) => $query->where('organization_id', $organizationId))
+            ->when($exceptId, fn (Builder $query) => $query->whereKeyNot($exceptId))
+            ->cursor()
+            ->filter(fn (self $attendee) => static::normalizeName($attendee->first_name, $attendee->last_name) === $name)
+            ->collect();
     }
 
     public function union(): BelongsTo

@@ -84,7 +84,7 @@ class EventRegistrationController extends Controller
                 $attendee = Attendee::findOrFail($data['attendee_id']);
             } else {
                 if (! $override) {
-                    $duplicates = Attendee::matchingName($data['first_name'], $data['middle_name'] ?? null, $data['last_name'])->get();
+                    $duplicates = Attendee::matchingName($data['first_name'], $data['last_name']);
 
                     if ($duplicates->isNotEmpty()) {
                         return response()->json([

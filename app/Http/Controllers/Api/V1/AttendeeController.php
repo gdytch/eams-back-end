@@ -97,9 +97,7 @@ class AttendeeController extends Controller
 
         if (! $override) {
             $organizationId = $data['organization_id'] ?? $request->user()->organization_id;
-            $duplicates = Attendee::matchingName($data['first_name'], $data['middle_name'] ?? null, $data['last_name'])
-                ->where('organization_id', $organizationId)
-                ->get();
+            $duplicates = Attendee::matchingName($data['first_name'], $data['last_name'], $organizationId);
 
             if ($duplicates->isNotEmpty()) {
                 return response()->json([
@@ -153,9 +151,8 @@ class AttendeeController extends Controller
 
         $duplicates = Attendee::matchingName(
             $request->validated('first_name'),
-            $request->validated('middle_name'),
             $request->validated('last_name'),
-        )->get();
+        );
 
         return AttendeeResource::collection($duplicates);
     }
@@ -169,24 +166,27 @@ class AttendeeController extends Controller
 
         $perPage = min(max($request->integer('per_page', 10), 1), 50);
         $page = max($request->integer('page', 1), 1);
-        $groupQuery = Attendee::query()
-            ->select('organization_id', 'normalized_name', DB::raw('COUNT(*) as attendee_count'))
-            ->groupBy('organization_id', 'normalized_name')
-            ->havingRaw('COUNT(*) > 1')
-            ->orderBy('normalized_name');
+        $groupQuery = Attendee::query()->select('id', 'organization_id', 'first_name', 'last_name');
 
         if ($request->user()->isSuperAdmin() && $request->filled('organization_id')) {
             $groupQuery->where('organization_id', $request->integer('organization_id'));
         }
 
-        $groups = $groupQuery->get()->filter(function ($group) {
-            $attendeeIds = Attendee::query()
-                ->where('organization_id', $group->organization_id)
-                ->where('normalized_name', $group->normalized_name)
-                ->pluck('id');
+        $groups = $groupQuery->get()
+            ->groupBy(fn (Attendee $attendee) => $attendee->organization_id.'|'.Attendee::normalizeName($attendee->first_name, $attendee->last_name))
+            ->filter(fn ($attendees) => $attendees->count() > 1)
+            ->map(function ($attendees) {
+                $first = $attendees->first();
 
-            return ! $this->allPairsDismissed($group->organization_id, $group->normalized_name, $attendeeIds);
-        })->values();
+                return (object) [
+                    'organization_id' => $first->organization_id,
+                    'normalized_name' => Attendee::normalizeName($first->first_name, $first->last_name),
+                    'ids' => $attendees->pluck('id'),
+                ];
+            })
+            ->filter(fn ($group) => ! $this->allPairsDismissed($group->organization_id, $group->normalized_name, $group->ids))
+            ->sortBy('normalized_name')
+            ->values();
 
         $pageGroups = $groups->slice(($page - 1) * $perPage, $perPage)->values();
         $organizationNames = DB::table('organizations')
@@ -194,8 +194,7 @@ class AttendeeController extends Controller
             ->pluck('name', 'id');
         $data = $pageGroups->map(function ($group) use ($request, $organizationNames) {
             $attendees = Attendee::query()
-                ->where('organization_id', $group->organization_id)
-                ->where('normalized_name', $group->normalized_name)
+                ->whereIn('id', $group->ids)
                 ->with(['union', 'mission', 'church', 'registrations.event', 'registrations.attendanceRecords'])
                 ->orderBy('created_at')
                 ->get();
@@ -235,7 +234,8 @@ class AttendeeController extends Controller
         $this->authorizeDuplicateResolution($request);
         $data = $request->validate(['attendee_ids' => ['required', 'array', 'min:2'], 'attendee_ids.*' => ['integer', 'distinct']]);
         $attendees = $this->activeDuplicateAttendees($data['attendee_ids']);
-        $fingerprint = $this->duplicateFingerprint($attendees->first()->normalized_name);
+        $first = $attendees->first();
+        $fingerprint = $this->duplicateFingerprint(Attendee::normalizeName($first->first_name, $first->last_name));
 
         foreach ($attendees as $index => $first) {
             foreach ($attendees->slice($index + 1) as $second) {
@@ -466,20 +466,14 @@ class AttendeeController extends Controller
         $override = (bool) ($data['override_duplicate'] ?? false);
         unset($data['override_duplicate']);
 
-        $nameChanged = array_key_exists('first_name', $data)
-            || array_key_exists('middle_name', $data)
-            || array_key_exists('last_name', $data);
+        $nameChanged = array_key_exists('first_name', $data) || array_key_exists('last_name', $data);
         if ($nameChanged && ! $override) {
             $firstName = $data['first_name'] ?? $attendee->first_name;
-            $middleName = array_key_exists('middle_name', $data) ? $data['middle_name'] : $attendee->middle_name;
             $lastName = $data['last_name'] ?? $attendee->last_name;
-            $normalizedName = Attendee::normalizeName($firstName, $middleName, $lastName);
+            $normalizedName = Attendee::normalizeName($firstName, $lastName);
 
-            if ($normalizedName !== $attendee->normalized_name) {
-                $duplicates = Attendee::matchingName($firstName, $middleName, $lastName)
-                    ->where('organization_id', $attendee->organization_id)
-                    ->whereKeyNot($attendee->id)
-                    ->get();
+            if ($normalizedName !== Attendee::normalizeName($attendee->first_name, $attendee->last_name)) {
+                $duplicates = Attendee::matchingName($firstName, $lastName, $attendee->organization_id, $attendee->id);
 
                 if ($duplicates->isNotEmpty()) {
                     return response()->json([
@@ -686,7 +680,7 @@ class AttendeeController extends Controller
         }
 
         if ($attendees->pluck('organization_id')->unique()->count() !== 1
-            || $attendees->pluck('normalized_name')->unique()->count() !== 1) {
+            || $attendees->map(fn (Attendee $attendee) => Attendee::normalizeName($attendee->first_name, $attendee->last_name))->unique()->count() !== 1) {
             abort(422, 'Attendees must be active duplicates from one organization.');
         }
 

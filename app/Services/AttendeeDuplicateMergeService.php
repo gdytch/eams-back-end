@@ -43,7 +43,7 @@ class AttendeeDuplicateMergeService
 
             if ($attendees->contains(fn (Attendee $attendee) => $attendee->merged_at !== null)
                 || $attendees->pluck('organization_id')->unique()->count() !== 1
-                || $attendees->pluck('normalized_name')->unique()->count() !== 1) {
+                || $attendees->map(fn (Attendee $attendee) => Attendee::normalizeName($attendee->first_name, $attendee->last_name))->unique()->count() !== 1) {
                 throw new DomainException('Attendees must be active duplicates from one organization.');
             }
 

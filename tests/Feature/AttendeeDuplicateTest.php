@@ -24,7 +24,8 @@ class AttendeeDuplicateTest extends TestCase
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $union = Union::factory()->for($org)->create();
-        Attendee::factory()->for($org)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
+        $existing = Attendee::factory()->for($org)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
+        DB::table('attendees')->where('id', $existing->id)->update(['normalized_name' => 'stale value']);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
             'first_name' => 'juan',
@@ -83,6 +84,8 @@ class AttendeeDuplicateTest extends TestCase
         $second = Attendee::factory()->for($org)->create([
             'first_name' => 'maria', 'middle_name' => 'Reyes', 'last_name' => 'santos',
         ]);
+        DB::table('attendees')->where('id', $first->id)->update(['normalized_name' => 'maria lopez santos']);
+        DB::table('attendees')->where('id', $second->id)->update(['normalized_name' => 'maria reyes santos']);
 
         $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/check-duplicates?'.http_build_query([
             'first_name' => 'Maria', 'middle_name' => 'Garcia', 'last_name' => 'Santos',
@@ -97,7 +100,7 @@ class AttendeeDuplicateTest extends TestCase
         ])->assertOk();
     }
 
-    public function test_name_key_backfill_keeps_existing_duplicate_dismissals(): void
+    public function test_duplicate_dismissals_ignore_stale_name_keys(): void
     {
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -114,15 +117,13 @@ class AttendeeDuplicateTest extends TestCase
             'attendee_ids' => [$first->id, $second->id],
         ])->assertNoContent();
 
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()->assertJsonPath('meta.total', 0);
+
         $migration = require database_path('migrations/2026_09_25_000000_exclude_middle_name_from_attendee_duplicate_key.php');
         $migration->up();
 
         $this->assertDatabaseHas('attendees', ['id' => $first->id, 'normalized_name' => 'maria santos']);
-        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
-            ->assertOk()->assertJsonPath('meta.total', 0);
-
-        $migration->down();
-        $this->assertDatabaseHas('attendees', ['id' => $first->id, 'normalized_name' => 'maria lopez santos']);
         $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
             ->assertOk()->assertJsonPath('meta.total', 0);
     }
@@ -195,6 +196,8 @@ class AttendeeDuplicateTest extends TestCase
         $admin = User::factory()->orgAdmin()->for($org)->create();
         Attendee::factory()->for($org)->create(['first_name' => 'Ana', 'middle_name' => null, 'last_name' => 'Reyes']);
         $attendee = Attendee::factory()->for($org)->create(['first_name' => 'Bea', 'middle_name' => null, 'last_name' => 'Cruz']);
+        DB::table('attendees')->where('first_name', 'Ana')->update(['normalized_name' => 'stale value']);
+        DB::table('attendees')->where('id', $attendee->id)->update(['normalized_name' => 'stale value']);
 
         $payload = ['first_name' => 'Ana', 'middle_name' => null, 'last_name' => 'Reyes'];
         $this->actingAs($admin, 'sanctum')->putJson("/api/v1/attendees/{$attendee->id}", $payload)

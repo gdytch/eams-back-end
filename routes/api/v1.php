@@ -30,15 +30,6 @@ use App\Http\Controllers\Api\V1\UnionController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/debug/request', function (Request $request) {
-    return [
-        'ip' => $request->ip(),
-        'scheme' => $request->getScheme(),
-        'secure' => $request->isSecure(),
-        'url' => url('/'),
-        'host' => $request->getHost(),
-    ];
-});
 
 Route::get('profile-photos/{kind}/{id}/{size}', ProfilePhotoController::class)
     ->middleware('signed')->whereNumber('id')->whereIn('kind', ['users', 'attendees'])

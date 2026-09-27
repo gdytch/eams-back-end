@@ -9,6 +9,13 @@ services:
     tty: true
     environment:
       - TZ=Asia/Manila
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:?Set DB_DATABASE in .env}
+      - DB_USERNAME=${DB_USERNAME:?Set DB_USERNAME in .env}
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-127.0.0.1,::1}
     volumes:
       - .:/var/www
     networks:
@@ -25,6 +32,13 @@ services:
     mem_limit: 1400m
     environment:
       - TZ=Asia/Manila
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:?Set DB_DATABASE in .env}
+      - DB_USERNAME=${DB_USERNAME:?Set DB_USERNAME in .env}
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-127.0.0.1,::1}
     command: php artisan queue:work --sleep=3 --tries=3 --timeout=600 --memory=1400
     restart: unless-stopped
     volumes:
@@ -58,20 +72,20 @@ services:
     container_name: ams_db
     restart: unless-stopped
     ports:
-      - "3308:${DB_PORT:-3306}"
+      - "127.0.0.1:${DB_HOST_PORT:-3308}:3306"
     environment:
       TZ: Asia/Manila
-      MYSQL_DATABASE: ${DB_DATABASE:-laravel}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-secret_root_password}
-      MYSQL_USER: ${DB_USERNAME:-laravel_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-secret_user_password}
+      MYSQL_DATABASE: ${DB_DATABASE:?Set DB_DATABASE in .env}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env}
+      MYSQL_USER: ${DB_USERNAME:?Set DB_USERNAME in .env}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     volumes:
       - dbdata:/var/lib/mysql
     command: --default-time-zone='+08:00'
     networks:
       - ams_network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-secret_root_password}"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$${MYSQL_ROOT_PASSWORD}\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -86,11 +100,11 @@ services:
       - local
       - development
     ports:
-      - "8080:80"
+      - "127.0.0.1:${PMA_HOST_PORT:-8080}:80"
     environment:
       PMA_HOST: db
-      PMA_PORT: ${DB_PORT:-3306}
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-secret_root_password}
+      PMA_PORT: 3306
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env}
     depends_on:
       - db
     networks:

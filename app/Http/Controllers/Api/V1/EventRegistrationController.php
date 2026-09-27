@@ -17,10 +17,12 @@ use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\IdCardGridDownload;
+use App\Models\User;
 use App\Services\AttendeeInvitationService;
 use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
@@ -35,7 +37,7 @@ class EventRegistrationController extends Controller
      */
     public function index(Request $request, Event $event)
     {
-        $this->authorize('view', $event);
+        $this->authorize('viewStaffData', $event);
 
         $query = $event->registrations()->with(['attendee.union', 'attendee.mission']);
 
@@ -138,6 +140,7 @@ class EventRegistrationController extends Controller
      */
     public function show(Event $event, EventRegistration $registration)
     {
+        abort_unless($registration->event_id === $event->id, 404);
         $this->authorize('view', $registration);
 
         return EventRegistrationResource::make($registration->load('attendee'));
@@ -148,6 +151,7 @@ class EventRegistrationController extends Controller
      */
     public function destroy(Event $event, EventRegistration $registration)
     {
+        abort_unless($registration->event_id === $event->id, 404);
         $this->authorize('delete', $registration);
 
         AuditLog::record('event_registration.deleted', $registration, ['attendee_id' => $registration->attendee_id]);
@@ -195,8 +199,11 @@ class EventRegistrationController extends Controller
     /**
      * Download the attendee's generated identification card PDF.
      */
-    public function downloadIdCard(Event $event, EventRegistration $registration)
+    public function downloadIdCard(int $event, int $registration)
     {
+        $registration = EventRegistration::where('event_id', $event)->findOrFail($registration);
+        $registration->setRelation('event', Event::withoutGlobalScopes()->findOrFail($event));
+        $registration->setRelation('attendee', Attendee::withoutGlobalScopes()->findOrFail($registration->attendee_id));
         $this->authorize('downloadIdCard', $registration);
 
         if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
@@ -239,6 +246,14 @@ class EventRegistrationController extends Controller
             return response()->json([
                 'message' => 'At least one registration ID is required.',
             ], 400);
+        }
+
+        if (! is_array($registrationIds)
+            || count($registrationIds) > 100
+            || collect($registrationIds)->contains(fn ($id) => filter_var($id, FILTER_VALIDATE_INT) === false || (int) $id < 1)) {
+            return response()->json([
+                'message' => 'Select no more than 100 registrations. Use the asynchronous grid ZIP for larger downloads.',
+            ], 422);
         }
 
         $registrations = $event->registrations()
@@ -290,7 +305,14 @@ class EventRegistrationController extends Controller
 
         $registrations = $event->registrations()
             ->with('attendee')
+            ->limit(101)
             ->get();
+
+        if ($registrations->count() > 100) {
+            return response()->json([
+                'message' => 'This event has more than 100 registrations. Use the asynchronous grid ZIP for larger downloads.',
+            ], 422);
+        }
 
         if ($registrations->isEmpty()) {
             return response()->json([
@@ -328,8 +350,11 @@ class EventRegistrationController extends Controller
     /**
      * Stream the generated identification card image for display on the frontend.
      */
-    public function getIdCardImage(Event $event, EventRegistration $registration)
+    public function getIdCardImage(int $event, int $registration)
     {
+        $registration = EventRegistration::where('event_id', $event)->findOrFail($registration);
+        $registration->setRelation('event', Event::withoutGlobalScopes()->findOrFail($event));
+        $registration->setRelation('attendee', Attendee::withoutGlobalScopes()->findOrFail($registration->attendee_id));
         $this->authorize('viewIdCardImage', $registration);
 
         // Validate that id_card_images_path is a non-empty array
@@ -355,10 +380,6 @@ class EventRegistrationController extends Controller
         if (! Storage::disk('local')->exists($imagePath)) {
             return response()->json([
                 'message' => 'Identification card image not found.',
-                'debug' => [
-                    'requested_path' => $imagePath,
-                    'full_path' => Storage::disk('local')->path($imagePath),
-                ],
             ], 404);
         }
 
@@ -390,23 +411,7 @@ class EventRegistrationController extends Controller
             }
         }
 
-        $download = IdCardGridDownload::create([
-            'event_id' => $event->id,
-            'requested_by' => $request->user()->id,
-            'registration_ids' => $registrationIds,
-            'status' => 'pending',
-        ]);
-
-        $download->refresh();
-
-        PrepareIdCardGridDownloadJob::dispatch($download->id);
-
-        AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
-            'download_id' => $download->id,
-            'registration_ids' => $registrationIds,
-        ]);
-
-        return IdCardGridDownloadResource::make($download)->response()->setStatusCode(202);
+        return $this->queueGridDownload($event, $request->user(), $registrationIds);
     }
 
     /**
@@ -424,23 +429,7 @@ class EventRegistrationController extends Controller
             ], 404);
         }
 
-        $download = IdCardGridDownload::create([
-            'event_id' => $event->id,
-            'requested_by' => auth()->user()->id,
-            'registration_ids' => null,
-            'status' => 'pending',
-        ]);
-
-        $download->refresh();
-
-        PrepareIdCardGridDownloadJob::dispatch($download->id);
-
-        AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
-            'download_id' => $download->id,
-            'registration_ids' => null,
-        ]);
-
-        return IdCardGridDownloadResource::make($download)->response()->setStatusCode(202);
+        return $this->queueGridDownload($event, request()->user(), null);
     }
 
     /**
@@ -495,19 +484,27 @@ class EventRegistrationController extends Controller
             ], 404);
         }
 
+        $streamLock = Cache::lock("id-card-grid-download:{$gridDownload->id}", 600);
+        if (! $streamLock->get()) {
+            return response()->json(['message' => 'This ZIP download is already being streamed.'], 409);
+        }
+
         return response()->streamDownload(
-            function () use ($disk, $filePath): void {
-                $stream = $disk->readStream($filePath);
-
-                if ($stream === false) {
-                    throw new \RuntimeException('Unable to read ZIP archive.');
-                }
-
+            function () use ($disk, $filePath, $streamLock): void {
                 try {
-                    fpassthru($stream);
+                    $stream = $disk->readStream($filePath);
+                    if ($stream === false) {
+                        throw new \RuntimeException('Unable to read ZIP archive.');
+                    }
+
+                    try {
+                        fpassthru($stream);
+                    } finally {
+                        fclose($stream);
+                        $disk->delete($filePath);
+                    }
                 } finally {
-                    fclose($stream);
-                    $disk->delete($filePath);
+                    $streamLock->release();
                 }
             },
             "event-{$event->id}-id-card-grid-batches.zip",
@@ -516,5 +513,41 @@ class EventRegistrationController extends Controller
                 'Content-Length' => $disk->size($filePath),
             ]
         );
+    }
+
+    private function queueGridDownload(Event $event, User $user, ?array $registrationIds)
+    {
+        return Cache::lock("id-card-grid-event:{$event->id}", 30)->get(function () use ($event, $user, $registrationIds) {
+            $active = IdCardGridDownload::query()
+                ->where('event_id', $event->id)
+                ->whereIn('status', ['pending', 'processing']);
+
+            if ($active->where('requested_by', $user->id)->exists()) {
+                return response()->json(['message' => 'An ID card grid download is already active for this event.'], 429);
+            }
+
+            if (IdCardGridDownload::query()
+                ->where('event_id', $event->id)
+                ->whereIn('status', ['pending', 'processing'])
+                ->count() >= 10) {
+                return response()->json(['message' => 'This event has reached its active ID card grid download limit.'], 429);
+            }
+
+            $download = IdCardGridDownload::create([
+                'event_id' => $event->id,
+                'requested_by' => $user->id,
+                'registration_ids' => $registrationIds,
+                'status' => 'pending',
+            ]);
+
+            PrepareIdCardGridDownloadJob::dispatch($download->id);
+
+            AuditLog::record('event_registration.id_card_grid_download_started_v2', $event, [
+                'download_id' => $download->id,
+                'registration_ids' => $registrationIds,
+            ]);
+
+            return IdCardGridDownloadResource::make($download)->response()->setStatusCode(202);
+        }) ?: response()->json(['message' => 'ID card grid download capacity is temporarily unavailable.'], 429);
     }
 }

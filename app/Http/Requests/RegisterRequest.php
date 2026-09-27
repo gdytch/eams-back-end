@@ -68,6 +68,7 @@ class RegisterRequest extends FormRequest
                             // Not an event token, check if it's a valid attendee invite token
                             $attendeeByToken = Attendee::withoutGlobalScopes()
                                 ->where('invite_token', $inviteToken)
+                                ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
                                 ->whereNull('user_id')
                                 ->first();
 

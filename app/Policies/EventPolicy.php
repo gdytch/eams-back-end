@@ -14,6 +14,11 @@ class EventPolicy
 
     public function view(User $user, Event $event): bool
     {
+        if ($user->isAttendee()) {
+            return $event->status->value === 'published'
+                && $user->attendee()->whereHas('registrations', fn ($query) => $query->where('event_id', $event->id))->exists();
+        }
+
         return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
             && $user->hasAccessToEvent($event);
     }
@@ -36,7 +41,14 @@ class EventPolicy
 
     public function manageIdCards(User $user, Event $event): bool
     {
-        return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
+        return ($user->isSuperAdmin() || (($user->isOrgAdmin() || $user->isChecker()) && $user->organization_id === $event->organization_id))
+            && $user->hasAccessToEvent($event);
+    }
+
+    public function viewStaffData(User $user, Event $event): bool
+    {
+        return ($user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker())
+            && ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
             && $user->hasAccessToEvent($event);
     }
 }

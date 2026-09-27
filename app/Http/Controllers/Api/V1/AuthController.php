@@ -65,7 +65,9 @@ class AuthController extends Controller
                 // First check if it's an attendee invite token
                 $attendee = Attendee::withoutGlobalScopes()
                     ->where('invite_token', $data['invite_token'])
+                    ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
                     ->whereNull('user_id')
+                    ->lockForUpdate()
                     ->first();
 
                 // If not found, check if it's an event invite token
@@ -79,6 +81,7 @@ class AuthController extends Controller
                         $attendee = Attendee::withoutGlobalScopes()
                             ->where('email_address', $data['email'])
                             ->whereNull('user_id')
+                            ->lockForUpdate()
                             ->first();
 
                         if ($attendee !== null && $attendee->organization_id !== null && $attendee->organization_id !== $event->organization_id) {
@@ -91,13 +94,17 @@ class AuthController extends Controller
                 } else {
                     $attendeeMatchMethod = 'personal_token';
                 }
+
+                if ($attendee === null && $event === null) {
+                    throw ValidationException::withMessages(['invite_token' => 'Invalid or expired invite.']);
+                }
             }
 
             $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
                 ->filter()
                 ->implode(' '));
 
-            $organizationId = $data['organization_id'];
+            $organizationId = $attendee?->organization_id ?? $data['organization_id'];
 
             // Mark email verified only if attendee email matches by personal token
             $emailVerifiedAt = null;
@@ -119,14 +126,18 @@ class AuthController extends Controller
 
             // Link the user to the attendee and clear the invite token, or create a new attendee for self-registered users
             if ($attendee) {
-                $attendee->update([
+                $attendeeData = [
                     'user_id' => $user->id,
                     'invite_token' => null,
-                    'organization_id' => $organizationId,
-                    'organization_level' => $data['organization_level'],
-                    'union_id' => $data['union_id'],
-                    'mission_id' => $data['mission_id'] ?? null,
-                ]);
+                ];
+                if ($data['organization_id'] === $attendee->organization_id) {
+                    $attendeeData += [
+                        'organization_level' => $data['organization_level'],
+                        'union_id' => $data['union_id'],
+                        'mission_id' => $data['mission_id'] ?? null,
+                    ];
+                }
+                $attendee->update($attendeeData);
 
                 if ($attendeeMatchMethod === 'personal_token') {
                     AuditLog::record('attendee.invite_claimed', $attendee, ['user_id' => $user->id]);
@@ -211,10 +222,18 @@ class AuthController extends Controller
                     ->where('email', $socialiteUser->getEmail())
                     ->first();
 
+                if ($user !== null && ! $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser)) {
+                    throw ValidationException::withMessages([
+                        'email' => 'This provider has not verified your email. Sign in with your existing account or reset its password.',
+                    ]);
+                }
+
                 if ($user === null) {
                     // Check if email exists in attendee table
                     $attendee = Attendee::withoutGlobalScopes()
                         ->where('email_address', $socialiteUser->getEmail())
+                        ->whereNull('user_id')
+                        ->lockForUpdate()
                         ->first();
 
                     // Check invite token (can be event or attendee token)
@@ -232,9 +251,17 @@ class AuthController extends Controller
                         if ($inviteEvent === null) {
                             $inviteAttendee = Attendee::withoutGlobalScopes()
                                 ->where('invite_token', $request->validated('invite_token'))
+                                ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
                                 ->whereNull('user_id')
+                                ->lockForUpdate()
                                 ->first();
                         }
+                    }
+
+                    if ($attendee !== null && ! $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser) && $inviteEvent === null && $inviteAttendee === null) {
+                        throw ValidationException::withMessages([
+                            'email' => 'This provider has not verified your email. Use your invitation link or sign in with your existing account.',
+                        ]);
                     }
 
                     $hasRegistrationTerritory = $request->filled('organization_id')
@@ -254,45 +281,44 @@ class AuthController extends Controller
                         ?? $inviteEvent?->organization_id
                         ?? $data['organization_id'];
 
-                    // Create new user
-                    $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
-                    $firstName = Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@');
-                    $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
+                    // An existing attendee record is the authoritative source for the user's name.
+                    $attendeeToLink = $attendee ?? $inviteAttendee;
+                    $name = $attendeeToLink !== null
+                        ? trim(collect([$attendeeToLink->first_name, $attendeeToLink->middle_name, $attendeeToLink->last_name])->filter()->implode(' '))
+                        : ($socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@'));
+                    $firstName = $attendeeToLink?->first_name ?? (Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@'));
+                    $middleName = $attendeeToLink?->middle_name;
+                    $lastName = $attendeeToLink?->last_name ?? (Str::contains($name, ' ') ? Str::after($name, ' ') : '');
 
                     $user = User::create([
                         'name' => $name,
                         'email' => $socialiteUser->getEmail(),
                         'password' => Hash::make(Str::random(40)),
                         'first_name' => $firstName,
+                        'middle_name' => $middleName,
                         'last_name' => $lastName,
                         'role' => UserRole::Attendee,
                         'organization_id' => $organizationId,
-                        'email_verified_at' => now(),
+                        'email_verified_at' => $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser) ? now() : null,
                     ]);
 
                     // Link the user to the attendee if found (either from pre-existing attendee or invite attendee)
-                    $attendeeToLink = $attendee ?? $inviteAttendee;
                     if ($attendeeToLink !== null) {
                         $attendeeToLink->update([
                             'user_id' => $user->id,
                             'invite_token' => null,
                         ]);
-                        if ($request->filled('organization_id')) {
-                            $attendeeToLink->update([
-                                'organization_id' => $request->validated('organization_id'),
-                            ]);
-                        }
-                        if ($request->filled('organization_level')) {
+                        if ($request->validated('organization_id') === $attendeeToLink->organization_id && $request->filled('organization_level')) {
                             $attendeeToLink->update([
                                 'organization_level' => $request->validated('organization_level'),
                             ]);
                         }
-                        if ($request->filled('union_id')) {
+                        if ($request->validated('organization_id') === $attendeeToLink->organization_id && $request->filled('union_id')) {
                             $attendeeToLink->update([
                                 'union_id' => $request->validated('union_id'),
                             ]);
                         }
-                        if ($request->filled('mission_id')) {
+                        if ($request->validated('organization_id') === $attendeeToLink->organization_id && $request->filled('mission_id')) {
                             $attendeeToLink->update([
                                 'mission_id' => $request->validated('mission_id'),
                             ]);
@@ -327,32 +353,34 @@ class AuthController extends Controller
                     $attendee = Attendee::withoutGlobalScopes()
                         ->where('email_address', $user->email)
                         ->whereNull('user_id')
+                        ->lockForUpdate()
                         ->first();
 
                     if ($attendee !== null) {
                         // Link the attendee to the user if organization_id matches or user doesn't have one
                         if ($user->organization_id === null || $user->organization_id === $attendee->organization_id) {
+                            $user->update([
+                                'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
+                                'first_name' => $attendee->first_name,
+                                'middle_name' => $attendee->middle_name,
+                                'last_name' => $attendee->last_name,
+                            ]);
                             $attendee->update([
                                 'user_id' => $user->id,
                                 'invite_token' => null,
                             ]);
 
-                            if ($request->filled('organization_id')) {
-                                $attendee->update([
-                                    'organization_id' => $request->validated('organization_id'),
-                                ]);
-                            }
-                            if ($request->filled('organization_level')) {
+                            if ($request->validated('organization_id') === $attendee->organization_id && $request->filled('organization_level')) {
                                 $attendee->update([
                                     'organization_level' => $request->validated('organization_level'),
                                 ]);
                             }
-                            if ($request->filled('union_id')) {
+                            if ($request->validated('organization_id') === $attendee->organization_id && $request->filled('union_id')) {
                                 $attendee->update([
                                     'union_id' => $request->validated('union_id'),
                                 ]);
                             }
-                            if ($request->filled('mission_id')) {
+                            if ($request->validated('organization_id') === $attendee->organization_id && $request->filled('mission_id')) {
                                 $attendee->update([
                                     'mission_id' => $request->validated('mission_id'),
                                 ]);
@@ -399,6 +427,8 @@ class AuthController extends Controller
                 ]);
             }
 
+            $this->syncAttendeeNameToUser($user);
+
             // Set organization_id from invite_token if currently null
             if ($user->organization_id === null && $request->filled('invite_token')) {
                 $event = Event::withoutGlobalScopes()
@@ -412,8 +442,14 @@ class AuthController extends Controller
             }
 
             // Mark email as verified if not already
-            if ($user->email_verified_at === null) {
+            if ($user->email_verified_at === null
+                && strcasecmp($user->email, (string) $socialiteUser->getEmail()) === 0
+                && $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser)) {
                 $user->update(['email_verified_at' => now()]);
+            }
+
+            if ($user->email_verified_at === null && $wasNewUser) {
+                event(new Registered($user));
             }
 
             $action = $wasNewUser ? 'user.sso_registered' : 'user.sso_login';
@@ -428,11 +464,43 @@ class AuthController extends Controller
         });
     }
 
+    private function hasAuthoritativeEmail(SsoProvider $provider, mixed $socialiteUser): bool
+    {
+        if ($provider !== SsoProvider::Google) {
+            return false;
+        }
+
+        $claims = $socialiteUser->getRaw();
+        $email = strtolower((string) $socialiteUser->getEmail());
+
+        return (bool) ($claims['verified_email'] ?? false)
+            && (str_ends_with($email, '@gmail.com') || filled($claims['hd'] ?? null));
+    }
+
+    private function syncAttendeeNameToUser(User $user): void
+    {
+        $attendee = $user->attendee;
+        if ($attendee === null) {
+            return;
+        }
+
+        $user->update([
+            'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
+            'first_name' => $attendee->first_name,
+            'middle_name' => $attendee->middle_name,
+            'last_name' => $attendee->last_name,
+        ]);
+    }
+
     private function claimWithSso(string $claimToken, $socialiteUser, SsoProvider $provider, AttendeeQrClaimService $claims): JsonResponse
     {
         $claim = $claims->claim($claimToken);
         if ($claim === null) {
             throw ValidationException::withMessages(['claim_token' => 'Your verification session has expired. Scan your ID card again.']);
+        }
+
+        if (! $claims->allowClaimCompletion($claimToken)) {
+            throw ValidationException::withMessages(['claim_token' => 'Too many attempts. Scan your ID card again.']);
         }
 
         $result = DB::transaction(function () use ($claim, $socialiteUser, $provider) {
@@ -506,21 +574,10 @@ class AuthController extends Controller
     {
         $email = $request->validated('email');
 
-        // Check if email exists in either user or attendee table
-        $emailExists = User::where('email', $email)->exists() ||
-            Attendee::where('email_address', $email)->exists();
-
-        if (! $emailExists) {
-            throw ValidationException::withMessages([
-                'email' => 'No account found with that email address.',
-            ]);
-        }
-
-        // Send reset link
         Password::sendResetLink(['email' => $email]);
 
         return response()->json([
-            'message' => 'A password reset link has been sent to your email.',
+            'message' => 'If an account exists for that email, a password reset link has been sent.',
         ], 200);
     }
 
@@ -529,56 +586,32 @@ class AuthController extends Controller
         $validated = $request->validated();
 
         return DB::transaction(function () use ($validated) {
-            // Manually verify the password reset token from the database
-            $resetRecord = DB::table('password_reset_tokens')
+            DB::table(config('auth.passwords.'.config('auth.defaults.passwords').'.table'))
                 ->where('email', $validated['email'])
+                ->lockForUpdate()
                 ->first();
 
-            if (! $resetRecord || ! Hash::check($validated['token'], $resetRecord->token)) {
-                throw ValidationException::withMessages([
-                    'email' => [trans('passwords.token')],
-                ]);
+            $status = Password::broker()->reset(
+                [
+                    'email' => $validated['email'],
+                    'token' => $validated['token'],
+                    'password' => $validated['password'],
+                ],
+                function (User $user, string $password): void {
+                    $user->forceFill([
+                        'password' => $password,
+                        'remember_token' => Str::random(60),
+                    ])->save();
+                    $user->tokens()->delete();
+                    AuditLog::record('user.password_reset', $user);
+                }
+            );
+
+            if ($status !== Password::PASSWORD_RESET) {
+                throw ValidationException::withMessages(['email' => [trans($status)]]);
             }
 
-            // Check if token has expired (default: 60 minutes)
-            if (now()->diffInMinutes($resetRecord->created_at) > 60) {
-                DB::table('password_reset_tokens')
-                    ->where('email', $validated['email'])
-                    ->delete();
-
-                throw ValidationException::withMessages([
-                    'email' => [trans('passwords.token')],
-                ]);
-            }
-
-            // Find the user without global scopes
-            $user = User::withoutGlobalScopes()->where('email', $validated['email'])->first();
-
-            if (! $user) {
-                throw ValidationException::withMessages([
-                    'email' => [trans('auth.failed')],
-                ]);
-            }
-
-            // Update password and token
-            $user->update([
-                'password' => $validated['password'],
-                'remember_token' => Str::random(60),
-            ]);
-
-            // Revoke all existing Sanctum tokens
-            $user->tokens()->delete();
-
-            // Delete the reset token
-            DB::table('password_reset_tokens')
-                ->where('email', $validated['email'])
-                ->delete();
-
-            AuditLog::record('user.password_reset', $user);
-
-            return response()->json([
-                'message' => 'Your password has been successfully reset.',
-            ], 200);
+            return response()->json(['message' => 'Your password has been successfully reset.']);
         });
     }
 
@@ -618,6 +651,7 @@ class AuthController extends Controller
     {
         $user = User::withoutGlobalScopes()
             ->where('invite_token', $token)
+            ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
             ->first();
 
         abort_if($user === null, 404, 'Invalid invite token.');
@@ -637,7 +671,13 @@ class AuthController extends Controller
             $user = User::withoutGlobalScopes()
                 ->where('invite_token', $data['token'])
                 ->where('email', $data['email'])
+                ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
+                ->lockForUpdate()
                 ->first();
+
+            if ($user === null) {
+                throw ValidationException::withMessages(['token' => ['Invalid or expired invite.']]);
+            }
 
             $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
                 ->filter()

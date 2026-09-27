@@ -161,7 +161,7 @@ class SsoLoginTest extends TestCase
     }
 
     #[Test]
-    public function existing_user_matched_by_email_links_identity(): void
+    public function unknown_facebook_identity_cannot_link_by_email(): void
     {
         $org = Organization::factory()->create();
         $user = User::factory()->create(['email' => 'existing@example.com', 'organization_id' => null]);
@@ -190,20 +190,9 @@ class SsoLoginTest extends TestCase
             'token' => 'valid_token',
         ]);
 
-        $response->assertOk();
-        $response->assertJson(['is_new_user' => false]);
-
-        $identity = UserIdentity::where('provider', 'facebook')
-            ->where('provider_id', 'fb-user-456')
-            ->first();
-        $this->assertNotNull($identity);
-        $this->assertEquals($user->id, $identity->user_id);
-
-        // Verify attendee was linked to the user and organization inherited
-        $attendee->refresh();
-        $this->assertEquals($user->id, $attendee->user_id);
-        $user->refresh();
-        $this->assertEquals($org->id, $user->organization_id);
+        $response->assertUnprocessable()->assertJsonValidationErrors('email');
+        $this->assertDatabaseMissing('user_identities', ['provider' => 'facebook', 'provider_id' => 'fb-user-456']);
+        $this->assertNull($attendee->fresh()->user_id);
     }
 
     #[Test]
@@ -520,6 +509,9 @@ class SsoLoginTest extends TestCase
         $user->id = $id;
         $user->name = $name;
         $user->email = $email;
+        if ($provider === 'google') {
+            $user->setRaw(['verified_email' => true, 'hd' => 'example.com']);
+        }
 
         return $user;
     }

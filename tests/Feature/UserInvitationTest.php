@@ -14,6 +14,24 @@ class UserInvitationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
+    public function test_expired_staff_invite_cannot_be_viewed_or_accepted(): void
+    {
+        $user = User::factory()->create([
+            'invite_token' => User::generateUniqueInviteToken(),
+            'invited_at' => now()->subDays(31),
+        ]);
+        $this->getJson('/api/v1/auth/invite/'.$user->invite_token)->assertNotFound();
+        $this->postJson('/api/v1/auth/accept-invite', [
+            'token' => $user->invite_token,
+            'email' => $user->email,
+            'first_name' => 'Jamie',
+            'last_name' => 'Rivera',
+            'password' => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ])->assertUnprocessable();
+        $this->assertNotNull($user->fresh()->invite_token);
+    }
+
     public function test_org_admin_can_invite_user_by_email(): void
     {
         Mail::fake();

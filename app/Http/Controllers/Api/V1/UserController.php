@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class UserController extends Controller
 {
@@ -108,13 +109,25 @@ class UserController extends Controller
     public function update(UpdateUserRequest $request, User $user)
     {
         $data = $request->validated();
+        unset($data['current_password']);
 
-        return DB::transaction(function () use ($user, $data) {
+        return DB::transaction(function () use ($request, $user, $data) {
             if (array_key_exists('password', $data)) {
                 $data['password'] = Hash::make($data['password']);
+                $currentToken = $request->user()->currentAccessToken();
+                $currentTokenId = $user->id === $request->user()->id && $currentToken instanceof PersonalAccessToken
+                    ? $currentToken->getKey()
+                    : null;
+                $user->tokens()->when($currentTokenId, fn ($query) => $query->whereKeyNot($currentTokenId))->delete();
             }
 
+            $emailChanged = isset($data['email']) && $data['email'] !== $user->email;
             $user->update($data);
+            if ($emailChanged) {
+                $user->forceFill(['email_verified_at' => null])->save();
+                $user->tokens()->delete();
+                DB::afterCommit(fn () => $user->sendEmailVerificationNotification());
+            }
 
             // Sync name fields to linked attendee
             if ($user->attendee !== null) {
@@ -177,6 +190,7 @@ class UserController extends Controller
             preset: 'profile_photo',
             directory: "users/{$user->id}",
             prefix: 'photo',
+            disk: 'local',
         );
 
         $user->update(['photo_paths' => $paths]);
@@ -200,6 +214,7 @@ class UserController extends Controller
 
         if ($user->photo_paths) {
             foreach ($user->photo_paths as $path) {
+                Storage::disk('local')->delete($path);
                 Storage::disk('public')->delete($path);
             }
         }

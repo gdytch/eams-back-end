@@ -61,7 +61,8 @@ class AttendeeFactory extends Factory
             $file,
             'profile_photo',
             "attendees/{$attendee->id}",
-            'photo'
+            'photo',
+            disk: 'local'
         );
 
         $attendee->update(['photo_paths' => $paths]);

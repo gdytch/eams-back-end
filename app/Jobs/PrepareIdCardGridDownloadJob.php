@@ -36,6 +36,21 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
 
     public function handle(): void
     {
+        // A retention sweep may expire a queued request before this job
+        // starts. Claim only pending rows so the job cannot revive it.
+        $claimed = IdCardGridDownload::query()
+            ->whereKey($this->downloadId)
+            ->where('status', IdCardGridDownloadStatus::Pending)
+            ->update([
+                'status' => IdCardGridDownloadStatus::Processing,
+                'progress_percentage' => 0,
+                'failure_reason' => null,
+            ]);
+
+        if ($claimed === 0) {
+            return;
+        }
+
         $download = IdCardGridDownload::with('event')->findOrFail(
             $this->downloadId
         );
@@ -43,12 +58,6 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
         $event = $download->event;
 
         try {
-            $download->update([
-                'status' => IdCardGridDownloadStatus::Processing,
-                'progress_percentage' => 0,
-                'failure_reason' => null,
-            ]);
-
             /*
              * Get registrations.
              *
@@ -140,6 +149,15 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
             Bus::batch($jobs)
                 ->name("ID Card Grid Download #{$download->id}")
                 ->then(function (Batch $batch) use ($download) {
+                    $isProcessing = IdCardGridDownload::query()
+                        ->whereKey($download->id)
+                        ->where('status', IdCardGridDownloadStatus::Processing)
+                        ->exists();
+
+                    if (! $isProcessing) {
+                        return;
+                    }
+
                     MergeIdCardGridDownloadJob::dispatch(
                         $download->id
                     );

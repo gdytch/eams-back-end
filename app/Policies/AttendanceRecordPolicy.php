@@ -17,13 +17,13 @@ class AttendanceRecordPolicy
     {
         $event = $attendanceRecord->eventRegistration->event;
 
-        return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
-            && $user->hasAccessToEvent($event);
+        return $user->can('viewStaffData', $event);
     }
 
     public function create(User $user, Event $event): bool
     {
-        return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
+        return ($user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker())
+            && ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
             && $user->hasAccessToEvent($event);
     }
 }

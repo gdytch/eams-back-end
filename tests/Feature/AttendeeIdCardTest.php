@@ -111,10 +111,14 @@ class AttendeeIdCardTest extends TestCase
             ->for(Attendee::factory()->for($org))
             ->create();
 
-        $response = $this->actingAs($orgAdmin, 'sanctum')
-            ->post("/api/v1/events/{$event->id}/registrations/{$registration->id}/id-card/regenerate");
+        $this->actingAs($orgAdmin, 'sanctum');
 
-        $response->assertStatus(202);
+        for ($attempt = 0; $attempt < 7; $attempt++) {
+            $this->postJson("/api/v1/events/{$event->id}/registrations/{$registration->id}/id-card/regenerate")
+                ->assertStatus(202)
+                ->assertHeader('X-RateLimit-Limit', '120');
+        }
+
         Queue::assertPushed(GenerateAttendeeIdCardJob::class);
     }
 
@@ -133,6 +137,23 @@ class AttendeeIdCardTest extends TestCase
 
         $response->assertOk();
         $this->assertNotNull($response->json('data.id_card_background_url'));
+        Storage::disk('public')->assertExists($event->fresh()->id_card_background_path);
+    }
+
+    public function test_org_admin_can_upload_a_base64_id_card_background(): void
+    {
+        Storage::fake('public');
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $binary = UploadedFile::fake()->image('background.png', 16, 16)->get();
+
+        $response = $this->actingAs($admin, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/id-card-background",
+            ['background' => 'data:image/png;base64,'.base64_encode($binary)]
+        );
+
+        $response->assertOk();
         Storage::disk('public')->assertExists($event->fresh()->id_card_background_path);
     }
 

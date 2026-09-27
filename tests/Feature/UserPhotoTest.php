@@ -17,6 +17,7 @@ class UserPhotoTest extends TestCase
     public function test_org_admin_can_upload_user_photo_as_multipart(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -34,15 +35,16 @@ class UserPhotoTest extends TestCase
         $this->assertArrayHasKey('lg', $response->json('data.photo_urls'));
         $this->assertArrayHasKey('original', $response->json('data.photo_urls'));
 
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-sm.webp");
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-md.webp");
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-lg.webp");
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-original.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-sm.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-md.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-lg.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-original.webp");
     }
 
     public function test_user_photo_accepts_base64_jpeg(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -58,12 +60,13 @@ class UserPhotoTest extends TestCase
 
         $response->assertOk();
         $this->assertNotNull($response->json('data.photo_urls'));
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-sm.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-sm.webp");
     }
 
     public function test_user_photo_accepts_base64_with_data_uri(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -84,6 +87,7 @@ class UserPhotoTest extends TestCase
     public function test_user_photo_upload_replaces_existing(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -110,12 +114,13 @@ class UserPhotoTest extends TestCase
         // URLs should be the same (same files exist), proving replacement happened
         $this->assertEquals($firstUrls, $secondUrls);
         // And files should still exist
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-sm.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-sm.webp");
     }
 
     public function test_user_photo_removes_files_on_delete(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -126,21 +131,22 @@ class UserPhotoTest extends TestCase
             ['photo' => UploadedFile::fake()->image('photo.png')],
         );
 
-        Storage::disk('public')->assertExists("users/{$user->id}/photo-sm.webp");
+        Storage::disk('local')->assertExists("users/{$user->id}/photo-sm.webp");
 
         $response = $this->actingAs($admin, 'sanctum')->deleteJson("/api/v1/users/{$user->id}/photo");
 
         $response->assertOk();
         $this->assertNull($response->json('data.photo_urls'));
-        Storage::disk('public')->assertMissing("users/{$user->id}/photo-sm.webp");
-        Storage::disk('public')->assertMissing("users/{$user->id}/photo-md.webp");
-        Storage::disk('public')->assertMissing("users/{$user->id}/photo-lg.webp");
-        Storage::disk('public')->assertMissing("users/{$user->id}/photo-original.webp");
+        Storage::disk('local')->assertMissing("users/{$user->id}/photo-sm.webp");
+        Storage::disk('local')->assertMissing("users/{$user->id}/photo-md.webp");
+        Storage::disk('local')->assertMissing("users/{$user->id}/photo-lg.webp");
+        Storage::disk('local')->assertMissing("users/{$user->id}/photo-original.webp");
     }
 
     public function test_user_photo_rejects_non_png_jpeg(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
@@ -166,6 +172,7 @@ class UserPhotoTest extends TestCase
     public function test_user_can_upload_own_photo(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $user = User::factory()->for($org)->create();
@@ -182,6 +189,7 @@ class UserPhotoTest extends TestCase
     public function test_user_cannot_upload_another_users_photo(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $user1 = User::factory()->for($org)->create();
@@ -198,6 +206,7 @@ class UserPhotoTest extends TestCase
     public function test_user_from_different_org_cannot_upload_user_photo(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org1 = Organization::factory()->create();
         $org2 = Organization::factory()->create();
@@ -215,6 +224,7 @@ class UserPhotoTest extends TestCase
     public function test_super_admin_can_upload_user_photo_for_any_org(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $superAdmin = User::factory()->superAdmin()->create();
@@ -232,6 +242,7 @@ class UserPhotoTest extends TestCase
     public function test_user_photo_upload_syncs_to_linked_attendee(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $user = User::factory()->for($org)->create(['role' => 'attendee']);
@@ -255,6 +266,7 @@ class UserPhotoTest extends TestCase
     public function test_user_photo_remove_syncs_to_linked_attendee(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $user = User::factory()->for($org)->create(['role' => 'attendee']);
@@ -286,6 +298,7 @@ class UserPhotoTest extends TestCase
     public function test_user_without_attendee_can_upload_photo(): void
     {
         Storage::fake('public');
+        Storage::fake('local');
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();

@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -88,22 +88,23 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->attendee()->exists();
     }
 
-    /**
-     * Super Admins and Org Admins always have full access; a Checker with zero
-     * `event_checker_access` rows also has full org access by default (only
-     * gains explicit rows to become restricted to specific events).
-     */
     public function hasAccessToEvent(Event $event): bool
     {
-        if ($this->isSuperAdmin() || $this->isOrgAdmin()) {
+        if ($this->isSuperAdmin()) {
             return true;
         }
 
-        if (! $this->accessibleEvents()->exists()) {
+        if ($this->organization_id !== $event->organization_id) {
+            return false;
+        }
+
+        if ($this->isOrgAdmin()) {
             return true;
         }
 
-        return $this->accessibleEvents()->whereKey($event->getKey())->exists();
+        return $this->isChecker()
+            && (! $this->accessibleEvents()->exists()
+                || $this->accessibleEvents()->whereKey($event->getKey())->exists());
     }
 
     public function sendPasswordResetNotification($token)
@@ -119,7 +120,7 @@ class User extends Authenticatable implements MustVerifyEmail
     public function getPhotoUrlsAttribute(): ?array
     {
         return $this->photo_paths
-            ? collect($this->photo_paths)->mapWithKeys(fn($path, $key) => [$key => Storage::disk('public')->url($path)])->toArray()
+            ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [$key => URL::temporarySignedRoute('profile-photos.show', now()->addMinutes(30), ['kind' => 'users', 'id' => $this->id, 'size' => $key])])->toArray()
             : null;
     }
 

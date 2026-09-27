@@ -10,17 +10,18 @@ use InvalidArgumentException;
 
 class ValidImageUpload implements ValidationRule
 {
-    private const MAX_DECODED_SIZE = 10 * 1024 * 1024; // 10 MB
-
     private const ALLOWED_MIMES = ['image/png', 'image/jpeg'];
 
     /** @var array<int, string> */
     private array $allowedMimes;
 
+    private ?int $maxBytes;
+
     /** @param array<int, string>|null $allowedMimes */
-    public function __construct(?array $allowedMimes = null)
+    public function __construct(?array $allowedMimes = null, ?int $maxBytes = null)
     {
         $this->allowedMimes = $allowedMimes ?? self::ALLOWED_MIMES;
+        $this->maxBytes = $maxBytes;
     }
 
     /**
@@ -39,16 +40,9 @@ class ValidImageUpload implements ValidationRule
         }
 
         try {
-            $binary = ImageInput::toBinary($value);
+            $binary = ImageInput::toBinary($value, $this->maxBytes);
         } catch (InvalidArgumentException $e) {
             $fail('The '.$attribute.' must be a valid base64-encoded image or file.');
-
-            return;
-        }
-
-        // Check decoded size ≤ 10 MB
-        if (strlen($binary) > self::MAX_DECODED_SIZE) {
-            $fail('The '.$attribute.' may not be greater than 10 MB.');
 
             return;
         }
@@ -62,6 +56,12 @@ class ValidImageUpload implements ValidationRule
             $fail('The '.$attribute.' must be a '.($this->allowedMimes === ['image/png'] ? 'PNG' : 'PNG or JPEG').' image.');
 
             return;
+        }
+
+        try {
+            ImageInput::assertDimensions($binary);
+        } catch (InvalidArgumentException) {
+            $fail('The '.$attribute.' has invalid or unsupported image dimensions.');
         }
     }
 }

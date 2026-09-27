@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Http\Request;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AttendeeController;
 use App\Http\Controllers\Api\V1\AttendeeDashboardController;
@@ -17,6 +18,7 @@ use App\Http\Controllers\Api\V1\EventSessionController;
 use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
+use App\Http\Controllers\Api\V1\ProfilePhotoController;
 use App\Http\Controllers\Api\V1\PublicEventController;
 use App\Http\Controllers\Api\V1\PublicEventProgramController;
 use App\Http\Controllers\Api\V1\PublicMissionController;
@@ -27,6 +29,20 @@ use App\Http\Controllers\Api\V1\SystemLogController;
 use App\Http\Controllers\Api\V1\UnionController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/debug/request', function (Request $request) {
+    return [
+        'ip' => $request->ip(),
+        'scheme' => $request->getScheme(),
+        'secure' => $request->isSecure(),
+        'url' => url('/'),
+        'host' => $request->getHost(),
+    ];
+});
+
+Route::get('profile-photos/{kind}/{id}/{size}', ProfilePhotoController::class)
+    ->middleware('signed')->whereNumber('id')->whereIn('kind', ['users', 'attendees'])
+    ->whereIn('size', ['sm', 'md', 'lg', 'original'])->name('profile-photos.show');
 
 Route::middleware('throttle:10,1')->group(function () {
     Route::post('auth/login', [AuthController::class, 'login']);
@@ -104,7 +120,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendees/duplicates', [AttendeeController::class, 'duplicates']);
     Route::post('attendees/duplicates/merge', [AttendeeController::class, 'mergeDuplicates']);
     Route::post('attendees/duplicates/dismiss', [AttendeeController::class, 'dismissDuplicates']);
-    Route::get('attendees/export', [AttendeeController::class, 'export']);
+    Route::get('attendees/export', [AttendeeController::class, 'export'])->middleware('throttle:6,1');
     Route::get('attendees/{attendeeId}', [AttendeeController::class, 'showById'])->whereNumber('attendeeId');
     Route::apiResource('attendees', AttendeeController::class)->except('show');
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);
@@ -146,25 +162,25 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/program/items/{itemId}/photos', [EventProgramItemController::class, 'uploadPhoto']);
         Route::delete('events/{event}/program/items/{itemId}/photos', [EventProgramItemController::class, 'removePhoto']);
 
-        Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr']);
-        Route::get('events/{event}/registrations/id-cards/bulk-download', [EventRegistrationController::class, 'bulkDownloadIdCards']);
-        Route::get('events/{event}/registrations/id-cards/download-all', [EventRegistrationController::class, 'downloadAllIdCards']);
-        Route::post('events/{event}/registrations/id-cards/grid-download', [EventRegistrationController::class, 'startIdCardGridDownload']);
-        Route::post('events/{event}/registrations/id-cards/grid-download-all', [EventRegistrationController::class, 'startIdCardGridDownloadAll']);
-        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}', [EventRegistrationController::class, 'showIdCardGridDownload'])->name('events.registrations.id-card-grid-download');
-        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}/file', [EventRegistrationController::class, 'downloadIdCardGridDownload'])->name('events.registrations.id-card-grid-download-file');
+        Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr'])->middleware('throttle:6,1');
+        Route::get('events/{event}/registrations/id-cards/bulk-download', [EventRegistrationController::class, 'bulkDownloadIdCards'])->middleware('throttle:60,1,id-card-download:');
+        Route::get('events/{event}/registrations/id-cards/download-all', [EventRegistrationController::class, 'downloadAllIdCards'])->middleware('throttle:60,1,id-card-download:');
+        Route::post('events/{event}/registrations/id-cards/grid-download', [EventRegistrationController::class, 'startIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-start:');
+        Route::post('events/{event}/registrations/id-cards/grid-download-all', [EventRegistrationController::class, 'startIdCardGridDownloadAll'])->middleware('throttle:60,1,id-card-grid-start:');
+        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}', [EventRegistrationController::class, 'showIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-status:')->name('events.registrations.id-card-grid-download');
+        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}/file', [EventRegistrationController::class, 'downloadIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-file:')->name('events.registrations.id-card-grid-download-file');
         Route::apiResource('events.registrations', EventRegistrationController::class)
             ->only(['index', 'store', 'show', 'destroy']);
         Route::get('events/{event}/registrations/{registration}/id-card', [EventRegistrationController::class, 'downloadIdCard']);
         Route::get('events/{event}/registrations/{registration}/id-card-image', [EventRegistrationController::class, 'getIdCardImage'])->name('events.registrations.id-card-image');
-        Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventRegistrationController::class, 'regenerateIdCard']);
+        Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventRegistrationController::class, 'regenerateIdCard'])->middleware('throttle:120,1,id-card-regenerate:');
 
         Route::get('events/{event}/sessions/{session}/attendance', [AttendanceController::class, 'forSession']);
         Route::get('events/{event}/sessions/{session}/roster', [AttendanceController::class, 'roster']);
         Route::get('events/{event}/sessions/{session}/quick-stats', [ReportController::class, 'eventSessionQuickStats']);
 
         Route::get('events/{event}/reports/attendance-summary', [ReportController::class, 'eventAttendanceSummary']);
-        Route::get('events/{event}/reports/attendance-summary/export', [ReportController::class, 'exportEventAttendance']);
+        Route::get('events/{event}/reports/attendance-summary/export', [ReportController::class, 'exportEventAttendance'])->middleware('throttle:6,1');
         Route::get('events/{event}/reports/dashboard', [ReportController::class, 'eventDashboard']);
     });
 

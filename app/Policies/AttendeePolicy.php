@@ -16,7 +16,7 @@ class AttendeePolicy
     {
         return $user->isSuperAdmin()
             || ($user->isAttendee() && $attendee->user_id === $user->id)
-            || $user->organization_id === $attendee->organization_id;
+            || ((! $user->isAttendee()) && $user->organization_id === $attendee->organization_id);
     }
 
     public function create(User $user): bool
@@ -30,7 +30,8 @@ class AttendeePolicy
             return $attendee->user_id === $user->id;
         }
 
-        return $this->view($user, $attendee);
+        return $user->isSuperAdmin()
+            || ((! $user->isAttendee()) && $user->organization_id === $attendee->organization_id);
     }
 
     public function delete(User $user, Attendee $attendee): bool

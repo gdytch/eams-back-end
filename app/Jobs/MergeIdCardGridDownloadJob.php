@@ -31,6 +31,15 @@ class MergeIdCardGridDownloadJob implements ShouldQueue
         $download = IdCardGridDownload::with('event')
             ->findOrFail($this->downloadId);
 
+        if ($download->status !== IdCardGridDownloadStatus::Processing) {
+            Log::info('Skipping ID card grid archive for inactive download', [
+                'download_id' => $download->id,
+                'status' => $download->status->value,
+            ]);
+
+            return;
+        }
+
         $event = $download->event;
 
         try {

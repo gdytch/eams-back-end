@@ -45,6 +45,10 @@ class AttendeeController extends Controller
 
         $query = Attendee::query();
 
+        if (! $request->user()->isSuperAdmin()) {
+            $query->where('organization_id', $request->user()->organization_id);
+        }
+
         if ($organizationId = $request->integer('organization_id')) {
             $query->where('organization_id', $organizationId);
         }
@@ -58,6 +62,8 @@ class AttendeeController extends Controller
         }
 
         if ($eventId = $request->input('event_id')) {
+            $event = Event::findOrFail($eventId);
+            $this->authorize('viewStaffData', $event);
             $query->whereHas('registrations', function ($q) use ($eventId) {
                 $q->where('event_id', $eventId);
             });
@@ -308,6 +314,9 @@ class AttendeeController extends Controller
         $eventId = $request->input('event_id');
 
         if ($eventId !== null) {
+            $event = Event::findOrFail($eventId);
+            abort_unless($request->user()->can('viewStaffData', $event)
+                || ($attendee->user_id === $request->user()->id && EventRegistration::where('attendee_id', $attendee->id)->where('event_id', $event->id)->exists()), 403);
             $registration = EventRegistration::where('attendee_id', $attendee->id)
                 ->where('event_id', $eventId)
                 ->with(['attendanceRecords', 'event.sessions'])
@@ -561,6 +570,7 @@ class AttendeeController extends Controller
             preset: 'profile_photo',
             directory: "attendees/{$attendee->id}",
             prefix: 'photo',
+            disk: 'local',
         );
 
         $attendee->update(['photo_paths' => $paths]);
@@ -584,6 +594,7 @@ class AttendeeController extends Controller
 
         if ($attendee->photo_paths) {
             foreach ($attendee->photo_paths as $path) {
+                Storage::disk('local')->delete($path);
                 Storage::disk('public')->delete($path);
             }
         }
@@ -609,6 +620,10 @@ class AttendeeController extends Controller
 
         $query = Attendee::query();
 
+        if (! $request->user()->isSuperAdmin()) {
+            $query->where('organization_id', $request->user()->organization_id);
+        }
+
         if ($search = trim((string) $request->string('search'))) {
             $query->where(function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
@@ -619,6 +634,8 @@ class AttendeeController extends Controller
 
         $eventId = $request->input('event_id');
         if ($eventId) {
+            $event = Event::findOrFail($eventId);
+            $this->authorize('viewStaffData', $event);
             $query->whereHas('registrations', function ($q) use ($eventId) {
                 $q->where('event_id', $eventId);
             });

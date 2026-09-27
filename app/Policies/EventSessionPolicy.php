@@ -15,8 +15,17 @@ class EventSessionPolicy
 
     public function view(User $user, EventSession $eventSession): bool
     {
+        if ($user->isAttendee()) {
+            return $user->attendee()->whereHas('registrations', fn ($query) => $query->where('event_id', $eventSession->event_id))->exists();
+        }
+
         return ($user->isSuperAdmin() || $user->organization_id === $eventSession->event->organization_id)
             && $user->hasAccessToEvent($eventSession->event);
+    }
+
+    public function viewRoster(User $user, EventSession $eventSession): bool
+    {
+        return $user->can('viewStaffData', $eventSession->event);
     }
 
     public function create(User $user, Event $event): bool

@@ -25,6 +25,7 @@ class ScanAttendanceRequest extends FormRequest
             'session_id' => ['required', 'integer', 'exists:event_sessions,id'],
             'qr_token' => ['required', 'string'],
             'override' => ['sometimes', 'boolean'],
+            'test_mode' => ['sometimes', 'boolean'],
         ];
     }
 }

@@ -2,6 +2,11 @@
 
 return [
     'quality' => 82,
+    'max_upload_bytes' => 10 * 1024 * 1024,
+    'max_width' => 8192,
+    'max_height' => 8192,
+    // Bounds one true-color decoded raster to about 46 MiB.
+    'max_pixels' => 12000000,
 
     'presets' => [
         'profile_photo' => [

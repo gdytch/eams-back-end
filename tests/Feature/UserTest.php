@@ -3,16 +3,26 @@
 namespace Tests\Feature;
 
 use App\Models\Attendee;
+use App\Models\AuditLog;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
 class UserTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_user_can_self_update_email(): void
+    public function test_old_bearer_tokens_expire(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('old');
+        $token->accessToken->forceFill(['created_at' => now()->subDays(8)])->save();
+        $this->withToken($token->plainTextToken)->getJson('/api/v1/auth/me')->assertUnauthorized();
+    }
+
+    public function test_user_cannot_change_email_through_generic_update(): void
     {
         $org = Organization::factory()->create();
         $user = User::factory()->for($org)->create([
@@ -23,9 +33,9 @@ class UserTest extends TestCase
             'email' => 'new@example.com',
         ]);
 
-        $response->assertOk();
-        $response->assertJsonPath('data.email', 'new@example.com');
-        $this->assertDatabaseHas('users', ['id' => $user->id, 'email' => 'new@example.com']);
+        $response->assertUnprocessable();
+        $response->assertJsonValidationErrors('email');
+        $this->assertDatabaseHas('users', ['id' => $user->id, 'email' => 'old@example.com']);
     }
 
     public function test_user_can_self_update_password(): void
@@ -37,9 +47,94 @@ class UserTest extends TestCase
 
         $response = $this->actingAs($user, 'sanctum')->putJson("/api/v1/users/{$user->id}", [
             'password' => 'newpassword123',
+            'current_password' => 'oldpassword',
         ]);
 
         $response->assertOk();
+        $this->assertTrue(Hash::check('newpassword123', $user->fresh()->password));
+    }
+
+    public function test_user_must_supply_current_password_to_change_password(): void
+    {
+        $org = Organization::factory()->create();
+        $user = User::factory()->for($org)->create(['password' => 'oldpassword']);
+
+        $this->actingAs($user, 'sanctum')->putJson("/api/v1/users/{$user->id}", [
+            'password' => 'newpassword123',
+            'current_password' => 'wrongpassword',
+        ])->assertUnprocessable()->assertJsonValidationErrors('current_password');
+    }
+
+    public function test_password_change_revokes_other_tokens_but_keeps_current_token(): void
+    {
+        $org = Organization::factory()->create();
+        $user = User::factory()->for($org)->create(['password' => 'oldpassword']);
+        $current = $user->createToken('current')->plainTextToken;
+        $other = $user->createToken('other')->plainTextToken;
+
+        $this->withToken($current)->putJson("/api/v1/users/{$user->id}", [
+            'password' => 'newpassword123',
+            'current_password' => 'oldpassword',
+        ])->assertOk();
+
+        $this->assertDatabaseHas('personal_access_tokens', ['name' => 'current']);
+        $this->assertDatabaseMissing('personal_access_tokens', ['name' => 'other']);
+        $changes = AuditLog::where('action', 'user.updated')->latest('id')->firstOrFail()->changes;
+        $this->assertArrayNotHasKey('password', $changes);
+        $this->assertArrayNotHasKey('current_password', $changes);
+    }
+
+    public function test_org_admin_email_change_clears_verification_and_tokens(): void
+    {
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $target = User::factory()->checker()->for($org)->create(['email' => 'old@example.com']);
+
+        $target->createToken('target-token');
+        $this->actingAs($admin, 'sanctum')->putJson("/api/v1/users/{$target->id}", [
+            'email' => 'new@example.com',
+        ])->assertOk();
+        $this->assertDatabaseHas('users', ['id' => $target->id, 'email' => 'new@example.com', 'email_verified_at' => null]);
+        $this->assertSame(0, $target->tokens()->count());
+    }
+
+    public function test_org_admin_cannot_promote_user_to_super_admin(): void
+    {
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $checker = User::factory()->checker()->for($org)->create();
+
+        $this->actingAs($admin, 'sanctum')->putJson("/api/v1/users/{$checker->id}", [
+            'role' => 'super_admin',
+        ])->assertUnprocessable()->assertJsonValidationErrors('role');
+        $this->assertTrue($checker->fresh()->isChecker());
+    }
+
+    public function test_org_admin_cannot_create_user_in_another_organization(): void
+    {
+        $org = Organization::factory()->create();
+        $otherOrg = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/users', [
+            'name' => 'Foreign User',
+            'email' => 'foreign@example.com',
+            'password' => 'password123',
+            'role' => 'checker',
+            'organization_id' => $otherOrg->id,
+        ])->assertUnprocessable()->assertJsonValidationErrors('organization_id');
+
+        $this->assertDatabaseMissing('users', ['email' => 'foreign@example.com']);
+    }
+
+    public function test_checker_cannot_edit_event_access_even_for_self(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+
+        $this->actingAs($checker, 'sanctum')->putJson("/api/v1/users/{$checker->id}/event-access", [
+            'event_ids' => [],
+        ])->assertForbidden();
     }
 
     public function test_user_can_self_update_name_fields(): void

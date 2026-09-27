@@ -41,4 +41,11 @@ class UserPolicy
     {
         return $this->update($user, $model);
     }
+
+    public function manageEventAccess(User $user, User $model): bool
+    {
+        return $model->isChecker()
+            && ($user->isSuperAdmin()
+                || ($user->isOrgAdmin() && $user->organization_id === $model->organization_id));
+    }
 }

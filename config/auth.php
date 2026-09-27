@@ -114,4 +114,6 @@ return [
 
     'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
 
+    'invite_expire' => env('AUTH_INVITE_EXPIRE_DAYS', 30),
+
 ];

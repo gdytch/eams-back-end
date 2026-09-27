@@ -15,6 +15,7 @@ use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -75,6 +76,110 @@ class IdCardGridDownloadTest extends TestCase
 
         $download = IdCardGridDownload::first();
         $this->assertNull($download->registration_ids);
+    }
+
+    public function test_prepare_job_does_not_resurrect_an_expired_download(): void
+    {
+        $org = Organization::factory()->create();
+        $user = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->for($event)->for($user, 'requestedBy')->create([
+            'status' => IdCardGridDownloadStatus::Failed,
+            'failure_reason' => 'Expired by cleanup.',
+        ]);
+
+        (new PrepareIdCardGridDownloadJob($download->id))->handle();
+
+        $this->assertDatabaseHas('id_card_grid_downloads', [
+            'id' => $download->id,
+            'status' => IdCardGridDownloadStatus::Failed->value,
+            'failure_reason' => 'Expired by cleanup.',
+        ]);
+    }
+
+    public function test_status_polling_does_not_throttle_grid_creation_or_file_download(): void
+    {
+        Queue::fake();
+        Storage::fake('local');
+
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+        $event = Event::factory()->for($organization)->create();
+        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($organization))->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Completed,
+            'file_path' => "{$event->id}/grid.zip",
+        ]);
+        Storage::disk('local')->put($download->file_path, 'zip contents');
+
+        $this->actingAs($admin, 'sanctum');
+        $statusUrl = "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}";
+
+        for ($attempt = 0; $attempt < 6; $attempt++) {
+            $this->getJson($statusUrl)->assertOk();
+        }
+
+        $this->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all"
+        )->assertStatus(202);
+        $this->get($statusUrl.'/file')->assertDownload("event-{$event->id}-id-card-grid-batches.zip");
+    }
+
+    public function test_grid_creation_endpoints_share_their_generation_rate_limit(): void
+    {
+        Queue::fake();
+
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+        $event = Event::factory()->for($organization)->create();
+        $registration = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($organization))->create();
+        $this->actingAs($admin, 'sanctum');
+
+        for ($attempt = 0; $attempt < 60; $attempt++) {
+            $this->postJson(
+                "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all"
+            )->assertStatus(202);
+            IdCardGridDownload::query()->update(['status' => IdCardGridDownloadStatus::Failed]);
+        }
+
+        $this->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download",
+            ['registration_ids' => [$registration->id]]
+        )->assertStatus(429);
+        Queue::assertPushed(PrepareIdCardGridDownloadJob::class, 60);
+    }
+
+    public function test_user_cannot_queue_a_second_active_grid_download_for_same_event(): void
+    {
+        Queue::fake();
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $url = "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all";
+
+        $this->actingAs($admin, 'sanctum')->postJson($url)->assertStatus(202);
+        $this->actingAs($admin, 'sanctum')->postJson($url)->assertStatus(429);
+
+        $this->assertDatabaseCount('id_card_grid_downloads', 1);
+        Queue::assertPushed(PrepareIdCardGridDownloadJob::class, 1);
+    }
+
+    public function test_event_active_download_limit_rejects_additional_jobs(): void
+    {
+        Queue::fake();
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        IdCardGridDownload::factory(10)->for($event)->create(['status' => IdCardGridDownloadStatus::Processing]);
+
+        $this->actingAs($admin, 'sanctum')->postJson(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all"
+        )->assertStatus(429);
+
+        $this->assertDatabaseCount('id_card_grid_downloads', 10);
+        Queue::assertNotPushed(PrepareIdCardGridDownloadJob::class);
     }
 
     public function test_start_grid_download_requires_org_admin(): void
@@ -281,6 +386,7 @@ class IdCardGridDownloadTest extends TestCase
 
     public function test_batch_job_tracks_completed_batches(): void
     {
+        $this->freezeTime();
         Storage::fake('local');
 
         $org = Organization::factory()->create();
@@ -296,19 +402,55 @@ class IdCardGridDownloadTest extends TestCase
 
         $download = IdCardGridDownload::factory()->for($event)->create([
             'total_batches' => 1,
+            'status' => IdCardGridDownloadStatus::Processing,
         ]);
 
-        (new GenerateIdCardGridBatchJob(
-            $download->id,
-            1,
-            [$registration->id],
-        ))->handle();
+        // Simulate MySQL reporting zero affected rows for an unchanged heartbeat.
+        $sqlite = DB::connection()->getDriverName() === 'sqlite';
+        if ($sqlite) {
+            DB::statement('PRAGMA count_changes = ON');
+        }
+
+        try {
+            (new GenerateIdCardGridBatchJob(
+                $download->id,
+                1,
+                [$registration->id],
+            ))->handle();
+        } finally {
+            if ($sqlite) {
+                DB::statement('PRAGMA count_changes = OFF');
+            }
+        }
 
         $download->refresh();
 
         $this->assertSame(1, $download->completed_batches);
         $this->assertSame(90, $download->progress_percentage);
         Storage::disk('local')->assertExists(
+            "{$event->id}/id-card-grids/{$download->id}/batches/batch-1.pdf"
+        );
+    }
+
+    public function test_batch_job_skips_an_expired_download(): void
+    {
+        Storage::fake('local');
+
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $download = IdCardGridDownload::factory()->for($event)->create([
+            'status' => IdCardGridDownloadStatus::Failed,
+            'total_batches' => 1,
+            'completed_batches' => 0,
+        ]);
+
+        (new GenerateIdCardGridBatchJob($download->id, 1, []))->handle();
+
+        $download->refresh();
+
+        $this->assertSame(IdCardGridDownloadStatus::Failed, $download->status);
+        $this->assertSame(0, $download->completed_batches);
+        Storage::disk('local')->assertMissing(
             "{$event->id}/id-card-grids/{$download->id}/batches/batch-1.pdf"
         );
     }

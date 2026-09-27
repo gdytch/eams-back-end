@@ -21,7 +21,7 @@ class ReportController extends Controller
 
     public function eventSessionQuickStats(Event $event, EventSession $session)
     {
-        $this->authorize('view', $session);
+        $this->authorize('viewRoster', $session);
 
         $totalRegistered = $event->registrations()->count();
         $present = $event->registrations()
@@ -49,7 +49,7 @@ class ReportController extends Controller
      */
     public function eventDashboard(Event $event)
     {
-        $this->authorize('view', $event);
+        $this->authorize('viewStaffData', $event);
 
         $insights = $this->registrationInsights->build(
             Event::query()->whereKey($event->id)
@@ -150,7 +150,7 @@ class ReportController extends Controller
      */
     public function eventAttendanceSummary(Request $request, Event $event)
     {
-        $this->authorize('view', $event);
+        $this->authorize('viewStaffData', $event);
 
         $summary = $this->buildEventAttendanceSummary($event);
 
@@ -217,7 +217,7 @@ class ReportController extends Controller
      */
     public function exportEventAttendance(Request $request, Event $event)
     {
-        $this->authorize('view', $event);
+        $this->authorize('viewStaffData', $event);
 
         $format = $request->query('format', 'xlsx');
         $sessionId = $request->query('session_id');

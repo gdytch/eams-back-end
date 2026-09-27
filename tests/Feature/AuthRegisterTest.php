@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\OrganizationLevel;
 use App\Enums\UserRole;
 use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
@@ -15,6 +16,37 @@ use Tests\TestCase;
 class AuthRegisterTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    public function test_public_event_claim_keeps_approved_email_merge_flow(): void
+    {
+        $org = Organization::factory()->create();
+        $union = Union::factory()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $attendee = Attendee::factory()->for($org)->create(['email_address' => 'claim@example.com']);
+        $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
+            'email' => 'claim@example.com',
+            'organization_id' => $org->id,
+            'union_id' => $union->id,
+            'invite_token' => $event->invite_token,
+        ]));
+        $response->assertCreated();
+        $this->assertSame($response->json('user.id'), $attendee->fresh()->user_id);
+        $this->assertNull(User::find($attendee->fresh()->user_id)->email_verified_at);
+    }
+
+    public function test_expired_personal_attendee_invite_cannot_be_claimed(): void
+    {
+        $attendee = Attendee::factory()->create([
+            'email_address' => 'expired@example.com',
+            'invite_token' => Attendee::generateUniqueInviteToken(),
+            'invited_at' => now()->subDays(31),
+        ]);
+        $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
+            'email' => 'expired@example.com',
+            'invite_token' => $attendee->invite_token,
+        ]))->assertUnprocessable();
+        $this->assertNull($attendee->fresh()->user_id);
+    }
 
     private function validRegistrationPayload(array $overrides = []): array
     {
@@ -262,7 +294,7 @@ class AuthRegisterTest extends TestCase
         ]);
     }
 
-    public function test_invite_token_registration_overwrites_attendee_org_fields(): void
+    public function test_invite_token_registration_preserves_attendee_organization(): void
     {
         $organization = Organization::factory()->create();
         $union = Union::factory()->for($organization)->create();
@@ -276,6 +308,7 @@ class AuthRegisterTest extends TestCase
             'union_id' => $oldUnion->id,
             'organization_level' => OrganizationLevel::Union->value,
             'invite_token' => Attendee::generateUniqueInviteToken(),
+            'invited_at' => now(),
         ]);
 
         $payload = $this->validRegistrationPayload([
@@ -292,13 +325,14 @@ class AuthRegisterTest extends TestCase
         $response->assertCreated();
         $user = User::where('email', $payload['email'])->first();
 
-        // Verify the attendee was updated with new org fields, not overwritten
+        // Claiming must not move an existing attendee into a different tenant.
         $attendee->refresh();
         $this->assertSame($user->id, $attendee->user_id);
-        $this->assertSame($organization->id, $attendee->organization_id);
-        $this->assertSame($union->id, $attendee->union_id);
-        $this->assertSame($mission->id, $attendee->mission_id);
-        $this->assertSame(OrganizationLevel::Mission->value, $attendee->organization_level->value);
+        $this->assertSame($oldOrganization->id, $attendee->organization_id);
+        $this->assertSame($oldOrganization->id, $user->organization_id);
+        $this->assertSame($oldUnion->id, $attendee->union_id);
+        $this->assertNull($attendee->mission_id);
+        $this->assertSame(OrganizationLevel::Union->value, $attendee->organization_level->value);
         $this->assertNull($attendee->invite_token);
     }
 }

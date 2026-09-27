@@ -33,6 +33,7 @@ class ImageUploadService
         string $preset,
         string $directory,
         string $prefix,
+        string $disk = 'public',
     ): array {
         $presets = config('images.presets');
 
@@ -45,6 +46,7 @@ class ImageUploadService
 
         // Decode input to binary
         $binary = ImageInput::toBinary($input);
+        ImageInput::assertDimensions($binary);
 
         // Read and process image
         $image = $this->manager->read($binary);
@@ -64,7 +66,7 @@ class ImageUploadService
             $filename = "{$prefix}-{$sizeKey}.webp";
             $path = "{$directory}/{$filename}";
 
-            Storage::disk('public')->put($path, $encoded);
+            Storage::disk($disk)->put($path, $encoded);
 
             $paths[$sizeKey] = $path;
 

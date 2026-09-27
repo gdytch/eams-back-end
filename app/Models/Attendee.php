@@ -11,8 +11,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
 #[Fillable(['organization_id', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at', 'merged_into_id', 'merged_by', 'merged_at'])]
@@ -52,7 +52,7 @@ class Attendee extends Model
     {
         return collect([$first, $last])
             ->filter()
-            ->map(fn(string $part) => preg_replace('/\s+/', ' ', trim(mb_strtolower($part))))
+            ->map(fn (string $part) => preg_replace('/\s+/', ' ', trim(mb_strtolower($part))))
             ->implode(' ');
     }
 
@@ -128,16 +128,16 @@ class Attendee extends Model
     public function getPhotoUrlsAttribute()
     {
         return $this->photo_paths
-            ? collect($this->photo_paths)->mapWithKeys(fn($path, $key) => [
-                $key => Storage::disk('public')->url($path),
+            ? collect($this->photo_paths)->mapWithKeys(fn ($path, $key) => [
+                $key => URL::temporarySignedRoute('profile-photos.show', now()->addMinutes(30), ['kind' => 'attendees', 'id' => $this->id, 'size' => $key]),
             ])->toArray()
             : null;
     }
 
     public function getTerritoryAttribute()
     {
-        $unionName = $this->union ? $this->union->name . ', ' : '';
-        $missionName = $this->mission ? $this->mission->name . ', ' : '';
+        $unionName = $this->union ? $this->union->name.', ' : '';
+        $missionName = $this->mission ? $this->mission->name.', ' : '';
         $churchName = $this->church ? $this->church->name : '';
 
         return trim("{$unionName}{$missionName}{$churchName}");

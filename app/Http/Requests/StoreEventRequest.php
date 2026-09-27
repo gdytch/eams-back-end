@@ -23,7 +23,7 @@ class StoreEventRequest extends FormRequest
             'organization_id' => [
                 Rule::requiredIf(fn () => $this->user()->isSuperAdmin()),
                 'nullable',
-                'exists:organizations,id',
+                Rule::exists('organizations', 'id')->when(! $this->user()->isSuperAdmin(), fn ($rule) => $rule->where('id', $this->user()->organization_id)),
             ],
             'name' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],

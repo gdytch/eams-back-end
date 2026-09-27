@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Rules\ValidImageUpload;
 use Illuminate\Foundation\Http\FormRequest;
 
 class UploadEventIdCardBackgroundRequest extends FormRequest
@@ -17,7 +18,7 @@ class UploadEventIdCardBackgroundRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'background' => ['required', 'image', 'mimes:jpeg,png,webp', 'max:10240'],
+            'background' => ['required', new ValidImageUpload(['image/jpeg', 'image/png', 'image/webp'])],
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Exports\EventAttendanceExport;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventRegistration;
@@ -9,11 +10,40 @@ use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Maatwebsite\Excel\Facades\Excel;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class EventAttendanceReportTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    public function test_exported_attendance_text_that_looks_like_a_formula_stays_text(): void
+    {
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create();
+        $attendee = Attendee::factory()->for($org)->create([
+            'first_name' => '=1+1',
+            'remarks' => '=1+1',
+        ]);
+        EventRegistration::factory()->for($event)->for($attendee)->create();
+
+        $xlsx = Excel::raw(new EventAttendanceExport($event), \Maatwebsite\Excel\Excel::XLSX);
+        $path = tempnam(sys_get_temp_dir(), 'ams-export-');
+        file_put_contents($path, $xlsx);
+        $spreadsheet = IOFactory::load($path);
+
+        try {
+            $sheet = $spreadsheet->getSheetByName('All Sessions');
+            $this->assertSame(DataType::TYPE_STRING, $sheet->getCell('A2')->getDataType());
+            $this->assertSame('=1+1', $sheet->getCell('A2')->getValue());
+            $this->assertSame(DataType::TYPE_STRING, $sheet->getCell('I2')->getDataType());
+            $this->assertSame('=1+1', $sheet->getCell('I2')->getValue());
+        } finally {
+            unlink($path);
+        }
+    }
 
     private function createEventWithAttendees(Organization $org, int $attendeeCount = 5): Event
     {

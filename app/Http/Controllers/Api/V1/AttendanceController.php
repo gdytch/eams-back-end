@@ -27,6 +27,10 @@ class AttendanceController extends Controller
      */
     public function scan(ScanAttendanceRequest $request)
     {
+        if ($request->boolean('test_mode')) {
+            abort_unless($request->user()->isSuperAdmin(), 403);
+        }
+
         $event = Event::findOrFail($request->validated('event_id'));
         $session = EventSession::where('event_id', $event->id)->findOrFail($request->validated('session_id'));
 
@@ -38,6 +42,26 @@ class AttendanceController extends Controller
             throw ValidationException::withMessages([
                 'qr_token' => 'This QR code is not registered for this event.',
             ]);
+        }
+
+        if ($request->boolean('test_mode')) {
+            $registration->load(['attendee.union', 'attendee.mission']);
+            $attendance = new AttendanceRecord([
+                'event_registration_id' => $registration->id,
+                'event_session_id' => $session->id,
+                'check_in_at' => now(),
+                'method' => AttendanceMethod::Qr,
+                'recorded_by' => $request->user()->id,
+            ]);
+            $attendance->setRelation('eventRegistration', $registration);
+
+            return AttendanceRecordResource::make($attendance)
+                ->additional([
+                    'test_mode' => true,
+                    'message' => 'Test scan successful. No attendance recorded.',
+                ])
+                ->response()
+                ->setStatusCode(200);
         }
 
         return $this->recordAttendance($request, $registration, $session, AttendanceMethod::Qr);
@@ -84,7 +108,7 @@ class AttendanceController extends Controller
      */
     public function forSession(Request $request, Event $event, EventSession $session)
     {
-        $this->authorize('view', $session);
+        $this->authorize('viewRoster', $session);
         abort_unless($session->event_id === $event->id, 404);
 
         $input = $request->validate([
@@ -121,7 +145,7 @@ class AttendanceController extends Controller
      */
     public function roster(Request $request, Event $event, EventSession $session)
     {
-        $this->authorize('view', $session);
+        $this->authorize('viewRoster', $session);
 
         $status = strtolower((string) $request->query('status', 'all'));
         $search = $request->query('search', '');

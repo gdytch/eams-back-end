@@ -3,12 +3,13 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class SyncUserEventAccessRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        return $this->user()->can('update', $this->route('user'));
+        return $this->user()->can('manageEventAccess', $this->route('user'));
     }
 
     /**
@@ -18,7 +19,10 @@ class SyncUserEventAccessRequest extends FormRequest
     {
         return [
             'event_ids' => ['present', 'array'],
-            'event_ids.*' => ['integer', 'exists:events,id'],
+            'event_ids.*' => [
+                'integer',
+                Rule::exists('events', 'id')->where('organization_id', $this->route('user')->organization_id),
+            ],
         ];
     }
 }

@@ -2,6 +2,7 @@
 
 namespace App\Jobs;
 
+use App\Enums\IdCardGridDownloadStatus;
 use App\Models\IdCardGridDownload;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Bus\Batchable;
@@ -47,6 +48,18 @@ class GenerateIdCardGridBatchJob implements ShouldQueue
 
         $download = IdCardGridDownload::with('event')
             ->findOrFail($this->downloadId);
+
+        // Ignore batches left behind by a cancelled or expired request.
+        // Refresh the retention timestamp before touching temporary files.
+        $activeDownload = IdCardGridDownload::query()
+            ->whereKey($this->downloadId)
+            ->where('status', IdCardGridDownloadStatus::Processing);
+
+        $activeDownload->update(['updated_at' => now()]);
+
+        if (! $activeDownload->exists()) {
+            return;
+        }
 
         $event = $download->event;
 
@@ -203,10 +216,16 @@ class GenerateIdCardGridBatchJob implements ShouldQueue
             $batchPath =
                 "{$batchDirectory}/batch-{$this->batchNumber}.pdf";
 
-            Storage::disk('local')->put(
-                $batchPath,
-                $pdfContent
-            );
+            $disk = Storage::disk('local');
+
+            if (
+                ! $disk->put($batchPath, $pdfContent) ||
+                ! $disk->exists($batchPath)
+            ) {
+                throw new \RuntimeException(
+                    "Unable to persist ID card grid batch PDF: {$batchPath}"
+                );
+            }
 
             Log::info('ID card grid batch completed', [
                 'download_id' => $download->id,

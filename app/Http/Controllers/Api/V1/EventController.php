@@ -13,6 +13,7 @@ use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Services\ImageUploadService;
+use App\Support\ImageInput;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -27,15 +28,12 @@ class EventController extends Controller
 
         $query = Event::query();
 
-        if (! $request->user()->isSuperAdmin() && ! $request->user()->isOrgAdmin()) {
-            $userId = $request->user()->id;
-
-            $query->where(function ($q) use ($userId) {
-                $q->whereHas('checkers', fn ($q) => $q->whereKey($userId))
-                    ->orWhereDoesntHave('checkers');
-            });
-        }
-        if ($request->user()->isAttendee()) {
+        if ($request->user()->isOrgAdmin()) {
+            $query->where('organization_id', $request->user()->organization_id);
+        } elseif ($request->user()->isChecker()) {
+            $query->where('organization_id', $request->user()->organization_id)
+                ->when($request->user()->accessibleEvents()->exists(), fn ($query) => $query->whereIn('id', $request->user()->accessibleEvents()->select('events.id')));
+        } elseif ($request->user()->isAttendee()) {
             $query->where('status', 'published');
         }
 
@@ -104,7 +102,23 @@ class EventController extends Controller
             Storage::disk('public')->delete($event->id_card_background_path);
         }
 
-        $path = $request->file('background')->store("events/{$event->id}", 'public');
+        $upload = $request->file('background');
+        if ($upload !== null) {
+            $path = $upload->store("events/{$event->id}", 'public');
+        } else {
+            $binary = ImageInput::toBinary((string) $request->input('background'));
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = finfo_buffer($finfo, $binary);
+            finfo_close($finfo);
+            $extension = match ($mime) {
+                'image/jpeg' => 'jpg',
+                'image/png' => 'png',
+                'image/webp' => 'webp',
+                default => throw new \InvalidArgumentException('Unsupported background image type.'),
+            };
+            $path = "events/{$event->id}/background-".bin2hex(random_bytes(8)).".{$extension}";
+            Storage::disk('public')->put($path, $binary);
+        }
 
         $event->update(['id_card_background_path' => $path]);
 

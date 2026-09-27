@@ -37,6 +37,7 @@ class AcceptUserInviteRequest extends FormRequest
         $user = User::withoutGlobalScopes()
             ->where('invite_token', $token)
             ->where('email', $email)
+            ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
             ->whereNotNull('invite_token')
             ->first();
 

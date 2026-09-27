@@ -22,7 +22,7 @@ class StoreMissionRequest extends FormRequest
             'organization_id' => [
                 Rule::requiredIf(fn () => $this->user()->isSuperAdmin()),
                 'nullable',
-                'exists:organizations,id',
+                Rule::exists('organizations', 'id')->when(! $this->user()->isSuperAdmin(), fn ($rule) => $rule->where('id', $this->user()->organization_id)),
             ],
             'union_id' => [
                 'required',

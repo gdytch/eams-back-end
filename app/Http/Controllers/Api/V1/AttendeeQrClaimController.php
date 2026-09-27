@@ -46,6 +46,10 @@ class AttendeeQrClaimController extends Controller
             throw ValidationException::withMessages(['qr_token' => 'We could not verify those details. Qrcode not valid or already claimed.']);
         }
 
+        if (! $claims->allowVerificationAttempt($registration->id)) {
+            throw ValidationException::withMessages(['details' => 'Too many attempts. Wait before trying again.']);
+        }
+
         if (! $claims->matches($registration->attendee, $data['first_name'], $data['last_name'], $data['union_id'], $data['mission_id'])) {
             throw ValidationException::withMessages(['details' => 'We could not verify those details. Information provided does not match our records. QR code may belong to someone else.']);
         }
@@ -70,6 +74,10 @@ class AttendeeQrClaimController extends Controller
         $registration = EventRegistration::query()->with('attendee')->find($claim['registration_id']);
         if ($registration === null || $registration->attendee->user_id !== null || filled($registration->attendee->email_address)) {
             throw ValidationException::withMessages(['claim_token' => 'Your verification session is no longer available.']);
+        }
+
+        if (! $claims->allowEmailCodeSend($data['claim_token'])) {
+            throw ValidationException::withMessages(['claim_token' => 'Too many verification codes requested. Scan your ID card again later.']);
         }
 
         $code = (string) random_int(100000, 999999);
@@ -97,6 +105,10 @@ class AttendeeQrClaimController extends Controller
 
         if ($claim === null) {
             throw ValidationException::withMessages(['claim_token' => 'Your verification session has expired. Scan your ID card again.']);
+        }
+
+        if (! $claims->allowClaimCompletion($data['claim_token'])) {
+            throw ValidationException::withMessages(['claim_token' => 'Too many attempts. Scan your ID card again.']);
         }
 
         $result = DB::transaction(function () use ($claim, $data) {

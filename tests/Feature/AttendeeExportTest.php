@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Exports\AttendeeExport;
 use App\Models\Attendee;
 use App\Models\Church;
 use App\Models\Event;
@@ -11,6 +12,9 @@ use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Maatwebsite\Excel\Facades\Excel;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use Tests\TestCase;
 
 class AttendeeExportTest extends TestCase
@@ -29,6 +33,33 @@ class AttendeeExportTest extends TestCase
 
         $response->assertOk();
         $this->assertStringContainsString('spreadsheet', $response->headers->get('Content-Type'));
+    }
+
+    public function test_exported_attendee_text_that_looks_like_a_formula_stays_text(): void
+    {
+        $attendee = Attendee::factory()->make([
+            'first_name' => '=1+1',
+            'middle_name' => null,
+            'last_name' => 'Test',
+            'remarks' => '=1+1',
+        ]);
+        $attendee->organization_name = 'Org';
+        $attendee->mobile_no = '';
+        $attendee->email_address = '';
+
+        $xlsx = Excel::raw(new AttendeeExport(collect([$attendee])), \Maatwebsite\Excel\Excel::XLSX);
+        $path = tempnam(sys_get_temp_dir(), 'ams-export-');
+        file_put_contents($path, $xlsx);
+        $spreadsheet = IOFactory::load($path);
+
+        try {
+            $this->assertSame(DataType::TYPE_STRING, $spreadsheet->getActiveSheet()->getCell('A2')->getDataType());
+            $this->assertSame('=1+1', $spreadsheet->getActiveSheet()->getCell('A2')->getValue());
+            $this->assertSame(DataType::TYPE_STRING, $spreadsheet->getActiveSheet()->getCell('G2')->getDataType());
+            $this->assertSame('=1+1', $spreadsheet->getActiveSheet()->getCell('G2')->getValue());
+        } finally {
+            unlink($path);
+        }
     }
 
     public function test_export_attendees_as_pdf(): void

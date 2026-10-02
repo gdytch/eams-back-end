@@ -10,6 +10,7 @@ use App\Http\Requests\SyncAttendanceBatchRequest;
 use App\Http\Resources\AttendanceRecordResource;
 use App\Http\Resources\EventSessionRosterEntryResource;
 use App\Models\AttendanceRecord;
+use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
@@ -184,7 +185,11 @@ class AttendanceController extends Controller
                 $query->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
             }))
-            ->orderByRaw('session_check_in_at is null, session_check_in_at asc')
+            ->when($status === 'absent', function ($q) {
+                foreach (['last_name', 'first_name'] as $column) {
+                    $q->orderBy(Attendee::select($column)->whereColumn('attendees.id', 'event_registrations.attendee_id'));
+                }
+            }, fn ($q) => $q->orderByRaw('session_check_in_at is null, session_check_in_at asc'))
             ->paginate($request->input('per_page', 15));
 
         // Attach session status information to each registration

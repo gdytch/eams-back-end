@@ -187,15 +187,17 @@ class ReportController extends Controller
 
     private function buildAttendeeSummary(Event $event)
     {
-        $sessionCount = $event->sessions()->count();
+        $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get(['id', 'name']);
+        $sessionCount = $sessions->count();
         $levelOrder = ['union' => 0, 'mission' => 1];
 
         return $event->registrations()
             ->with(['attendee.union', 'attendee.mission', 'attendanceRecords' => fn ($q) => $q->whereNotNull('check_in_at')])
             ->get()
-            ->map(function ($registration) use ($sessionCount) {
+            ->map(function ($registration) use ($sessions, $sessionCount) {
                 $attendee = $registration->attendee;
-                $present = $registration->attendanceRecords->pluck('event_session_id')->unique()->count();
+                $presentIds = $registration->attendanceRecords->pluck('event_session_id')->unique();
+                $present = $presentIds->count();
 
                 return [
                     'event_registration_id' => $registration->id,
@@ -208,6 +210,8 @@ class ReportController extends Controller
                     'union' => $attendee->union,
                     'mission' => $attendee->mission,
                     'present' => $present,
+                    'present_sessions' => $sessions->whereIn('id', $presentIds)->pluck('name')->values(),
+                    'absent_sessions' => $sessions->whereNotIn('id', $presentIds)->pluck('name')->values(),
                     'absent' => max($sessionCount - $present, 0),
                     'attendance_rating' => $sessionCount > 0 ? round($present / $sessionCount * 100, 1) : 0,
                 ];

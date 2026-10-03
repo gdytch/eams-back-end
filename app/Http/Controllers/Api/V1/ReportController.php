@@ -205,6 +205,7 @@ class ReportController extends Controller
                     'event_registration_id' => $registration->id,
                     'attendee_id' => $attendee->id,
                     'attendee_name' => $attendee->full_name,
+                    'photo_urls' => $attendee->photo_urls,
                     'last_name' => $attendee->last_name,
                     'first_name' => $attendee->first_name,
                     'organization_level' => $attendee->organization_level?->value,

@@ -187,14 +187,15 @@ class ReportController extends Controller
 
     private function buildAttendeeSummary(Event $event)
     {
-        $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get(['id', 'name']);
-        $sessionCount = $sessions->count();
+        $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get();
+        $started = $sessions->filter(fn ($session) => now()->greaterThanOrEqualTo($session->startsAt()));
+        $startedCount = $started->count();
         $levelOrder = ['union' => 0, 'mission' => 1];
 
         return $event->registrations()
             ->with(['attendee.union', 'attendee.mission', 'attendanceRecords' => fn ($q) => $q->whereNotNull('check_in_at')])
             ->get()
-            ->map(function ($registration) use ($sessions, $sessionCount) {
+            ->map(function ($registration) use ($sessions, $started, $startedCount) {
                 $attendee = $registration->attendee;
                 $presentIds = $registration->attendanceRecords->pluck('event_session_id')->unique();
                 $present = $presentIds->count();
@@ -211,9 +212,11 @@ class ReportController extends Controller
                     'mission' => $attendee->mission,
                     'present' => $present,
                     'present_sessions' => $sessions->whereIn('id', $presentIds)->pluck('name')->values(),
-                    'absent_sessions' => $sessions->whereNotIn('id', $presentIds)->pluck('name')->values(),
-                    'absent' => max($sessionCount - $present, 0),
-                    'attendance_rating' => $sessionCount > 0 ? round($present / $sessionCount * 100, 1) : 0,
+                    'absent_sessions' => $started->whereNotIn('id', $presentIds)->pluck('name')->values(),
+                    'remaining_sessions' => $sessions->diff($started)->whereNotIn('id', $presentIds)->pluck('name')->values(),
+                    'absent' => $started->whereNotIn('id', $presentIds)->count(),
+                    'remaining' => $sessions->diff($started)->whereNotIn('id', $presentIds)->count(),
+                    'attendance_rating' => $startedCount > 0 ? round($present / $startedCount * 100, 1) : 0,
                 ];
             })
             ->sort(fn ($a, $b) => $this->summarySortKey($a, $levelOrder) <=> $this->summarySortKey($b, $levelOrder));

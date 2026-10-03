@@ -23,34 +23,41 @@ class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadi
             $row['organization_name'] ?? '',
             $row['present'],
             $row['absent'],
+            ...($this->hasRemaining() ? [$row['remaining']] : []),
             $row['attendance_rating'].'%',
         ]);
     }
 
     public function headings(): array
     {
-        return ['Attendee', 'Organization Level', 'Present', 'Absent', 'Attendance Rating'];
+        return ['Attendee', 'Organization Level', 'Present', 'Absent', ...($this->hasRemaining() ? ['Sessions Remaining'] : []), 'Attendance Rating'];
+    }
+
+    private function hasRemaining(): bool
+    {
+        return $this->rows->contains(fn ($row) => $row['remaining'] > 0);
     }
 
     public function styles($sheet): array
     {
         $lastRow = $sheet->getHighestRow();
+        $lastCol = $this->hasRemaining() ? 'F' : 'E';
         $border = ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'CCCCCC']]];
 
         $sheet->freezePane('A2');
-        $sheet->getStyle("A1:E{$lastRow}")->applyFromArray(['borders' => $border]);
-        $sheet->getStyle("C2:E{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
+        $sheet->getStyle("A1:{$lastCol}{$lastRow}")->applyFromArray(['borders' => $border]);
+        $sheet->getStyle("C2:{$lastCol}{$lastRow}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_CENTER);
 
         // Zebra rows
         for ($row = 3; $row <= $lastRow; $row += 2) {
-            $sheet->getStyle("A{$row}:E{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F5F5F5');
+            $sheet->getStyle("A{$row}:{$lastCol}{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F5F5F5');
         }
 
         // Rating colour: green >= 80, amber >= 50, red below
         for ($row = 2; $row <= $lastRow; $row++) {
-            $rate = (float) $sheet->getCell("E{$row}")->getValue();
+            $rate = (float) $sheet->getCell("{$lastCol}{$row}")->getValue();
             $color = $rate >= 80 ? 'C6EFCE' : ($rate >= 50 ? 'FFEB9C' : 'FFC7CE');
-            $sheet->getStyle("E{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($color);
+            $sheet->getStyle("{$lastCol}{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($color);
         }
 
         return [

@@ -10,6 +10,8 @@ use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\View;
 use Maatwebsite\Excel\Facades\Excel;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -189,6 +191,42 @@ class EventAttendanceReportTest extends TestCase
         $this->assertStringContainsString('pdf', $response->headers->get('Content-Type'));
     }
 
+    public function test_pdf_exports_count_attendance_for_all_sessions_in_one_query(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = $this->createEventWithAttendees($org, 3);
+        EventSession::factory()->for($event)->count(2)->create();
+        $session = $event->sessions()->firstOrFail();
+        $countQueries = 0;
+        $pdfViewData = [];
+
+        DB::listen(function ($query) use (&$countQueries): void {
+            $sql = strtolower($query->sql);
+            if (str_contains($sql, 'attendance_records') && str_contains($sql, 'count(')) {
+                $countQueries++;
+            }
+        });
+        View::composer('pdf.event-attendance-report', function ($view) use (&$pdfViewData): void {
+            $pdfViewData[] = $view->getData();
+        });
+
+        foreach ([null, $session->id] as $index => $sessionId) {
+            $countQueries = 0;
+            $query = $sessionId === null ? '' : "&session_id={$sessionId}";
+            $response = $this->actingAs($checker, 'sanctum')->get(
+                "/api/v1/events/{$event->id}/reports/attendance-summary/export?format=pdf{$query}"
+            );
+
+            $response->assertOk();
+            $this->assertStringContainsString('pdf', $response->headers->get('Content-Type'));
+            $this->assertSame(1, $countQueries);
+            $summary = collect($pdfViewData[$index]['sessionSummaries'])->firstWhere('name', $session->name);
+            $this->assertSame(3, $summary['checked_in']);
+            $this->assertSame(1, $summary['checked_out']);
+        }
+    }
+
     public function test_organization_attendance_overview_requires_org_admin(): void
     {
         $org = Organization::factory()->create();
@@ -212,6 +250,8 @@ class EventAttendanceReportTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('organization_id', $org->id);
         $response->assertJsonPath('total_registered', 5);
+        $this->assertSame(['No Union' => ['registered' => 5, 'checked_in' => 3, 'checked_out' => 1]], $response->json('by_union'));
+        $this->assertSame(['No Mission' => ['registered' => 5, 'checked_in' => 3, 'checked_out' => 1]], $response->json('by_mission'));
     }
 
     public function test_organization_attendance_overview_org_admin_access(): void

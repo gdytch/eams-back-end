@@ -90,6 +90,23 @@ class EventDashboardTest extends TestCase
         $this->assertSame(0, array_sum($missionSeries['data']));
     }
 
+    public function test_event_dashboard_handles_no_registrations_or_sessions(): void
+    {
+        $organization = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+        $event = Event::factory()->for($organization)->create();
+
+        $this->actingAs($admin, 'sanctum')
+            ->getJson("/api/v1/events/{$event->id}/reports/dashboard")
+            ->assertOk()
+            ->assertJsonPath('attendance.registered', 0)
+            ->assertJsonPath('attendance.checked_in', 0)
+            ->assertJsonPath('attendance.checked_out', 0)
+            ->assertJsonPath('attendance.attendance_rate', 0)
+            ->assertJsonPath('attendance_rate_trend.labels', [])
+            ->assertJsonPath('sessions.items', []);
+    }
+
     public function test_event_dashboard_honors_event_authorization(): void
     {
         $organization = Organization::factory()->create();

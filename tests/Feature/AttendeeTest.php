@@ -360,8 +360,8 @@ class AttendeeTest extends TestCase
         $event = Event::factory()->for($org)->create();
         $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
         $attended = EventSession::factory()->for($event)->create(['session_date' => now()->subDays(2)]);
-        EventSession::factory()->for($event)->create(['session_date' => now()->subDay()]);
-        EventSession::factory()->for($event)->create(['session_date' => now()->addDay()]);
+        $absent = EventSession::factory()->for($event)->create(['session_date' => now()->subDay()]);
+        $upcoming = EventSession::factory()->for($event)->create(['session_date' => now()->addDay()]);
         AttendanceRecord::factory()->for($registration)->for($attended, 'eventSession')
             ->create(['check_in_at' => now()->subDays(2)]);
 
@@ -380,6 +380,11 @@ class AttendeeTest extends TestCase
             ->assertJsonPath('profile_dashboard.registrations.0.attendance.sessions_total', 3)
             ->assertJsonPath('profile_dashboard.registrations.0.attendance.rate', 50)
             ->assertJsonMissingPath('profile_dashboard.registrations.0.qr_token');
+
+        $sessionRows = $response->json('profile_dashboard.registrations.0.attendance.sessions');
+        $this->assertSame([$attended->id, $absent->id, $upcoming->id], array_column($sessionRows, 'id'));
+        $this->assertSame(['id', 'name', 'description', 'session_date', 'start_time', 'end_time', 'status', 'check_in_at', 'check_out_at', 'method'], array_keys($sessionRows[0]));
+        $this->assertSame(['present', 'absent', 'upcoming'], array_column($sessionRows, 'status'));
     }
 
     public function test_profile_dashboard_empty_state_and_pending_invitation(): void

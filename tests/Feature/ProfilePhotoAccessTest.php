@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Attendee;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -10,6 +11,30 @@ use Tests\TestCase;
 class ProfilePhotoAccessTest extends TestCase
 {
     use LazilyRefreshDatabase;
+
+    public function test_factory_photos_are_isolated_from_application_storage(): void
+    {
+        foreach (['local', 'public'] as $disk) {
+            $this->assertNotSame(
+                rtrim(config("filesystems.disks.{$disk}.root"), '/'),
+                rtrim(Storage::disk($disk)->path(''), '/'),
+                "The {$disk} test disk must not use application storage.",
+            );
+        }
+
+        $attendee = Attendee::factory()->create();
+        $this->assertCount(4, $attendee->photo_paths);
+        Storage::disk('local')->assertExists(array_values($attendee->photo_paths));
+
+        $path = $attendee->photo_paths['sm'];
+        $photo = Storage::disk('local')->get($path);
+        $url = $attendee->photo_urls['sm'];
+        $this->get($url)->assertOk();
+        $this->travel(31)->minutes();
+        $this->get($url)->assertForbidden();
+        $this->assertSame($photo, Storage::disk('local')->get($path));
+        $this->get($attendee->photo_urls['sm'])->assertOk();
+    }
 
     public function test_photo_requires_valid_unexpired_signature_and_supports_legacy_storage(): void
     {

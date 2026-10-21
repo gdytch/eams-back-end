@@ -18,7 +18,6 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -180,18 +179,10 @@ class UserController extends Controller
     /**
      * Upload (or replace) the user's profile photo.
      */
-    public function uploadPhoto(UploadUserPhotoRequest $request, User $user)
+    public function uploadPhoto(UploadUserPhotoRequest $request, User $user, ImageUploadService $imageUploadService)
     {
-        $service = new ImageUploadService;
         $input = $request->file('photo') ?? $request->input('photo');
-
-        $paths = $service->process(
-            $input,
-            preset: 'profile_photo',
-            directory: "users/{$user->id}",
-            prefix: 'photo',
-            disk: 'local',
-        );
+        $paths = $imageUploadService->uploadProfilePhoto($input, "users/{$user->id}");
 
         $user->update(['photo_paths' => $paths]);
 
@@ -208,16 +199,11 @@ class UserController extends Controller
     /**
      * Remove the user's profile photo.
      */
-    public function removePhoto(User $user)
+    public function removePhoto(User $user, ImageUploadService $imageUploadService)
     {
         $this->authorize('update', $user);
 
-        if ($user->photo_paths) {
-            foreach ($user->photo_paths as $path) {
-                Storage::disk('local')->delete($path);
-                Storage::disk('public')->delete($path);
-            }
-        }
+        $imageUploadService->deleteProfilePhoto($user->photo_paths);
 
         $user->update(['photo_paths' => null]);
 

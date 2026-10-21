@@ -493,7 +493,7 @@ class EventRegistrationController extends Controller
             function () use ($disk, $filePath, $streamLock): void {
                 try {
                     $stream = $disk->readStream($filePath);
-                    if ($stream === false) {
+                    if (! is_resource($stream)) {
                         throw new \RuntimeException('Unable to read ZIP archive.');
                     }
 

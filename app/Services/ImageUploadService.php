@@ -18,6 +18,31 @@ class ImageUploadService
     }
 
     /**
+     * Store a profile photo using the shared profile preset and private local disk.
+     *
+     * @return array<string, string>
+     */
+    public function uploadProfilePhoto(UploadedFile|string $input, string $directory): array
+    {
+        return $this->process(
+            $input,
+            preset: 'profile_photo',
+            directory: $directory,
+            prefix: 'photo',
+            disk: 'local',
+        );
+    }
+
+    /** @param  array<string, string>|null  $paths */
+    public function deleteProfilePhoto(?array $paths): void
+    {
+        foreach ($paths ?? [] as $path) {
+            Storage::disk('local')->delete($path);
+            Storage::disk('public')->delete($path);
+        }
+    }
+
+    /**
      * Process an image upload: decode, resize to preset dimensions, encode to WebP, store, and return paths.
      *
      * @param  UploadedFile|string  $input  Uploaded file or base64 string

@@ -50,7 +50,6 @@ class AttendeeInvitationService
         // Queue the invitation email
         Mail::to($attendee->email_address)->send(new AttendeeAccountInviteMail($attendee));
 
-        // Record the audit log
         AuditLog::record('attendee.account_invited', $attendee, ['email' => $attendee->email_address]);
     }
 }

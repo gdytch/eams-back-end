@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
@@ -173,6 +174,11 @@ class AttendeeDuplicateTest extends TestCase
             'primary_attendee_id' => $primary->id,
             'duplicate_attendee_ids' => [$source->id],
         ])->assertOk()->assertJsonPath('data.id', $primary->id);
+
+        Queue::assertPushed(
+            GenerateAttendeeIdCardJob::class,
+            fn (GenerateAttendeeIdCardJob $job): bool => $job->registration->is($registration)
+        );
 
         $this->assertDatabaseHas('attendees', [
             'id' => $primary->id,

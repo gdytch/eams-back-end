@@ -13,8 +13,10 @@ use App\Models\EventRegistration;
 use App\Models\IdCardGridDownload;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
@@ -326,6 +328,45 @@ class IdCardGridDownloadTest extends TestCase
         $response->assertDownload("event-{$event->id}-id-card-grid-batches.zip");
         $this->assertSame('fake zip content', $response->streamedContent());
         Storage::disk('local')->assertMissing('test-grid.zip');
+    }
+
+    public function test_download_grid_file_releases_lock_without_deleting_when_stream_is_unreadable(): void
+    {
+        $org = Organization::factory()->create();
+        $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $download = IdCardGridDownload::factory()->completed()->for($event)->create([
+            'file_path' => 'unreadable-grid.zip',
+        ]);
+        $disk = \Mockery::mock(FilesystemAdapter::class);
+        $disk->shouldReceive('exists')->with($download->file_path)->andReturn(true);
+        $disk->shouldReceive('readStream')->with($download->file_path)->andReturn(null);
+        $disk->shouldReceive('size')->with($download->file_path)->andReturn(100);
+        $disk->shouldNotReceive('delete');
+        Storage::shouldReceive('disk')->with('local')->andReturn($disk);
+
+        $response = $this->actingAs($orgAdmin, 'sanctum')->get(
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$download->id}/file"
+        );
+
+        $response->assertOk();
+        $lockKey = "id-card-grid-download:{$download->id}";
+        $bufferLevel = ob_get_level();
+
+        try {
+            $response->streamedContent();
+            $this->fail('Expected an unreadable archive to raise an exception.');
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Unable to read ZIP archive.', $exception->getMessage());
+        } finally {
+            while (ob_get_level() > $bufferLevel) {
+                ob_end_clean();
+            }
+        }
+
+        $releasedLock = Cache::lock($lockKey, 600);
+        $this->assertTrue($releasedLock->get());
+        $releasedLock->release();
     }
 
     public function test_download_grid_file_returns_404_after_the_zip_has_been_deleted(): void

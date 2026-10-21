@@ -21,6 +21,8 @@
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",
+        "heyosseus/sloppy": "^1.1",
+        "larastan/larastan": "^3.0",
         "laravel/boost": "^2.5",
         "laravel/pail": "^1.2.5",
         "laravel/pao": "^1.0.6",

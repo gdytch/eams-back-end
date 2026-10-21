@@ -132,12 +132,14 @@ class UserPhotoTest extends TestCase
         );
 
         Storage::disk('local')->assertExists("users/{$user->id}/photo-sm.webp");
+        Storage::disk('public')->put("users/{$user->id}/photo-sm.webp", 'legacy photo');
 
         $response = $this->actingAs($admin, 'sanctum')->deleteJson("/api/v1/users/{$user->id}/photo");
 
         $response->assertOk();
         $this->assertNull($response->json('data.photo_urls'));
         Storage::disk('local')->assertMissing("users/{$user->id}/photo-sm.webp");
+        Storage::disk('public')->assertMissing("users/{$user->id}/photo-sm.webp");
         Storage::disk('local')->assertMissing("users/{$user->id}/photo-md.webp");
         Storage::disk('local')->assertMissing("users/{$user->id}/photo-lg.webp");
         Storage::disk('local')->assertMissing("users/{$user->id}/photo-original.webp");

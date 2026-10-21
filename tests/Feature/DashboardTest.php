@@ -4,12 +4,15 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class DashboardTest extends TestCase
@@ -63,6 +66,54 @@ class DashboardTest extends TestCase
         $response->assertJsonPath('organizations.total', 2);
         $response->assertJsonPath('organizations.active', 1);
         $response->assertJsonPath('events.total', 3);
+    }
+
+    public function test_organization_and_event_counts_do_not_add_dashboard_queries(): void
+    {
+        $superAdmin = User::factory()->superAdmin()->create();
+        $organizationIds = collect();
+        $queries = [];
+        AuditLog::factory()->for($superAdmin, 'user')->create();
+
+        $createOrganizationWithCompletedEvent = function () use ($organizationIds): void {
+            $organization = Organization::factory()->create();
+            $organizationIds->push($organization->id);
+            $event = Event::factory()->for($organization)->state(['status' => 'completed'])->create();
+            EventRegistration::factory()
+                ->for($event)
+                ->for(Attendee::factory()->for($organization))
+                ->create();
+        };
+
+        $createOrganizationWithCompletedEvent();
+        DB::listen(function (QueryExecuted $query) use (&$queries): void {
+            $queries[] = $query->sql;
+        });
+
+        $oneOrganizationQueries = $this->actingAs($superAdmin, 'sanctum')
+            ->getJson('/api/v1/dashboard')
+            ->assertOk()
+            ->json();
+        $oneOrganizationQueryCount = count($queries);
+        $queries = [];
+
+        for ($index = 0; $index < 4; $index++) {
+            $createOrganizationWithCompletedEvent();
+        }
+        $queries = [];
+
+        $fiveOrganizationResponse = $this->actingAs($superAdmin, 'sanctum')
+            ->getJson('/api/v1/dashboard')
+            ->assertOk();
+
+        $this->assertGreaterThan(0, $oneOrganizationQueryCount);
+        $this->assertSame($oneOrganizationQueryCount, count($queries));
+        $this->assertCount(1, $oneOrganizationQueries['top_organizations']);
+        $fiveOrganizationResponse->assertJsonCount(5, 'top_organizations');
+        $this->assertSame(
+            $organizationIds->all(),
+            collect($fiveOrganizationResponse->json('top_organizations'))->pluck('organization_id')->all()
+        );
     }
 
     public function test_org_admin_dashboard_is_scoped_to_their_organization(): void

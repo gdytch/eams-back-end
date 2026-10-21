@@ -3,20 +3,22 @@
 namespace App\Jobs;
 
 use App\Enums\IdCardGridDownloadStatus;
+use App\Jobs\Concerns\UpdatesIdCardGridDownloadStatus;
 use App\Models\AuditLog;
 use App\Models\IdCardGridDownload;
+use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
-use App\Services\PdfMergeService;
 use Symfony\Component\Process\Process;
 use Throwable;
 
 class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
 {
     use Queueable;
+    use UpdatesIdCardGridDownloadStatus;
 
     /**
      * Number of pages rendered by DomPDF per batch.
@@ -46,26 +48,6 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
     }
 
     /**
-     * Safely update download status.
-     */
-    private function updateDownloadStatus(array $data): void
-    {
-        try {
-            $this->download->update($data);
-        } catch (\Exception $e) {
-            // If progress_percentage column doesn't exist yet,
-            // try again without it.
-            if (str_contains($e->getMessage(), 'progress_percentage')) {
-                unset($data['progress_percentage']);
-
-                $this->download->update($data);
-            } else {
-                throw $e;
-            }
-        }
-    }
-
-    /**
      * Update progress while safely preventing values outside 0-100.
      */
     private function updateProgress(int $progress): void
@@ -83,9 +65,9 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
     private function convertPdfToImage(string $pdfPath): ?string
     {
         $tempImagePath = sys_get_temp_dir()
-            . '/'
-            . uniqid('card_', true)
-            . '.png';
+            .'/'
+            .uniqid('card_', true)
+            .'.png';
 
         $process = new Process([
             'convert',
@@ -207,7 +189,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             if ($readyRegistrations->isEmpty()) {
                 $failureReason =
                     'No ID cards (PDFs or images) were ready. '
-                    . 'Ensure GenerateAttendeeIdCardJob has run for each registration.';
+                    .'Ensure GenerateAttendeeIdCardJob has run for each registration.';
 
                 $this->updateDownloadStatus([
                     'status' => IdCardGridDownloadStatus::Failed,
@@ -267,7 +249,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
 
                     $dataUri =
                         "data:{$mimeType};base64,"
-                        . base64_encode($content);
+                        .base64_encode($content);
                 }
 
                 /*
@@ -296,7 +278,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                         if ($content !== false) {
                             $dataUri =
                                 'data:image/png;base64,'
-                                . base64_encode($content);
+                                .base64_encode($content);
                         }
                     }
                 }
@@ -326,7 +308,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             if ($imageDataUris->isEmpty()) {
                 throw new \RuntimeException(
                     'Failed to process ID cards. '
-                        . 'No images could be prepared.'
+                        .'No images could be prepared.'
                 );
             }
 
@@ -335,7 +317,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
              */
             $readyRegistrations = $readyRegistrations
                 ->filter(
-                    fn($reg) => $imageDataUris->has($reg->id)
+                    fn ($reg) => $imageDataUris->has($reg->id)
                 )
                 ->values();
 
@@ -349,11 +331,11 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
 
             $pages = $readyRegistrations
                 ->map(
-                    fn($reg) => $imageDataUris->get($reg->id)
+                    fn ($reg) => $imageDataUris->get($reg->id)
                 )
                 ->chunk(4)
                 ->map(
-                    fn($chunk) => $chunk->values()->all()
+                    fn ($chunk) => $chunk->values()->all()
                 )
                 ->values();
 
@@ -575,8 +557,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                 $event,
                 [
                     'download_id' => $this->download->id,
-                    'registration_count' =>
-                    $readyRegistrations->count(),
+                    'registration_count' => $readyRegistrations->count(),
                     'page_count' => $totalPages,
                     'batch_count' => $totalBatches,
                     'file_path' => $finalPath,
@@ -609,8 +590,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                         'Failed to cleanup temporary PDF batch',
                         [
                             'path' => $batchPath,
-                            'error' =>
-                            $cleanupException->getMessage(),
+                            'error' => $cleanupException->getMessage(),
                         ]
                     );
                 }
@@ -629,8 +609,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
 
                 $this->updateDownloadStatus([
                     'status' => IdCardGridDownloadStatus::Failed,
-                    'failure_reason' =>
-                    $e->getMessage(),
+                    'failure_reason' => $e->getMessage(),
                     'progress_percentage' => 0,
                     'completed_at' => now(),
                 ]);
@@ -651,10 +630,8 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                     'IdCardGridDownloadJobV2: Failed to update status',
                     [
                         'download_id' => $this->download->id,
-                        'original_error' =>
-                        $e->getMessage(),
-                        'update_error' =>
-                        $innerException->getMessage(),
+                        'original_error' => $e->getMessage(),
+                        'update_error' => $innerException->getMessage(),
                     ]
                 );
 
@@ -667,11 +644,9 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                             $this->download->id
                         )
                         ->update([
-                            'status' =>
-                            IdCardGridDownloadStatus::Failed->value,
-                            'failure_reason' =>
-                            'Job failed: '
-                                . substr(
+                            'status' => IdCardGridDownloadStatus::Failed->value,
+                            'failure_reason' => 'Job failed: '
+                                .substr(
                                     $e->getMessage(),
                                     0,
                                     255
@@ -682,10 +657,8 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
                     Log::error(
                         'IdCardGridDownloadJobV2: Critical database failure',
                         [
-                            'download_id' =>
-                            $this->download->id,
-                            'error' =>
-                            $dbException->getMessage(),
+                            'download_id' => $this->download->id,
+                            'error' => $dbException->getMessage(),
                         ]
                     );
                 }

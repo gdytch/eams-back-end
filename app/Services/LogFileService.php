@@ -122,8 +122,8 @@ class LogFileService
         fclose($handle);
 
         // Discard everything before the first complete entry (avoid partial leading entry)
-        if (preg_match('#^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]#m', $content)) {
-            $content = preg_replace('#^.*?(?=\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\])/s', '', $content, 1);
+        if (preg_match('#^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]#m', $content, $matches, PREG_OFFSET_CAPTURE)) {
+            $content = substr($content, $matches[0][1]);
         }
 
         return $content;

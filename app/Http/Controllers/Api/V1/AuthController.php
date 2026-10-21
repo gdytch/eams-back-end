@@ -308,21 +308,7 @@ class AuthController extends Controller
                             'user_id' => $user->id,
                             'invite_token' => null,
                         ]);
-                        if ($request->validated('organization_id') === $attendeeToLink->organization_id && $request->filled('organization_level')) {
-                            $attendeeToLink->update([
-                                'organization_level' => $request->validated('organization_level'),
-                            ]);
-                        }
-                        if ($request->validated('organization_id') === $attendeeToLink->organization_id && $request->filled('union_id')) {
-                            $attendeeToLink->update([
-                                'union_id' => $request->validated('union_id'),
-                            ]);
-                        }
-                        if ($request->validated('organization_id') === $attendeeToLink->organization_id && $request->filled('mission_id')) {
-                            $attendeeToLink->update([
-                                'mission_id' => $request->validated('mission_id'),
-                            ]);
-                        }
+                        $this->syncSsoTerritory($request, $attendeeToLink);
 
                         AuditLog::record('attendee.sso_merged', $attendeeToLink, ['user_id' => $user->id]);
                     } else {
@@ -358,41 +344,7 @@ class AuthController extends Controller
 
                     if ($attendee !== null) {
                         // Link the attendee to the user if organization_id matches or user doesn't have one
-                        if ($user->organization_id === null || $user->organization_id === $attendee->organization_id) {
-                            $user->update([
-                                'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
-                                'first_name' => $attendee->first_name,
-                                'middle_name' => $attendee->middle_name,
-                                'last_name' => $attendee->last_name,
-                            ]);
-                            $attendee->update([
-                                'user_id' => $user->id,
-                                'invite_token' => null,
-                            ]);
-
-                            if ($request->validated('organization_id') === $attendee->organization_id && $request->filled('organization_level')) {
-                                $attendee->update([
-                                    'organization_level' => $request->validated('organization_level'),
-                                ]);
-                            }
-                            if ($request->validated('organization_id') === $attendee->organization_id && $request->filled('union_id')) {
-                                $attendee->update([
-                                    'union_id' => $request->validated('union_id'),
-                                ]);
-                            }
-                            if ($request->validated('organization_id') === $attendee->organization_id && $request->filled('mission_id')) {
-                                $attendee->update([
-                                    'mission_id' => $request->validated('mission_id'),
-                                ]);
-                            }
-
-                            // Update user's organization_id if currently null
-                            if ($user->organization_id === null) {
-                                $user->update(['organization_id' => $attendee->organization_id]);
-                            }
-
-                            AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
-                        }
+                        $this->mergeExistingSsoAttendee($request, $user, $attendee);
                     } elseif (
                         $request->filled('organization_id')
                         && $request->filled('organization_level')
@@ -462,6 +414,44 @@ class AuthController extends Controller
 
             ], $wasNewUser ? 201 : 200);
         });
+    }
+
+    private function syncSsoTerritory(SsoLoginRequest $request, Attendee $attendee): void
+    {
+        if ($request->validated('organization_id') !== $attendee->organization_id) {
+            return;
+        }
+
+        foreach (['organization_level', 'union_id', 'mission_id'] as $field) {
+            if ($request->filled($field)) {
+                $attendee->update([$field => $request->validated($field)]);
+            }
+        }
+    }
+
+    private function mergeExistingSsoAttendee(SsoLoginRequest $request, User $user, Attendee $attendee): void
+    {
+        if ($user->organization_id !== null && $user->organization_id !== $attendee->organization_id) {
+            return;
+        }
+
+        $user->update([
+            'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
+            'first_name' => $attendee->first_name,
+            'middle_name' => $attendee->middle_name,
+            'last_name' => $attendee->last_name,
+        ]);
+        $attendee->update([
+            'user_id' => $user->id,
+            'invite_token' => null,
+        ]);
+        $this->syncSsoTerritory($request, $attendee);
+
+        if ($user->organization_id === null) {
+            $user->update(['organization_id' => $attendee->organization_id]);
+        }
+
+        AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
     }
 
     private function hasAuthoritativeEmail(SsoProvider $provider, mixed $socialiteUser): bool

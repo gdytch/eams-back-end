@@ -61,4 +61,29 @@ class ClearTemporaryIdCardGridDownloadsCommandTest extends TestCase
         Storage::disk('local')->assertMissing($stale->file_path);
         Storage::disk('local')->assertMissing("{$event->id}/id-card-grids/999/batches/old.pdf");
     }
+
+    public function test_cleanup_keeps_files_when_a_worker_refreshes_a_stale_download(): void
+    {
+        Storage::fake('local');
+        $download = IdCardGridDownload::factory()->create([
+            'status' => IdCardGridDownloadStatus::Processing,
+            'updated_at' => now()->subDays(2),
+        ]);
+        $path = "{$download->event_id}/id-card-grids/{$download->id}/batch.pdf";
+        Storage::disk('local')->put($path, 'active batch');
+        $refreshed = false;
+
+        IdCardGridDownload::retrieved(function (IdCardGridDownload $retrieved) use ($download, &$refreshed): void {
+            if ($retrieved->id === $download->id && ! $refreshed) {
+                $refreshed = true;
+                DB::table('id_card_grid_downloads')->where('id', $download->id)->update(['updated_at' => now()]);
+            }
+        });
+
+        $this->artisan('app:clear-temporary-id-card-grid-downloads')->assertSuccessful();
+
+        $this->assertTrue($refreshed);
+        $this->assertSame(IdCardGridDownloadStatus::Processing, $download->fresh()->status);
+        Storage::disk('local')->assertExists($path);
+    }
 }

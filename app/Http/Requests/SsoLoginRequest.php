@@ -25,7 +25,7 @@ class SsoLoginRequest extends FormRequest
             'organization_level' => ['sometimes', 'nullable', Rule::enum(OrganizationLevel::class)],
             'organization_id' => ['sometimes', 'nullable', 'integer', 'exists:organizations,id'],
             'union_id' => ['sometimes', 'nullable', 'integer', Rule::exists('unions', 'id')->where('organization_id', $this->integer('organization_id'))],
-            'mission_id' => ['sometimes', 'nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
+            'mission_id' => [Rule::requiredIf($this->input('organization_level') === OrganizationLevel::Mission->value), 'nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
         ];
     }
 }

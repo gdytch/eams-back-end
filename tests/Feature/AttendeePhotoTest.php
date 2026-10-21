@@ -133,12 +133,14 @@ class AttendeePhotoTest extends TestCase
         );
 
         Storage::disk('local')->assertExists("attendees/{$attendee->id}/photo-sm.webp");
+        Storage::disk('public')->put("attendees/{$attendee->id}/photo-sm.webp", 'legacy photo');
 
         $response = $this->actingAs($admin, 'sanctum')->deleteJson("/api/v1/attendees/{$attendee->id}/photo");
 
         $response->assertOk();
         $this->assertNull($response->json('data.photo_urls'));
         Storage::disk('local')->assertMissing("attendees/{$attendee->id}/photo-sm.webp");
+        Storage::disk('public')->assertMissing("attendees/{$attendee->id}/photo-sm.webp");
         Storage::disk('local')->assertMissing("attendees/{$attendee->id}/photo-md.webp");
         Storage::disk('local')->assertMissing("attendees/{$attendee->id}/photo-lg.webp");
         Storage::disk('local')->assertMissing("attendees/{$attendee->id}/photo-original.webp");

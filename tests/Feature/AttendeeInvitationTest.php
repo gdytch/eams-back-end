@@ -2,13 +2,16 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Mail\AttendeeAccountInviteMail;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AttendeeInvitationTest extends TestCase
@@ -23,6 +26,8 @@ class AttendeeInvitationTest extends TestCase
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'email_address' => 'john@example.com',
@@ -45,6 +50,8 @@ class AttendeeInvitationTest extends TestCase
         $admin = User::factory()->orgAdmin()->for($org)->create();
 
         $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Jane',
             'last_name' => 'Smith',
         ]);
@@ -67,6 +74,8 @@ class AttendeeInvitationTest extends TestCase
         User::factory()->for($org)->create(['email' => 'existing@example.com']);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Bob',
             'last_name' => 'Builder',
             'email_address' => 'existing@example.com',
@@ -106,6 +115,7 @@ class AttendeeInvitationTest extends TestCase
     public function test_event_registration_inline_attendee_with_email_sends_invitation(): void
     {
         Mail::fake();
+        Queue::fake([GenerateAttendeeIdCardJob::class]);
 
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
@@ -118,6 +128,7 @@ class AttendeeInvitationTest extends TestCase
         ]);
 
         $response->assertCreated();
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class);
 
         Mail::assertQueued(AttendeeAccountInviteMail::class);
 
@@ -136,6 +147,9 @@ class AttendeeInvitationTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/v1/auth/register', [
+            'organization_id' => $org->id,
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Test',
             'last_name' => 'User',
             'email' => 'invite@example.com',
@@ -166,6 +180,9 @@ class AttendeeInvitationTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/v1/auth/register', [
+            'organization_id' => $org->id,
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Test',
             'last_name' => 'User',
             'email' => 'different@example.com',
@@ -192,6 +209,9 @@ class AttendeeInvitationTest extends TestCase
         ]);
 
         $response = $this->postJson('/api/v1/auth/register', [
+            'organization_id' => $org->id,
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Test',
             'last_name' => 'User',
             'email' => 'newuser@example.com',
@@ -200,12 +220,13 @@ class AttendeeInvitationTest extends TestCase
             'invite_token' => 'invalid_token',
         ]);
 
-        $response->assertUnprocessable();
+        $response->assertUnprocessable()->assertJsonValidationErrors('email');
     }
 
     public function test_public_event_self_registration_does_not_send_invite(): void
     {
         Mail::fake();
+        Queue::fake([GenerateAttendeeIdCardJob::class]);
 
         $org = Organization::factory()->create();
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
@@ -214,6 +235,7 @@ class AttendeeInvitationTest extends TestCase
         $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class);
 
         Mail::assertNotQueued(AttendeeAccountInviteMail::class);
     }

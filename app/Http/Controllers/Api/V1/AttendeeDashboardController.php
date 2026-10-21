@@ -9,6 +9,7 @@ use App\Http\Resources\EventRegistrationResource;
 use App\Http\Resources\SpeakerResource;
 use App\Models\Attendee;
 use App\Models\Event;
+use App\Services\AttendeeDashboardData;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -18,86 +19,22 @@ class AttendeeDashboardController extends Controller
     /**
      * Get the authenticated attendee's dashboard: profile, account, upcoming/past events, and stats.
      */
-    public function index(Request $request)
+    public function index(Request $request, AttendeeDashboardData $dashboardData)
     {
-
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
         $attendee = Attendee::with(['union', 'mission', 'church'])->where('user_id', $user->id)->first();
 
         if ($attendee === null) {
-            return AttendeeDashboardResource::make([
-                'profile' => null,
-                'account' => $user,
-                'upcoming_events' => [],
-                'past_events' => [],
-                'next_event' => null,
-                'latest_event' => null,
-                'stats' => [
-                    'total_events_registered' => 0,
-                    'total_upcoming_events' => 0,
-                    'total_past_events' => 0,
-                    'total_sessions_attended' => 0,
-                    'total_sessions_available' => 0,
-                    'attendance_rate' => 0,
-                ],
-            ])->response();
+            return AttendeeDashboardResource::make($dashboardData->emptyDashboard($user))->response();
         }
 
         $registrations = $attendee->registrations()
             ->with(['event.sessions', 'attendanceRecords'])
             ->get();
 
-        [$upcomingRegistrations, $pastRegistrations] = $registrations->partition(
-            fn ($registration) => $registration->event->end_date->isFuture() || $registration->event->end_date->isToday()
-        );
-
-        // Sort upcoming events ascending (soonest first) and past events descending (most recent first).
-        $upcomingRegistrations = $upcomingRegistrations->sortBy(fn ($r) => $r->event->start_date);
-        $pastRegistrations = $pastRegistrations->sortByDesc(fn ($r) => $r->event->end_date);
-
-        $upcomingEvents = $upcomingRegistrations->map(fn ($registration) => [
-            'registration_id' => $registration->id,
-            'event' => $registration->event,
-            'qr_token' => $registration->qr_token,
-            'id_card_ready' => $registration->id_card_generated_at !== null,
-            'id_card_url' => "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",
-            'next_session' => $this->getNextSession($registration->event),
-        ]);
-
-        $pastEvents = $pastRegistrations->map(fn ($registration) => [
-            'registration_id' => $registration->id,
-            'event' => $registration->event,
-            'attendance_summary' => [
-                'sessions_total' => $registration->event->sessions->count(),
-                'sessions_attended' => $registration->attendanceRecords->whereNotNull('check_in_at')->whereIn('event_session_id', $registration->event->sessions->modelKeys())->unique('event_session_id')->count(),
-            ],
-        ]);
-
-        $totalSessionsAttended = $pastEvents->sum('attendance_summary.sessions_attended');
-        $totalSessionsAvailable = $pastRegistrations->sum(fn ($r) => $r->event->sessions->count());
-        $attendanceRate = $totalSessionsAvailable > 0 ? round($totalSessionsAttended / $totalSessionsAvailable * 100, 1) : 0;
-
-        $nextEvent = $upcomingEvents->first();
-        $latestEvent = $pastEvents->first();
-
-        return AttendeeDashboardResource::make([
-            'profile' => $attendee,
-            'account' => $user,
-            'upcoming_events' => $upcomingEvents->values()->all(),
-            'past_events' => $pastEvents->values()->all(),
-            'next_event' => $nextEvent,
-            'latest_event' => $latestEvent,
-            'stats' => [
-                'total_events_registered' => $registrations->count(),
-                'total_upcoming_events' => $upcomingRegistrations->count(),
-                'total_past_events' => $pastRegistrations->count(),
-                'total_sessions_attended' => $totalSessionsAttended,
-                'total_sessions_available' => $totalSessionsAvailable,
-                'attendance_rate' => $attendanceRate,
-            ],
-        ])->response();
+        return AttendeeDashboardResource::make($dashboardData->attendeeDashboard($user, $attendee, $registrations))->response();
     }
 
     /**
@@ -121,7 +58,7 @@ class AttendeeDashboardController extends Controller
     /**
      * Show the authenticated attendee's session attendance for one registered event.
      */
-    public function attendance(Request $request, int $event): JsonResponse
+    public function attendance(Request $request, int $event, AttendeeDashboardData $dashboardData): JsonResponse
     {
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
@@ -132,50 +69,12 @@ class AttendeeDashboardController extends Controller
             ->where('event_id', $event->id)
             ->with(['attendanceRecords' => fn ($query) => $query->whereNotNull('check_in_at')])
             ->firstOrFail();
-
         $sessions = $event->sessions()
             ->orderBy('session_date')
             ->orderBy('start_time')
             ->get();
-        $attendanceBySession = $registration->attendanceRecords->keyBy('event_session_id');
 
-        $sessionRows = $sessions->map(function ($session) use ($attendanceBySession) {
-            $attendance = $attendanceBySession->get($session->id);
-
-            return [
-                'id' => $session->id,
-                'name' => $session->name,
-                'description' => $session->description,
-                'session_date' => $session->session_date?->toDateString(),
-                'start_time' => $session->start_time,
-                'end_time' => $session->end_time,
-                'status' => $attendance === null ? 'absent' : 'present',
-                'attendance_record_id' => $attendance?->id,
-                'check_in_at' => $attendance?->check_in_at,
-                'check_out_at' => $attendance?->check_out_at,
-            ];
-        });
-
-        $present = $sessionRows->where('status', 'present')->count();
-        $total = $sessionRows->count();
-
-        return response()->json([
-            'event' => [
-                'id' => $event->id,
-                'name' => $event->name,
-                'start_date' => $event->start_date?->toDateString(),
-                'end_date' => $event->end_date?->toDateString(),
-                'venue' => $event->venue,
-            ],
-            'registration_id' => $registration->id,
-            'stats' => [
-                'total_sessions' => $total,
-                'sessions_present' => $present,
-                'sessions_absent' => $total - $present,
-                'attendance_rate' => $total > 0 ? round(($present / $total) * 100, 1) : 0,
-            ],
-            'sessions' => $sessionRows->values(),
-        ]);
+        return response()->json($dashboardData->eventAttendance($event, $registration, $sessions));
     }
 
     /**
@@ -209,31 +108,5 @@ class AttendeeDashboardController extends Controller
         abort_unless($attendee->registrations()->where('event_id', $event->id)->exists(), 404, 'Registration not found.');
 
         return SpeakerResource::collection($event->speakers()->with('programItems')->get());
-    }
-
-    /**
-     * Find the earliest EventSession in the future (or today), or null if none exist.
-     */
-    private function getNextSession($event): ?array
-    {
-        $nextSession = $event->sessions
-            ->filter(fn ($session) => $session->startsAt()->isFuture() || $session->startsAt()->isToday())
-            ->sortBy(fn ($session) => $session->startsAt())
-            ->first();
-
-        if ($nextSession === null) {
-            return null;
-        }
-
-        return [
-            'id' => $nextSession->id,
-            'event_id' => $nextSession->event_id,
-            'name' => $nextSession->name,
-            'description' => $nextSession->description,
-            'session_date' => $nextSession->session_date?->toDateString(),
-            'start_time' => $nextSession->start_time,
-            'end_time' => $nextSession->end_time,
-            'check_in_opens_at' => $nextSession->checkInOpensAt(),
-        ];
     }
 }

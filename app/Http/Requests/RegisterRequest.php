@@ -62,7 +62,6 @@ class RegisterRequest extends FormRequest
                                 if ($attendeeByEmail->user_id !== null || ($attendeeByEmail->organization_id !== null && $attendeeByEmail->organization_id !== $event->organization_id)) {
                                     $fail('This email address is already in use.');
                                 }
-                                // Otherwise allow (will be merged in controller)
                             }
                         } else {
                             // Not an event token, check if it's a valid attendee invite token
@@ -94,7 +93,7 @@ class RegisterRequest extends FormRequest
             'invite_token' => ['nullable', 'string'],
             'organization_id' => ['required', 'integer', 'exists:organizations,id'],
             'union_id' => ['required', 'integer', Rule::exists('unions', 'id')->where('organization_id', $this->integer('organization_id'))],
-            'mission_id' => ['nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
+            'mission_id' => [Rule::requiredIf($this->input('organization_level') === OrganizationLevel::Mission->value), 'nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
             'organization_level' => ['required', Rule::enum(OrganizationLevel::class)],
         ];
     }

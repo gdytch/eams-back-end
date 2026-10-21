@@ -7,6 +7,7 @@ use App\Models\IdCardGridDownload;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Storage;
 
@@ -21,6 +22,17 @@ class ClearTemporaryIdCardGridDownloads extends Command
     public function handle(): int
     {
         $disk = Storage::disk('local');
+        $this->removeExpiredDownloads($disk);
+        $this->expireStaleDownloads($disk);
+        $this->removeOrphanedFiles($disk);
+
+        $this->info('Expired ID card grid downloads and orphan files cleared.');
+
+        return self::SUCCESS;
+    }
+
+    private function removeExpiredDownloads(Filesystem $disk): void
+    {
         $expiredAt = now()->subDays(self::RETAIN_DAYS);
         $expired = IdCardGridDownload::query()
             ->whereIn('status', [IdCardGridDownloadStatus::Completed, IdCardGridDownloadStatus::Failed])
@@ -36,7 +48,10 @@ class ClearTemporaryIdCardGridDownloads extends Command
                 $download->delete();
             });
         }
+    }
 
+    private function expireStaleDownloads(Filesystem $disk): void
+    {
         $staleBefore = now()->subHours(self::ORPHAN_HOURS);
         $stale = IdCardGridDownload::query()
             ->whereIn('status', [IdCardGridDownloadStatus::Pending, IdCardGridDownloadStatus::Processing])
@@ -62,7 +77,10 @@ class ClearTemporaryIdCardGridDownloads extends Command
 
             $disk->deleteDirectory("{$download->event_id}/id-card-grids/{$download->id}");
         }
+    }
 
+    private function removeOrphanedFiles(Filesystem $disk): void
+    {
         $tracked = IdCardGridDownload::query()->get(['event_id', 'id'])->mapWithKeys(
             fn (IdCardGridDownload $download) => ["{$download->event_id}:{$download->id}" => true]
         );
@@ -84,9 +102,5 @@ class ClearTemporaryIdCardGridDownloads extends Command
                 $disk->deleteDirectory("{$matches[1]}/id-card-grids/{$matches[2]}");
             }
         }
-
-        $this->info('Expired ID card grid downloads and orphan files cleared.');
-
-        return self::SUCCESS;
     }
 }

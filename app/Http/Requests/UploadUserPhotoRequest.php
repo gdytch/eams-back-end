@@ -14,7 +14,7 @@ class UploadUserPhotoRequest extends FormRequest
 
         return $user->isSuperAdmin()
             || ($user->isOrgAdmin() && $user->organization_id === $targetUser->organization_id)
-            || $user->id === $targetUser->id; // Allow users to upload their own photo
+            || $user->id === $targetUser->id;
     }
 
     /**

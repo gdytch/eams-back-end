@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 use setasign\Fpdi\Fpdi;
@@ -95,6 +96,11 @@ class PdfMergeService
                 }
             } catch (\Exception $e) {
                 // Skip PDFs that cannot be parsed
+                Log::warning('Skipping invalid PDF during merge', [
+                    'path' => $pdfPath,
+                    'exception' => $e,
+                ]);
+
                 continue;
             }
         }

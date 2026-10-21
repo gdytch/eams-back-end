@@ -117,6 +117,7 @@ class AttendeeDashboardTest extends TestCase
 
         $upcomingEvent = $data['upcoming_events'][0];
         $this->assertEquals($registration->id, $upcomingEvent['registration_id']);
+        $this->assertEquals($registration->qr_token, $upcomingEvent['qr_token']);
         $this->assertEquals($futureEvent->id, $upcomingEvent['event']['id']);
         $this->assertTrue($upcomingEvent['id_card_ready']);
         $this->assertStringContainsString('/id-card', $upcomingEvent['id_card_url']);

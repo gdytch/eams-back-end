@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\IdCardGridDownloadStatus;
+use App\Jobs\Concerns\UpdatesIdCardGridDownloadStatus;
 use App\Models\AuditLog;
 use App\Models\IdCardGridDownload;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -14,6 +15,7 @@ use Symfony\Component\Process\Process;
 class GenerateIdCardGridDownloadJob implements ShouldQueue
 {
     use Queueable;
+    use UpdatesIdCardGridDownloadStatus;
 
     public function __construct(public IdCardGridDownload $download) {}
 
@@ -30,25 +32,6 @@ class GenerateIdCardGridDownloadJob implements ShouldQueue
         }
 
         return $images;
-    }
-
-    /**
-     * Safely update download status, gracefully handling missing progress_percentage column
-     */
-    private function updateDownloadStatus(array $data): void
-    {
-        try {
-            $this->download->update($data);
-        } catch (\Exception $e) {
-            // If progress_percentage column doesn't exist yet (migration not run),
-            // try again without it
-            if (str_contains($e->getMessage(), 'progress_percentage')) {
-                unset($data['progress_percentage']);
-                $this->download->update($data);
-            } else {
-                throw $e;
-            }
-        }
     }
 
     public function handle(): void
@@ -144,7 +127,7 @@ class GenerateIdCardGridDownloadJob implements ShouldQueue
                 } else {
                     // Convert PDF to temporary PNG image
                     $pdfPath = Storage::disk('local')->path($reg->id_card_path);
-                    $tempImagePath = sys_get_temp_dir() . '/' . uniqid('card_') . '.png';
+                    $tempImagePath = sys_get_temp_dir().'/'.uniqid('card_').'.png';
 
                     $process = new Process([
                         'convert',
@@ -176,13 +159,13 @@ class GenerateIdCardGridDownloadJob implements ShouldQueue
                 $this->updateDownloadStatus(['progress_percentage' => $progress]);
 
                 return [
-                    $reg->id => "data:{$mimeType};base64," . base64_encode($content),
+                    $reg->id => "data:{$mimeType};base64,".base64_encode($content),
                 ];
-            })->filter(fn($uri) => $uri !== null); // Remove any that failed to convert
+            })->filter(fn ($uri) => $uri !== null); // Remove any that failed to convert
 
             // Rebuild readyRegistrations to only include those that were successfully encoded
             $readyRegistrations = $readyRegistrations->filter(
-                fn($reg) => isset($imageDataUris[$reg->id])
+                fn ($reg) => isset($imageDataUris[$reg->id])
             );
 
             if ($imageDataUris->isEmpty()) {
@@ -205,9 +188,9 @@ class GenerateIdCardGridDownloadJob implements ShouldQueue
             $this->updateDownloadStatus(['progress_percentage' => 70]);
 
             $pages = $readyRegistrations
-                ->map(fn($reg) => $imageDataUris[$reg->id])
+                ->map(fn ($reg) => $imageDataUris[$reg->id])
                 ->chunk(4)
-                ->map(fn($chunk) => $chunk->values()->all())
+                ->map(fn ($chunk) => $chunk->values()->all())
                 ->values()
                 ->all();
 
@@ -267,7 +250,7 @@ class GenerateIdCardGridDownloadJob implements ShouldQueue
                 try {
                     $updateData = [
                         'status' => IdCardGridDownloadStatus::Failed->value,
-                        'failure_reason' => 'Job failed: ' . substr($e->getMessage(), 0, 255),
+                        'failure_reason' => 'Job failed: '.substr($e->getMessage(), 0, 255),
                         'completed_at' => now(),
                     ];
 

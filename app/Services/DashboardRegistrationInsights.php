@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 
 class DashboardRegistrationInsights
 {
@@ -20,7 +21,18 @@ class DashboardRegistrationInsights
         $registrations = EventRegistration::query()
             ->whereIn('event_id', (clone $events)->select('events.id'));
 
-        $territories = (clone $registrations)
+        $territories = $this->territoryBreakdown(clone $registrations);
+        $dailyCounts = $this->dailyRegistrationCounts(clone $registrations);
+
+        return $this->formatInsights($territories, $dailyCounts);
+    }
+
+    /** @param Builder<EventRegistration> $registrations
+     * @return Collection<int, object>
+     */
+    private function territoryBreakdown(Builder $registrations): Collection
+    {
+        return $registrations
             ->leftJoin('attendees', 'attendees.id', '=', 'event_registrations.attendee_id')
             ->leftJoin('unions', 'unions.id', '=', 'attendees.union_id')
             ->leftJoin('missions', 'missions.id', '=', 'attendees.mission_id')
@@ -33,13 +45,23 @@ class DashboardRegistrationInsights
             ->orderByDesc('registrations')
             ->orderBy('organization_name')
             ->toBase()->get();
+    }
 
-        $total = (int) $territories->sum('registrations');
-        $checkedIn = (int) $territories->sum('checked_in');
-        $dailyCounts = (clone $registrations)
+    /** @param Builder<EventRegistration> $registrations */
+    private function dailyRegistrationCounts(Builder $registrations): Collection
+    {
+        return $registrations
             ->whereBetween('registered_at', [today()->subDays(13), now()])
             ->selectRaw('DATE(registered_at) as date, COUNT(*) as total')
-            ->groupByRaw('DATE(registered_at)')->pluck('total', 'date');
+            ->groupByRaw('DATE(registered_at)')
+            ->pluck('total', 'date');
+    }
+
+    /** @param Collection<int, object> $territories */
+    private function formatInsights(Collection $territories, Collection $dailyCounts): array
+    {
+        $total = (int) $territories->sum('registrations');
+        $checkedIn = (int) $territories->sum('checked_in');
 
         return [
             'registration_summary' => [

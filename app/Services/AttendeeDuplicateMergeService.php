@@ -5,9 +5,9 @@ namespace App\Services;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\AuditLog;
 use App\Models\EventProgramItem;
 use App\Models\EventRegistration;
-use App\Models\AuditLog;
 use App\Models\User;
 use DomainException;
 use Illuminate\Support\Collection;
@@ -99,8 +99,13 @@ class AttendeeDuplicateMergeService
                 'registrations' => $registrationSummary,
             ]);
 
+            $retainedRegistrations = EventRegistration::query()
+                ->whereKey($registrationSummary['retained_registration_ids'])
+                ->get()
+                ->keyBy('id');
+
             foreach ($registrationSummary['retained_registration_ids'] as $registrationId) {
-                GenerateAttendeeIdCardJob::dispatch(EventRegistration::find($registrationId))->afterCommit();
+                GenerateAttendeeIdCardJob::dispatch($retainedRegistrations->get($registrationId))->afterCommit();
             }
 
             return $primary->fresh(['union', 'mission', 'church']);
@@ -176,6 +181,7 @@ class AttendeeDuplicateMergeService
                 $primaryByEvent->put($sourceRegistration->event_id, $sourceRegistration);
                 $retainedIds[] = $sourceRegistration->id;
                 $movedRegistrationIds[] = $sourceRegistration->id;
+
                 continue;
             }
 
@@ -185,6 +191,7 @@ class AttendeeDuplicateMergeService
                 if ($targetRecord === null) {
                     $sourceRecord->update(['event_registration_id' => $target->id]);
                     $targetRecords->put($sourceRecord->event_session_id, $sourceRecord);
+
                     continue;
                 }
 

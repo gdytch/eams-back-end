@@ -277,7 +277,8 @@ class AttendeeController extends Controller
         }
 
         try {
-            $this->activeDuplicateAttendees([$data['primary_attendee_id'], ...$data['duplicate_attendee_ids']]);
+            $this->activeDuplicateAttendees([$data['primary_attendee_id'], ...$data['duplicate_attendee_ids']])
+                ->each(fn (Attendee $attendee) => $this->authorize('merge', $attendee));
             $attendee = $this->duplicateMergeService->merge(
                 $request->user(),
                 $data['primary_attendee_id'],

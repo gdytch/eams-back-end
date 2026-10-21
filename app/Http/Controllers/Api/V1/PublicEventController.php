@@ -37,6 +37,7 @@ class PublicEventController extends Controller
     public function register(Request $request, string $eventInviteToken): JsonResponse
     {
         $event = $this->resolvePublishedEvent($eventInviteToken);
+        $this->authorize('register', $event);
         $user = $request->user();
 
         return DB::transaction(function () use ($event, $user) {

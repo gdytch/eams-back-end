@@ -3,13 +3,15 @@
 namespace App\Http\Requests;
 
 use App\Models\EventSession;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 
 class StoreEventSessionRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): Response|bool
     {
-        return $this->user()->can('create', [EventSession::class, $this->route('event')]);
+        return Gate::forUser($this->user())->inspect('create', [EventSession::class, $this->route('event')]);
     }
 
     /**

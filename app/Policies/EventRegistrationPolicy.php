@@ -5,9 +5,13 @@ namespace App\Policies;
 use App\Models\Event;
 use App\Models\EventRegistration;
 use App\Models\User;
+use App\Policies\Concerns\DeniesArchivedEvents;
+use Illuminate\Auth\Access\Response;
 
 class EventRegistrationPolicy
 {
+    use DeniesArchivedEvents;
+
     public function viewAny(User $user, Event $event): bool
     {
         return $user->can('viewStaffData', $event);
@@ -23,22 +27,26 @@ class EventRegistrationPolicy
             && $user->hasAccessToEvent($eventRegistration->event);
     }
 
-    public function create(User $user, Event $event): bool
+    public function create(User $user, Event $event): Response|bool
     {
-        return ($user->isSuperAdmin() || ($user->isOrgAdmin() || $user->isChecker()) && $user->organization_id === $event->organization_id)
-            && $user->hasAccessToEvent($event);
+        return $this->allowWrite(
+            ($user->isSuperAdmin() || ($user->isOrgAdmin() || $user->isChecker()) && $user->organization_id === $event->organization_id)
+                && $user->hasAccessToEvent($event),
+            $event,
+        );
     }
 
-    public function update(User $user, EventRegistration $eventRegistration): bool
+    public function update(User $user, EventRegistration $eventRegistration): Response|bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id);
+        return $this->delete($user, $eventRegistration);
     }
 
-    public function delete(User $user, EventRegistration $eventRegistration): bool
+    public function delete(User $user, EventRegistration $eventRegistration): Response|bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id);
+        return $this->allowWrite(
+            $user->isSuperAdmin() || ($user->isOrgAdmin() && $user->organization_id === $eventRegistration->event->organization_id),
+            $eventRegistration->event,
+        );
     }
 
     public function downloadIdCard(User $user, EventRegistration $eventRegistration): bool
@@ -61,12 +69,19 @@ class EventRegistrationPolicy
             && $user->hasAccessToEvent($eventRegistration->event);
     }
 
-    public function manageIdCards(User $user, EventRegistration $eventRegistration): bool
+    /**
+     * Only used by ID card regenerate, so it is a write.
+     */
+    public function manageIdCards(User $user, EventRegistration $eventRegistration): Response|bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isOrgAdmin()
-                && $user->organization_id === $eventRegistration->event->organization_id
-                && $user->hasAccessToEvent($eventRegistration->event));
+        /** @var Event $event */
+        $event = $eventRegistration->event;
+
+        return $this->allowWrite(
+            $user->isSuperAdmin()
+                || ($user->isOrgAdmin() && $user->organization_id === $event->organization_id && $user->hasAccessToEvent($event)),
+            $event,
+        );
     }
 
     public function viewStaffData(User $user, EventRegistration $eventRegistration): bool

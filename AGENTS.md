@@ -201,6 +201,15 @@ Inherited findings are not yours to fix in passing. New ones are.
 - Why it costs: An interface earns its keep by letting callers not care which implementation they got. With one implementation and one caller there is no choice being hidden, so the interface mostly duplicates the class signature and doubles the edits every change needs. This is advice, not a defect: keep it if a second implementation or a test double is genuinely on the way.
 - Write it this way instead: An interface with one implementation and one caller is indirection with nothing on the other side. Inline it until a second implementation shows up.
 
+=== .ai/openapi rules ===
+
+# API documentation
+
+- `openapi.yaml` in this repository is the canonical API description for both repositories. `AMS-Frontend/openapi.yaml` is a copy: a frontend change replaces it whole with this file and never edits it by hand.
+- Every change that adds, removes or changes an API route, request field or response shape updates `openapi.yaml` in the same change.
+- Every route in `php artisan route:list --path=api` has a matching path and method in `openapi.yaml`, and every documented path has a route. Routes registered as `PUT|PATCH` are documented once, as `put`, with "Also accepts `PATCH`."
+- Check the file with `npx @redocly/cli lint openapi.yaml` before finishing. It must report no errors.
+
 === foundation rules ===
 
 # Laravel Boost Guidelines

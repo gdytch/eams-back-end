@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\User;
+use Illuminate\Auth\Access\Response;
 
 class EventSessionPolicy
 {
@@ -13,18 +14,26 @@ class EventSessionPolicy
         return true;
     }
 
-    public function view(User $user, EventSession $eventSession): bool
+    public function view(User $user, EventSession $eventSession): Response|bool
     {
         if ($user->isAttendee()) {
             return $user->attendee()->whereHas('registrations', fn ($query) => $query->where('event_id', $eventSession->event_id))->exists();
+        }
+
+        if ($eventSession->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $eventSession->event->organization_id)
             && $user->hasAccessToEvent($eventSession->event);
     }
 
-    public function viewRoster(User $user, EventSession $eventSession): bool
+    public function viewRoster(User $user, EventSession $eventSession): Response|bool
     {
+        if ($eventSession->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         return $user->can('viewStaffData', $eventSession->event);
     }
 

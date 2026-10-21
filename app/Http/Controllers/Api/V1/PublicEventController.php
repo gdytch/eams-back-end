@@ -36,7 +36,7 @@ class PublicEventController extends Controller
      */
     public function register(Request $request, string $eventInviteToken): JsonResponse
     {
-        $event = $this->resolvePublishedEvent($eventInviteToken);
+        $event = $this->resolveEventOpenForRegistration($eventInviteToken);
         $user = $request->user();
 
         return DB::transaction(function () use ($event, $user) {
@@ -96,6 +96,17 @@ class PublicEventController extends Controller
                 ->response()
                 ->setStatusCode(200);
         });
+    }
+
+    /**
+     * Resolve a published event that still accepts registrations (403 once archived).
+     */
+    private function resolveEventOpenForRegistration(string $inviteToken): Event
+    {
+        $event = $this->resolvePublishedEvent($inviteToken);
+        abort_if($event->isArchived(), 403, 'This event is archived.');
+
+        return $event;
     }
 
     /**

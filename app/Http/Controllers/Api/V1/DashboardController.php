@@ -137,8 +137,8 @@ class DashboardController extends Controller
     {
         $restricted = $user->accessibleEvents()->exists();
         $eventsQuery = $restricted
-            ? fn () => Event::query()->whereIn('id', $user->accessibleEvents()->pluck('events.id'))
-            : fn () => Event::query();
+            ? fn () => Event::query()->whereNull('archived_at')->whereIn('id', $user->accessibleEvents()->pluck('events.id'))
+            : fn () => Event::query()->whereNull('archived_at');
 
         return [
             'access_restricted' => $restricted,

@@ -29,6 +29,7 @@ class PublicEventResource extends JsonResource
                 $this->speakers_public && $this->relationLoaded('speakers') ? $this->speakers : [],
             ),
             'banner_urls' => $this->banner_urls,
+            'closed' => $this->resource->isArchived(),
         ];
     }
 }

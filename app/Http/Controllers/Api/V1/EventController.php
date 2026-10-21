@@ -38,7 +38,7 @@ class EventController extends Controller
     {
         return match (true) {
             $user->isOrgAdmin() => Event::query()->where('organization_id', $user->organization_id),
-            $user->isChecker() => Event::query()->where('organization_id', $user->organization_id)
+            $user->isChecker() => Event::query()->where('organization_id', $user->organization_id)->whereNull('archived_at')
                 ->when($user->accessibleEvents()->exists(), fn ($query) => $query->whereIn('id', $user->accessibleEvents()->select('events.id'))),
             $user->isAttendee() => Event::query()->where('status', 'published'),
             default => Event::query(),

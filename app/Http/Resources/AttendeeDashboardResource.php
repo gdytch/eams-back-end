@@ -112,6 +112,10 @@ class AttendeeDashboardResource extends JsonResource
                 'id_card_url' => $eventData['id_card_url'],
             ];
 
+            if (! $includeAttendance) {
+                $formatted['banner'] = $eventData['banner'];
+            }
+
             if ($includeAttendance) {
                 $formatted['attendance_summary'] = $eventData['attendance_summary'];
             } elseif ($eventData['next_session']) {

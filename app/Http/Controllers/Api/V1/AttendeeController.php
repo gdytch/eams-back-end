@@ -69,6 +69,15 @@ class AttendeeController extends Controller
             $query->where('event_id', $eventId);
         }
 
+        $request->validate(['registration_status' => ['nullable', 'in:draft,incomplete,registered']]);
+
+        if ($status = $request->input('registration_status')) {
+            $query->withRegistrationStatus($status);
+        } else {
+            // Drafts are hidden unless asked for; rows without an event have no registration state.
+            $query->where(fn ($q) => $q->whereNotNull('first_registered_at')->orWhereNull('event_id'));
+        }
+
         $query->with(['union', 'mission', 'church']);
 
         // Apply sorting
@@ -571,6 +580,7 @@ class AttendeeController extends Controller
         $request->validate([
             'event_id' => ['required', 'integer'],
             'format' => ['nullable', 'in:xlsx,pdf'],
+            'registration_status' => ['nullable', 'in:draft,incomplete,registered'],
         ]);
 
         $event = Event::findOrFail($request->integer('event_id'));
@@ -590,6 +600,10 @@ class AttendeeController extends Controller
             });
         }
 
+        if ($status = $request->input('registration_status')) {
+            $query->withRegistrationStatus($status);
+        }
+
         $attendees = $query->with(['union', 'mission', 'church'])->orderBy('last_name')->orderBy('first_name')->get();
         $format = $request->query('format', 'xlsx');
 
@@ -604,6 +618,7 @@ class AttendeeController extends Controller
                 $organizationName = $attendee->mission->code;
             }
             $attendee->organization_name = $organizationName;
+            $attendee->registration_status_label = ['registered' => 'Fully registered', 'incomplete' => 'Incomplete', 'draft' => 'Draft'][$attendee->registrationStatus()] ?? '';
         });
         if ($format === 'pdf') {
             return $this->exportPdf($attendees, $event);

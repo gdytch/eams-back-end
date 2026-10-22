@@ -317,7 +317,7 @@ class AttendanceScanTest extends TestCase
         $this->assertDatabaseHas('attendance_records', ['attendee_id' => $attendee->id, 'method' => 'manual']);
     }
 
-    public function test_manual_attendance_still_accepts_the_deprecated_event_registration_id(): void
+    public function test_manual_attendance_rejects_the_removed_event_registration_id(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
@@ -330,14 +330,8 @@ class AttendanceScanTest extends TestCase
             'event_id' => $event->id,
             'session_id' => $session->id,
             'event_registration_id' => 777,
-        ])->assertCreated()->assertJsonPath('data.attendee_id', $attendee->id);
-
-        $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/manual', [
-            'event_id' => $event->id,
-            'session_id' => $session->id,
-            'event_registration_id' => 778,
-        ])->assertNotFound();
-        $this->assertDatabaseCount('attendance_records', 1);
+        ])->assertUnprocessable()->assertJsonValidationErrors(['attendee_id']);
+        $this->assertDatabaseCount('attendance_records', 0);
     }
 
     public function test_manual_attendance_requires_an_attendee_and_rejects_one_from_another_event(): void
@@ -351,7 +345,7 @@ class AttendanceScanTest extends TestCase
         $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/manual', [
             'event_id' => $event->id,
             'session_id' => $session->id,
-        ])->assertUnprocessable()->assertJsonValidationErrors(['attendee_id', 'event_registration_id']);
+        ])->assertUnprocessable()->assertJsonValidationErrors(['attendee_id']);
 
         $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/manual', [
             'event_id' => $event->id,

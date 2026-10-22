@@ -293,20 +293,11 @@ class AttendanceController extends Controller
     }
 
     /**
-     * Find the event's Attendee by attendee_id, or by the deprecated event_registration_id
-     * (translated through legacy_registration_id, removed in Release 2).
-     *
      * @param  array<string, mixed>  $input
      */
     private function resolveAttendee(Event $event, array $input): Attendee
     {
-        $query = Attendee::where('event_id', $event->id);
-
-        if (! empty($input['attendee_id'])) {
-            return $query->findOrFail($input['attendee_id']);
-        }
-
-        return $query->where('legacy_registration_id', $input['event_registration_id'] ?? null)->firstOrFail();
+        return Attendee::where('event_id', $event->id)->findOrFail($input['attendee_id'] ?? null);
     }
 
     private function recordAttendance(

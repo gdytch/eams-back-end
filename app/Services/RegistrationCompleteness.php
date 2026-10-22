@@ -29,6 +29,27 @@ class RegistrationCompleteness
         ];
     }
 
+    /**
+     * Human wording for every missing item, in wizard order.
+     *
+     * @return array<int, string>
+     */
+    public function missingLabels(Attendee $attendee): array
+    {
+        $labels = [
+            'first_name' => 'Add your first name',
+            'last_name' => 'Add your last name',
+            'mobile_no' => 'Add your mobile number',
+            'organization_level' => 'Choose your organization level',
+            'union_id' => 'Add your union',
+            'mission_id' => 'Add your mission',
+            'church_id' => 'Add your church',
+            'confirmation' => 'Finish your registration',
+        ];
+
+        return collect($this->steps($attendee))->flatten()->map(fn (string $item) => $labels[$item] ?? $item)->values()->all();
+    }
+
     public function isComplete(Attendee $attendee): bool
     {
         return array_filter($this->steps($attendee)) === [];

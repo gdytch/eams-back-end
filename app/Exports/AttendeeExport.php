@@ -33,6 +33,7 @@ class AttendeeExport extends DefaultValueBinder implements FromCollection, Shoul
                 'Mobile No.' => $attendee->mobile_no ?? '',
                 'Email Address' => $attendee->email_address ?? '',
                 'Remarks' => $attendee->remarks ?? '',
+                'Registration Status' => $attendee->registration_status_label ?? '',
             ];
         });
     }
@@ -58,6 +59,7 @@ class AttendeeExport extends DefaultValueBinder implements FromCollection, Shoul
             'Mobile No.',
             'Email Address',
             'Remarks',
+            'Registration Status',
         ];
     }
 

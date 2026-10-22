@@ -8,16 +8,6 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 class AttendeeResource extends JsonResource
 {
-    private function registrationStatus(): ?string
-    {
-        return match (true) {
-            $this->event_id === null => null,
-            $this->registration_completed_at !== null => 'registered',
-            $this->first_registered_at !== null => 'incomplete',
-            default => 'draft',
-        };
-    }
-
     /**
      * Transform the resource into an array.
      *
@@ -41,7 +31,7 @@ class AttendeeResource extends JsonResource
             'email_address' => $this->email_address,
             'remarks' => $this->remarks,
             'photo_urls' => $this->photo_urls,
-            'registration_status' => $this->registrationStatus(),
+            'registration_status' => $this->resource->registrationStatus(),
             'registration_completed_at' => $this->registration_completed_at,
             'first_registered_at' => $this->first_registered_at,
             'registration_confirmed_at' => $this->registration_confirmed_at,

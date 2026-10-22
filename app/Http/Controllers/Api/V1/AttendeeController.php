@@ -6,6 +6,7 @@ use App\Enums\OrganizationLevel;
 use App\Exports\AttendeeExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CheckAttendeeDuplicatesRequest;
+use App\Http\Requests\SaveBreakoutPicksRequest;
 use App\Http\Requests\StoreAttendeeRequest;
 use App\Http\Requests\UpdateAttendeeRequest;
 use App\Http\Requests\UploadAttendeePhotoRequest;
@@ -20,6 +21,7 @@ use App\Models\Event;
 use App\Services\AttendeeDashboardData;
 use App\Services\AttendeeDuplicateMergeService;
 use App\Services\AttendeeRegistrationService;
+use App\Services\BreakoutPickService;
 use App\Services\ImageUploadService;
 use App\Services\RegistrationCompleteness;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -176,6 +178,22 @@ class AttendeeController extends Controller
             }
 
             return AttendeeResource::make($attendee);
+        });
+    }
+
+    /**
+     * Admin wizard, Breakouts: admins may also change picks after registration and may exceed capacity. Audited.
+     */
+    public function saveBreakouts(SaveBreakoutPicksRequest $request, Attendee $attendee, BreakoutPickService $picks)
+    {
+        $this->authorize('registerOnBehalf', $attendee);
+
+        return DB::transaction(function () use ($request, $attendee, $picks) {
+            $before = $attendee->breakouts()->pluck('breakouts.id')->all();
+            $note = $picks->save($attendee, $request->validated('breakout_ids'), ignoreCapacity: true);
+            AuditLog::record('attendee.breakout_picks_changed', $attendee, ['before' => $before, 'after' => $request->validated('breakout_ids')]);
+
+            return AttendeeResource::make($attendee->load('breakouts'))->additional(['note' => $note]);
         });
     }
 

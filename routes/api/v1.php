@@ -71,6 +71,7 @@ Route::middleware('auth:sanctum')->prefix('public/event/{eventInviteToken}/regis
     Route::get('/', [PublicEventRegistrationController::class, 'show']);
     Route::put('basic-info', [PublicEventRegistrationController::class, 'saveBasicInfo']);
     Route::put('territory', [PublicEventRegistrationController::class, 'saveTerritory']);
+    Route::put('breakouts', [PublicEventRegistrationController::class, 'saveBreakouts']);
     Route::post('finish', [PublicEventRegistrationController::class, 'finish']);
 });
 Route::get('public/unions', [PublicUnionController::class, 'index']);
@@ -125,6 +126,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendees/export', [AttendeeController::class, 'export'])->middleware('throttle:6,1');
     Route::get('attendees/{attendeeId}', [AttendeeController::class, 'showById'])->whereNumber('attendeeId');
     Route::apiResource('attendees', AttendeeController::class)->except('show');
+    Route::put('attendees/{attendee}/breakouts', [AttendeeController::class, 'saveBreakouts']);
     Route::post('attendees/{attendee}/finish', [AttendeeController::class, 'finish']);
     Route::post('attendees/{attendee}/resend-invite', [AttendeeController::class, 'resendInvite']);
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);

@@ -238,10 +238,11 @@ class AttendeeInvitationTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
         $event = Event::factory()->for($org)->create(['status' => 'published']);
 
-        $response = $this->actingAs($user, 'sanctum')->postJson("/api/v1/public/event/{$event->invite_token}/register");
+        $response = $this->actingAs($user, 'sanctum')->putJson("/api/v1/public/event/{$event->invite_token}/registration/basic-info", [
+            'first_name' => 'Jane', 'last_name' => 'Doe', 'mobile_no' => '09171234567',
+        ]);
 
-        $response->assertCreated();
-        Queue::assertPushed(GenerateAttendeeIdCardJob::class);
+        $response->assertOk();
 
         Mail::assertNotQueued(AttendeeAccountInviteMail::class);
     }

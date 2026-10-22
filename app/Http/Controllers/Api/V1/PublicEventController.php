@@ -4,17 +4,9 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\EventStatus;
 use App\Http\Controllers\Controller;
-use App\Http\Resources\EventAttendeeResource;
 use App\Http\Resources\PublicEventResource;
-use App\Jobs\GenerateAttendeeIdCardJob;
-use App\Models\AuditLog;
 use App\Models\Event;
-use App\Services\AttendeeLinkingService;
-use App\Services\AttendeeRegistrationService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\ValidationException;
 
 class PublicEventController extends Controller
 {
@@ -26,46 +18,6 @@ class PublicEventController extends Controller
         $event = $this->resolvePublishedEvent($eventInviteToken);
 
         return PublicEventResource::make($event);
-    }
-
-    /**
-     * Register authenticated user to the event: one per-event Attendee, prefilled from their latest Attendee.
-     */
-    public function register(Request $request, string $eventInviteToken, AttendeeRegistrationService $registrationService, AttendeeLinkingService $linking): JsonResponse
-    {
-        $event = $this->resolvePublishedEvent($eventInviteToken);
-        $this->authorize('register', $event);
-        $user = $request->user();
-
-        return DB::transaction(function () use ($event, $user, $registrationService, $linking) {
-            $linking->linkVerifiedEmail($user);
-
-            if ($registrationService->userAttendeeIn($user, $event) === null && $linking->hasUnlinkedAttendeeIn($user, $event->id)) {
-                throw ValidationException::withMessages(['email' => 'Verify your email to continue. An attendee with this email is already registered for this event.']);
-            }
-
-            [$attendee, $created] = $registrationService->registerUser($user, $event);
-
-            if ($created) {
-                if ($user->organization_id === null) {
-                    $user->update(['organization_id' => $event->organization_id]);
-                }
-
-                AuditLog::record('event_registration.self_registered', $attendee, ['attendee_id' => $attendee->id]);
-                GenerateAttendeeIdCardJob::dispatch($attendee);
-
-                // Send welcome email if attendee has an email
-                // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
-                // $email = $attendee->email_address ?? $attendee->user?->email;
-                // if ($email) {
-                //     Mail::to($email)->send(new AttendeeRegistrationWelcomeMail($attendee));
-                // }
-            }
-
-            return EventAttendeeResource::make($attendee)
-                ->response()
-                ->setStatusCode($created ? 201 : 200);
-        });
     }
 
     /**

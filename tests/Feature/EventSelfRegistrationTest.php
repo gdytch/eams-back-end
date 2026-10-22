@@ -3,238 +3,305 @@
 namespace Tests\Feature;
 
 use App\Enums\EventStatus;
+use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\Attendee;
+use App\Models\Church;
 use App\Models\Event;
+use App\Models\Mission;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
-use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class EventSelfRegistrationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_unauthenticated_user_cannot_self_register_to_event(): void
+    private Organization $org;
+
+    private Event $event;
+
+    private User $user;
+
+    private Union $union;
+
+    protected function setUp(): void
     {
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
+        parent::setUp();
 
-        $response = $this->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertUnauthorized();
+        Queue::fake();
+        $this->org = Organization::factory()->create();
+        $this->event = Event::factory()->for($this->org)->state(['status' => EventStatus::Published])->create();
+        $this->user = User::factory()->attendee()->for($this->org)->create();
+        $this->union = Union::factory()->create(['organization_id' => $this->org->id]);
     }
 
-    public function test_authenticated_attendee_user_can_self_register_to_event(): void
+    private function url(string $path = '', ?Event $event = null): string
     {
-        Bus::fake();
-
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->create();
-
-        $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertCreated();
-        $this->assertDatabaseHas('attendees', [
-            'event_id' => $event->id,
-            'user_id' => $user->id,
-        ]);
+        return '/api/v1/public/event/'.($event ?? $this->event)->invite_token.'/registration'.$path;
     }
 
-    public function test_self_registration_creates_attendee_if_user_has_none(): void
+    /** @return array<string, string> */
+    private function basicInfo(array $overrides = []): array
     {
-        Bus::fake();
-
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()
-            ->attendee()
-            ->state(['first_name' => 'Jane', 'last_name' => 'Doe'])
-            ->create(['organization_id' => null]);
-
-        $this->assertNull($user->attendee);
-
-        $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertCreated();
-        $this->assertNotNull($user->fresh()->attendee);
-        $this->assertDatabaseHas('attendees', [
-            'user_id' => $user->id,
-            'first_name' => 'Jane',
-            'last_name' => 'Doe',
-            'organization_id' => $event->organization_id,
-        ]);
+        return [...['first_name' => 'Jane', 'last_name' => 'Doe', 'mobile_no' => '09171234567'], ...$overrides];
     }
 
-    public function test_self_registration_prefills_from_the_latest_attendee(): void
+    /** @return array<string, mixed> */
+    private function unionTerritory(): array
     {
-        Bus::fake();
-
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->for($org)->create();
-        $attendee = Attendee::factory()->for($org)->for($user)->create();
-
-        $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertCreated();
-        // The earlier profile prefills a new per-event row; the old row is untouched.
-        $this->assertDatabaseHas('attendees', [
-            'event_id' => $event->id,
-            'user_id' => $user->id,
-            'first_name' => $attendee->first_name,
-            'last_name' => $attendee->last_name,
-        ]);
-        $this->assertNull($attendee->fresh()->event_id);
+        return ['organization_level' => 'union', 'union_id' => $this->union->id];
     }
 
-    public function test_self_registration_is_idempotent(): void
+    private function completeAll(?User $user = null): void
     {
-        Bus::fake();
-
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->for($org)->create();
-
-        $response1 = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response2 = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response1->assertCreated();
-        $response2->assertOk(); // Second call returns 200 (already registered)
-        $this->assertSame($response1->json('data.id'), $response2->json('data.id'));
-
-        // Only one registration should exist
-        $this->assertCount(1, $event->registrations);
+        $this->actingAs($user ?? $this->user, 'sanctum');
+        $this->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+        $this->putJson($this->url('/territory'), $this->unionTerritory())->assertOk();
+        $this->postJson($this->url('/finish'))->assertOk();
     }
 
-    public function test_self_registration_returns_404_for_draft_event(): void
+    public function test_wizard_requires_authentication(): void
     {
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Draft])->create();
-        $user = User::factory()->attendee()->for($org)->create();
-
-        $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertNotFound();
+        $this->getJson($this->url())->assertUnauthorized();
+        $this->putJson($this->url('/basic-info'))->assertUnauthorized();
+        $this->postJson($this->url('/finish'))->assertUnauthorized();
     }
 
-    public function test_checker_can_self_register_to_event(): void
+    public function test_unpublished_event_is_not_found(): void
     {
-        Bus::fake();
+        $draft = Event::factory()->for($this->org)->state(['status' => EventStatus::Draft])->create();
 
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $checker = User::factory()->checker()->for($org)->create();
-
-        $response = $this->actingAs($checker, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertCreated();
-        // Checker should have an attendee created
-        $this->assertNotNull($checker->fresh()->attendee);
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/basic-info', $draft), $this->basicInfo())->assertNotFound();
+        $this->putJson($this->url('/territory', $draft), $this->unionTerritory())->assertNotFound();
+        $this->getJson($this->url('', $draft))->assertNotFound();
     }
 
-    public function test_org_admin_can_self_register_to_event(): void
+    public function test_read_before_any_save_returns_no_attendee_and_all_steps_missing(): void
     {
-        Bus::fake();
-
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $admin = User::factory()->orgAdmin()->for($org)->create();
-
-        $response = $this->actingAs($admin, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertCreated();
-        $this->assertNotNull($admin->fresh()->attendee);
+        $this->actingAs($this->user, 'sanctum')->getJson($this->url())
+            ->assertOk()
+            ->assertJsonPath('status', 'ready')
+            ->assertJsonPath('data', null)
+            ->assertJsonPath('steps.review', ['confirmation']);
+        $this->assertDatabaseCount('attendees', 0);
     }
 
-    public function test_self_registration_sets_org_id_if_user_org_is_null(): void
+    public function test_basic_info_save_creates_a_draft_without_qr_token(): void
     {
-        Bus::fake();
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/basic-info'), $this->basicInfo())
+            ->assertOk()
+            ->assertJsonPath('data.attendee.first_name', 'Jane')
+            ->assertJsonPath('steps.basic_info', []);
 
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->state(['organization_id' => null])->create();
-
-        $this->assertNull($user->organization_id);
-
-        $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $this->assertSame($org->id, $user->fresh()->organization_id);
+        $attendee = Attendee::where('user_id', $this->user->id)->sole();
+        $this->assertSame($this->event->id, $attendee->event_id);
+        $this->assertSame($this->user->email, $attendee->email_address);
+        $this->assertNull($attendee->qr_token);
+        $this->assertNull($attendee->registration_completed_at);
+        $this->assertNull($attendee->first_registered_at);
     }
 
-    public function test_self_registration_does_not_override_existing_org_id(): void
+    public function test_basic_info_does_not_accept_a_client_email(): void
     {
-        Bus::fake();
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/basic-info'), $this->basicInfo(['email_address' => 'other@example.com']))->assertOk();
 
-        $orgA = Organization::factory()->create();
-        $orgB = Organization::factory()->create();
-        $event = Event::factory()->for($orgB)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->create(['organization_id' => $orgA->id]);
-
-        $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        // User's org should stay as orgA
-        $this->assertSame($orgA->id, $user->fresh()->organization_id);
+        $this->assertSame($this->user->email, Attendee::where('user_id', $this->user->id)->sole()->email_address);
     }
 
-    public function test_self_registration_creates_a_draft_without_qr_token(): void
+    public function test_basic_info_validates_required_fields(): void
     {
-        Bus::fake();
-
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->for($org)->create();
-
-        $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
-
-        $response->assertCreated();
-        $this->assertNull($response->json('data.qr_token'));
-        $response->assertJsonPath('data.attendee.registration_status', 'draft');
-    }
-
-    public function test_unverified_user_cannot_register_over_an_attendee_with_their_email(): void
-    {
-        Bus::fake();
-
-        $event = Event::factory()->state(['status' => EventStatus::Published])->create();
-        $existing = Attendee::factory()->for($event)->create(['email_address' => 'taken@example.com']);
-        $user = User::factory()->attendee()->unverified()->create(['email' => 'taken@example.com']);
-
-        $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register")
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/basic-info'), [])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['email']);
+            ->assertJsonValidationErrors(['first_name', 'last_name', 'mobile_no']);
+    }
+
+    public function test_second_save_from_another_session_updates_the_same_row(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+
+        $this->app['auth']->forgetGuards();
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/basic-info'), $this->basicInfo(['first_name' => 'Janet']))->assertOk();
+
+        $this->assertSame('Janet', Attendee::where('user_id', $this->user->id)->sole()->first_name);
+    }
+
+    public function test_territory_before_basic_info_is_rejected(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/territory'), $this->unionTerritory())->assertUnprocessable();
+        $this->assertDatabaseCount('attendees', 0);
+    }
+
+    public function test_territory_saves_union_level_and_drops_mission_and_church(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+
+        $this->putJson($this->url('/territory'), $this->unionTerritory() + ['mission_id' => null])
+            ->assertOk()->assertJsonPath('steps.territory', []);
+
+        $attendee = Attendee::where('user_id', $this->user->id)->sole();
+        $this->assertSame($this->union->id, $attendee->union_id);
+        $this->assertNull($attendee->church_id);
+    }
+
+    public function test_mission_level_territory_needs_a_church_inside_the_mission(): void
+    {
+        $mission = Mission::factory()->create(['organization_id' => $this->org->id, 'union_id' => $this->union->id]);
+        $church = Church::factory()->create(['organization_id' => $this->org->id, 'mission_id' => $mission->id]);
+        $stray = Church::factory()->create(['organization_id' => $this->org->id]);
+        $this->actingAs($this->user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+        $body = ['organization_level' => 'mission', 'union_id' => $this->union->id, 'mission_id' => $mission->id];
+
+        $this->putJson($this->url('/territory'), $body)->assertUnprocessable()->assertJsonValidationErrors(['church_id']);
+        $this->putJson($this->url('/territory'), $body + ['church_id' => $stray->id])->assertUnprocessable()->assertJsonValidationErrors(['church_id']);
+        $this->putJson($this->url('/territory'), $body + ['church_id' => $church->id])->assertOk();
+    }
+
+    public function test_territory_of_another_organization_is_rejected(): void
+    {
+        $foreign = Union::factory()->create(['organization_id' => Organization::factory()->create()->id]);
+        $this->actingAs($this->user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+
+        $this->putJson($this->url('/territory'), ['organization_level' => 'union', 'union_id' => $foreign->id])
+            ->assertUnprocessable()->assertJsonValidationErrors(['union_id']);
+    }
+
+    public function test_finish_on_a_complete_attendee_registers_and_queues_the_id_card(): void
+    {
+        $this->completeAll();
+
+        $attendee = Attendee::where('user_id', $this->user->id)->sole();
+        $this->assertNotNull($attendee->registration_completed_at);
+        $this->assertNotNull($attendee->first_registered_at);
+        $this->assertNotNull($attendee->qr_token);
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, 1);
+    }
+
+    public function test_finish_on_an_incomplete_attendee_names_the_missing_steps(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+
+        $this->postJson($this->url('/finish'))
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.steps', ['territory']);
+
+        $attendee = Attendee::where('user_id', $this->user->id)->sole();
+        $this->assertNull($attendee->registration_confirmed_at);
+        $this->assertNull($attendee->qr_token);
+        Queue::assertNothingPushed();
+    }
+
+    public function test_finish_without_an_attendee_is_not_found(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->postJson($this->url('/finish'))->assertNotFound();
+    }
+
+    public function test_finishing_twice_does_not_queue_a_second_id_card(): void
+    {
+        $this->completeAll();
+        $this->postJson($this->url('/finish'))->assertOk();
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, 1);
+    }
+
+    public function test_changing_the_name_after_registration_regenerates_the_id_card(): void
+    {
+        $this->completeAll();
+
+        $this->putJson($this->url('/basic-info'), $this->basicInfo(['first_name' => 'Janet']))->assertOk();
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, 2);
+        $this->assertNotNull(Attendee::where('user_id', $this->user->id)->sole()->registration_completed_at);
+    }
+
+    public function test_changing_the_territory_after_registration_regenerates_the_id_card(): void
+    {
+        $this->completeAll();
+        $other = Union::factory()->create(['organization_id' => $this->org->id]);
+
+        $this->putJson($this->url('/territory'), ['organization_level' => 'union', 'union_id' => $other->id])->assertOk();
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, 2);
+    }
+
+    public function test_changing_the_name_of_a_once_registered_but_now_incomplete_attendee_regenerates_the_id_card(): void
+    {
+        $this->completeAll();
+        Attendee::where('user_id', $this->user->id)->sole()->update(['mobile_no' => null]);
+
+        $this->putJson($this->url('/basic-info'), $this->basicInfo(['first_name' => 'Janet']))->assertOk();
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, 2);
+    }
+
+    public function test_saving_unchanged_card_data_does_not_regenerate_the_id_card(): void
+    {
+        $this->completeAll();
+
+        $this->putJson($this->url('/basic-info'), $this->basicInfo(['mobile_no' => '09999999999']))->assertOk();
+
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, 1);
+    }
+
+    public function test_unverified_email_matching_an_unlinked_attendee_returns_the_verify_email_state(): void
+    {
+        $existing = Attendee::factory()->for($this->event)->create(['email_address' => 'taken@example.com']);
+        $user = User::factory()->attendee()->unverified()->create(['email' => 'taken@example.com']);
+        $this->actingAs($user, 'sanctum');
+
+        $this->getJson($this->url())->assertStatus(409)->assertJsonPath('status', 'verify_email');
+        $this->putJson($this->url('/basic-info'), $this->basicInfo())->assertStatus(409)->assertJsonPath('status', 'verify_email');
+        $this->putJson($this->url('/territory'), $this->unionTerritory())->assertStatus(409)->assertJsonPath('status', 'verify_email');
+        $this->postJson($this->url('/finish'))->assertStatus(409)->assertJsonPath('status', 'verify_email');
 
         $this->assertNull($existing->fresh()->user_id);
         $this->assertDatabaseCount('attendees', 1);
     }
 
-    public function test_verified_user_registering_is_linked_to_the_existing_attendee_in_that_event(): void
+    public function test_verified_user_is_linked_to_the_existing_attendee_and_the_wizard_opens_on_it(): void
     {
-        Bus::fake();
-
-        $event = Event::factory()->state(['status' => EventStatus::Published])->create();
-        $existing = Attendee::factory()->for($event)->create(['email_address' => 'taken@example.com']);
+        $existing = Attendee::factory()->for($this->event)->create(['email_address' => 'taken@example.com']);
         $user = User::factory()->attendee()->create(['email' => 'taken@example.com']);
 
-        $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/event/{$event->invite_token}/register")
-            ->assertOk();
+        $this->actingAs($user, 'sanctum')->getJson($this->url())
+            ->assertOk()->assertJsonPath('data.id', $existing->id);
 
         $this->assertSame($user->id, $existing->fresh()->user_id);
         $this->assertDatabaseCount('attendees', 1);
+    }
+
+    public function test_saving_sets_the_user_organization_when_missing(): void
+    {
+        $user = User::factory()->attendee()->state(['organization_id' => null])->create();
+
+        $this->actingAs($user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+
+        $this->assertSame($this->org->id, $user->fresh()->organization_id);
+    }
+
+    public function test_archived_event_blocks_saves_but_not_the_read(): void
+    {
+        $this->event->forceFill(['archived_at' => now()->subMinute()])->save();
+        $this->actingAs($this->user, 'sanctum');
+
+        $this->putJson($this->url('/basic-info'), $this->basicInfo())->assertForbidden();
+        $this->putJson($this->url('/territory'), $this->unionTerritory())->assertForbidden();
+        $this->postJson($this->url('/finish'))->assertForbidden();
+        $this->getJson($this->url())->assertOk();
+        $this->assertDatabaseCount('attendees', 0);
+    }
+
+    public function test_the_single_step_register_route_is_gone(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->postJson("/api/v1/public/event/{$this->event->invite_token}/register")->assertStatus(404);
     }
 }

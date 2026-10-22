@@ -147,7 +147,7 @@ All three roles (Attendee, Checker, Org Admin, Super Admin) can use SSO — for 
 - **This endpoint does NOT create an `Attendee` record or `EventRegistration` for the user.** It only authenticates and (optionally) sets their organization. After receiving the token from this endpoint, if you want to actually register the user for that event, call the existing endpoint next:
 
     ```
-    POST /api/v1/public/event/{eventInviteToken}/register
+    GET /api/v1/public/event/{eventInviteToken}/registration
     Authorization: Bearer <token from the SSO response>
     ```
 
@@ -158,7 +158,7 @@ All three roles (Attendee, Checker, Org Admin, Super Admin) can use SSO — for 
 1. User opens an event invite link → you show the public event landing page (`GET /public/event/{token}` — no auth).
 2. User clicks "Sign in with Google" (or Microsoft/Facebook) to register.
 3. Frontend gets the provider access token → `POST /auth/sso/google` with `{ token, invite_token: <the event's invite token from the URL> }`.
-4. Frontend receives the bearer token → immediately calls `POST /public/event/{token}/register` with that bearer token to complete registration.
+4. Frontend receives the bearer token → immediately calls `GET /public/event/{token}/registration` with that bearer token to open the registration wizard (then `PUT .../basic-info`, `PUT .../territory`, `POST .../finish`).
 5. If invalid/unknown `invite_token` is passed, it is silently ignored (no error) — `organization_id` simply stays `null` and the subsequent register call will still work using the event context from the URL itself.
 
 ## Per-provider frontend setup notes
@@ -205,4 +205,4 @@ All three roles (Attendee, Checker, Org Admin, Super Admin) can use SSO — for 
 - [ ] All three provider flows request the **email scope/permission** explicitly.
 - [ ] Send the OAuth **access token** (not `id_token`) to `POST /auth/sso/{provider}`.
 - [ ] Handle `401`/`422` gracefully per the table above.
-- [ ] For event-invite sign-ups, pass `invite_token` and follow up with `POST /public/event/{token}/register` using the returned bearer token.
+- [ ] For event-invite sign-ups, pass `invite_token` and follow up with the wizard endpoints under `/public/event/{token}/registration` using the returned bearer token.

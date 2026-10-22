@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\OrganizationLevel;
 use App\Models\Attendee;
 use App\Models\Event;
+use Illuminate\Support\LazyCollection;
 
 /**
  * Owns the rule for a fully registered Attendee. The result is cached on the row:
@@ -82,7 +83,7 @@ class RegistrationCompleteness
         return $became;
     }
 
-    private function becomingIncomplete(Event $event): \Illuminate\Support\LazyCollection
+    private function becomingIncomplete(Event $event): LazyCollection
     {
         return $event->attendees()->whereNotNull('registration_completed_at')->cursor()
             ->filter(fn (Attendee $attendee) => ! $this->isComplete($attendee));
@@ -91,7 +92,7 @@ class RegistrationCompleteness
     /** @return array<int, string> */
     private function missingBasicInfo(Attendee $attendee): array
     {
-        return collect(['first_name', 'last_name', 'email_address', 'mobile_no'])
+        return collect(['first_name', 'last_name', 'mobile_no'])
             ->filter(fn (string $field) => blank($attendee->{$field}))
             ->values()->all();
     }

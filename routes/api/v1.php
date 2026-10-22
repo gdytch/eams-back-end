@@ -7,7 +7,6 @@ use App\Http\Controllers\Api\V1\AttendeeQrClaimController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChurchController;
-use App\Http\Controllers\Api\V1\PublicChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
 use App\Http\Controllers\Api\V1\EventController;
@@ -19,9 +18,10 @@ use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\ProfilePhotoController;
+use App\Http\Controllers\Api\V1\PublicChurchController;
 use App\Http\Controllers\Api\V1\PublicEventController;
-use App\Http\Controllers\Api\V1\PublicEventRegistrationController;
 use App\Http\Controllers\Api\V1\PublicEventProgramController;
+use App\Http\Controllers\Api\V1\PublicEventRegistrationController;
 use App\Http\Controllers\Api\V1\PublicMissionController;
 use App\Http\Controllers\Api\V1\PublicUnionController;
 use App\Http\Controllers\Api\V1\ReportController;
@@ -122,6 +122,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendees/export', [AttendeeController::class, 'export'])->middleware('throttle:6,1');
     Route::get('attendees/{attendeeId}', [AttendeeController::class, 'showById'])->whereNumber('attendeeId');
     Route::apiResource('attendees', AttendeeController::class)->except('show');
+    Route::post('attendees/{attendee}/finish', [AttendeeController::class, 'finish']);
+    Route::post('attendees/{attendee}/resend-invite', [AttendeeController::class, 'resendInvite']);
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);
     Route::delete('attendees/{attendee}/photo', [AttendeeController::class, 'removePhoto']);
 

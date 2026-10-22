@@ -12,26 +12,29 @@ use App\Http\Requests\UploadAttendeePhotoRequest;
 use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventAttendeeResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
-use App\Mail\AttendeeRegistrationWelcomeMail;
+use App\Mail\AttendeeAccountInviteMail;
 use App\Models\Attendee;
 use App\Models\AttendeeDuplicateDismissal;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Services\AttendeeDashboardData;
 use App\Services\AttendeeDuplicateMergeService;
-use App\Services\AttendeeInvitationService;
+use App\Services\AttendeeRegistrationService;
 use App\Services\ImageUploadService;
+use App\Services\RegistrationCompleteness;
 use Barryvdh\DomPDF\Facade\Pdf;
 use DomainException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Validation\ValidationException;
 use Maatwebsite\Excel\Facades\Excel;
 
 class AttendeeController extends Controller
 {
     public function __construct(
-        private AttendeeInvitationService $invitationService,
+        private AttendeeRegistrationService $registration,
         private AttendeeDuplicateMergeService $duplicateMergeService,
     ) {}
 
@@ -88,49 +91,99 @@ class AttendeeController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage: one Attendee, which is the person's registration in the event.
+     * Admin wizard, Basic info save: creates the Draft Attendee for the event on behalf of the person.
+     * No User is created; an email owned by an attendee-role User links to it instead.
      */
     public function store(StoreAttendeeRequest $request)
     {
         $data = $request->validated();
-        $override = (bool) ($data['override_duplicate'] ?? false);
         $event = $request->event();
-        unset($data['override_duplicate'], $data['auto_register']);
+        $admin = $request->user();
+        $user = $request->linkedUser();
+        unset($data['confirm']);
 
-        if (! $override) {
+        if ($user !== null && $existing = $this->registration->userAttendeeIn($user, $event)) {
+            return AttendeeResource::make($existing);
+        }
+
+        if (! $request->boolean('confirm')) {
             $duplicates = Attendee::matchingName($data['first_name'], $data['last_name'], $event->organization_id, eventId: $event->id);
 
             if ($duplicates->isNotEmpty()) {
                 return response()->json([
-                    'message' => 'Potential duplicate attendees found. Pass override_duplicate=true to create anyway.',
+                    'message' => 'Possible duplicate attendees found. Pass confirm=true to save anyway.',
                     'duplicates' => AttendeeResource::collection($duplicates),
                 ], 409);
             }
         }
 
-        $data['created_by'] = $request->user()->id;
-        $data['registered_by'] = $request->user()->id;
-        $data['registration_confirmed_at'] = now();
+        return DB::transaction(function () use ($data, $event, $admin, $user) {
+            $latest = $user === null ? null : Attendee::withoutGlobalScopes()->where('user_id', $user->id)->where('organization_id', $event->organization_id)->latest('id')->first();
 
-        return DB::transaction(function () use ($data, $request) {
-            $attendee = Attendee::create($data);
+            if ($latest !== null) {
+                // The email is read-only: it mirrors the account, and the rest prefills from the person's latest Attendee.
+                $attendee = $this->registration->registerFrom($latest, $event, $admin, confirmed: false);
+                $attendee->fill(Arr::except($data, ['email_address', 'event_id']))->save();
+            } else {
+                $attendee = Attendee::create([
+                    ...$data,
+                    'email_address' => $user === null ? ($data['email_address'] ?? null) : $user->email,
+                    'user_id' => $user?->id,
+                    'registered_by' => $admin->id,
+                    'created_by' => $admin->id,
+                ]);
+            }
 
-            AuditLog::record('attendee.created', $attendee);
-            AuditLog::record('event_registration.created', $attendee, ['attendee_id' => $attendee->id]);
-
-            $this->invitationService->sendIfEligible($attendee, $request->user());
-
-            GenerateAttendeeIdCardJob::dispatch($attendee);
-
-            // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
-            // if ($attendee->email_address) {
-            //     Mail::to($attendee->email_address)->send(new AttendeeRegistrationWelcomeMail($attendee));
-            // }
+            AuditLog::record('attendee.created', $attendee, ['on_behalf' => true, 'registered_by' => $admin->id]);
 
             return AttendeeResource::make($attendee)
                 ->additional(['registration' => EventAttendeeResource::make($attendee)])
                 ->response()->setStatusCode(201);
         });
+    }
+
+    /**
+     * Admin wizard, Finish: confirms the Draft. Strict completeness applies.
+     */
+    public function finish(Attendee $attendee, RegistrationCompleteness $completeness)
+    {
+        $this->authorize('registerOnBehalf', $attendee);
+
+        return DB::transaction(function () use ($attendee, $completeness) {
+            $wasRegistered = $attendee->first_registered_at !== null;
+
+            $attendee->update(['registration_confirmed_at' => now()]);
+
+            if (! $attendee->registration_completed_at) {
+                $missing = array_filter(array_diff_key($completeness->steps($attendee), ['review' => 1]));
+                // Roll back: the saving hook already cleared the confirmation.
+                throw ValidationException::withMessages(['steps' => array_keys($missing)]);
+            }
+
+            AuditLog::record('event_registration.finished', $attendee, ['attendee_id' => $attendee->id, 'on_behalf' => true]);
+
+            if (! $wasRegistered) {
+                GenerateAttendeeIdCardJob::dispatch($attendee)->afterCommit();
+            }
+
+            return AttendeeResource::make($attendee);
+        });
+    }
+
+    /**
+     * Issue a fresh invite token to an Attendee without a login that has an email.
+     */
+    public function resendInvite(Attendee $attendee)
+    {
+        $this->authorize('registerOnBehalf', $attendee);
+
+        abort_if($attendee->user_id !== null || blank($attendee->email_address), 422, 'Only an attendee without a login and with an email can be invited.');
+
+        $attendee->update(['invite_token' => Attendee::generateUniqueInviteToken(), 'invited_at' => now()]);
+        Mail::to($attendee->email_address)->send(new AttendeeAccountInviteMail($attendee));
+        AuditLog::record('attendee.invite_resent', $attendee, ['email' => $attendee->email_address]);
+
+        return AttendeeResource::make($attendee);
     }
 
     /**
@@ -429,7 +482,7 @@ class AttendeeController extends Controller
             }
 
             // regenerate ID card if the attendee's name, union, mission, organization_leve has changed and they have an existing registration
-            if ($attendee->event_id !== null && (
+            if ($attendee->first_registered_at !== null && (
                 isset($data['first_name']) ||
                 isset($data['middle_name']) ||
                 isset($data['last_name']) ||
@@ -456,6 +509,9 @@ class AttendeeController extends Controller
         if (Attendee::withoutGlobalScopes()->where('merged_into_id', $attendee->id)->exists()) {
             return response()->json(['message' => 'Cannot delete an attendee with merged source records.'], 409);
         }
+
+        // A once-registered Attendee holds attendance and registration history.
+        abort_if($attendee->first_registered_at !== null, 422, 'Only a Draft attendee can be deleted.');
 
         AuditLog::record('attendee.deleted', $attendee);
 

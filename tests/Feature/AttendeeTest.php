@@ -25,14 +25,14 @@ class AttendeeTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
         $union = Union::factory()->for($org)->create();
         $mission = Mission::factory()->for($org)->for($union)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'mobile_no' => '+1234567890',
@@ -54,12 +54,12 @@ class AttendeeTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'Jane',
             'last_name' => 'Smith',
         ]);
@@ -78,12 +78,12 @@ class AttendeeTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'email_address' => 'invalid-email',
@@ -98,12 +98,12 @@ class AttendeeTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'mobile_no' => str_repeat('1', 21),
@@ -118,16 +118,16 @@ class AttendeeTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
         $union = Union::factory()->for($org)->create();
         $mission = Mission::factory()->for($org)->for($union)->create();
         $church = Church::factory()->for($org)->for($union)->for($mission)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'mission',
             'union_id' => $union->id,
             'mission_id' => $mission->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'church_id' => $church->id,
@@ -186,15 +186,15 @@ class AttendeeTest extends TestCase
 
         $orgA = Organization::factory()->create();
         $orgB = Organization::factory()->create();
-        $checkerA = User::factory()->checker()->for($orgA)->create();
+        $adminA = User::factory()->orgAdmin()->for($orgA)->create();
         $unionB = Union::factory()->for($orgB)->create();
         $missionB = Mission::factory()->for($orgB)->for($unionB)->create();
         $churchB = Church::factory()->for($orgB)->for($unionB)->for($missionB)->create();
 
-        $response = $this->actingAs($checkerA, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($adminA, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checkerA->organization_id])->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checkerA->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $adminA->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $adminA->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'church_id' => $churchB->id,
@@ -577,17 +577,17 @@ class AttendeeTest extends TestCase
         $response->assertJsonPath('event_stats.registration_count', 3);
     }
 
-    public function test_created_attendee_is_the_event_registration(): void
+    public function test_created_attendee_is_a_draft_event_registration(): void
     {
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'email_address' => 'john@example.com',
@@ -600,14 +600,16 @@ class AttendeeTest extends TestCase
         $response->assertJsonPath('data.event_id', $event->id);
         $response->assertJsonPath('registration.event_id', $event->id);
         $response->assertJsonPath('registration.attendee_id', $attendeeId);
-        $this->assertNotNull($response->json('registration.qr_token'));
+        $this->assertNull($response->json('registration.qr_token'));
         $this->assertDatabaseHas('attendees', [
             'id' => $attendeeId,
             'event_id' => $event->id,
             'organization_id' => $org->id,
-            'registered_by' => $checker->id,
+            'registered_by' => $admin->id,
+            'user_id' => null,
+            'registered_at' => null,
         ]);
-        Queue::assertPushed(GenerateAttendeeIdCardJob::class, fn ($job) => $job->attendee->id === $attendeeId);
+        Queue::assertNotPushed(GenerateAttendeeIdCardJob::class);
     }
 
     public function test_attendee_create_requires_an_event_id(): void
@@ -615,11 +617,11 @@ class AttendeeTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
         ]);

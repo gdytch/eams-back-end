@@ -26,7 +26,7 @@ class AttendeeRegistrationService
     /**
      * Register the person behind $source in $event, prefilled from $source.
      */
-    public function registerFrom(Attendee $source, Event $event, ?User $registeredBy): Attendee
+    public function registerFrom(Attendee $source, Event $event, ?User $registeredBy, bool $confirmed = true): Attendee
     {
         $prefill = $source->only(self::PREFILL_COLUMNS);
 
@@ -44,7 +44,7 @@ class AttendeeRegistrationService
             ...$prefill,
             'event_id' => $event->id,
             'registered_by' => $registeredBy?->id,
-            'registration_confirmed_at' => $registeredBy !== null && $registeredBy->id === $source->user_id ? null : now(),
+            'registration_confirmed_at' => $confirmed && ($registeredBy === null || $registeredBy->id !== $source->user_id) ? now() : null,
             'created_by' => $registeredBy?->id ?? $source->created_by,
         ]);
 

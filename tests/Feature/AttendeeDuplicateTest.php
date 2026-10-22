@@ -24,13 +24,13 @@ class AttendeeDuplicateTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
         $union = Union::factory()->for($org)->create();
         $event = Event::factory()->for($org)->create();
         $existing = Attendee::factory()->for($event)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
         DB::table('attendees')->where('id', $existing->id)->update(['normalized_name' => 'stale value']);
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'event_id' => $event->id,
             'first_name' => 'juan',
             'last_name' => '  dela   cruz ',
@@ -47,18 +47,18 @@ class AttendeeDuplicateTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
         $union = Union::factory()->for($org)->create();
         $event = Event::factory()->for($org)->create();
         Attendee::factory()->for($event)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'event_id' => $event->id,
             'first_name' => 'Juan',
             'last_name' => 'Dela Cruz',
             'organization_level' => 'union',
             'union_id' => $union->id,
-            'override_duplicate' => true,
+            'confirm' => true,
         ]);
 
         $response->assertCreated();

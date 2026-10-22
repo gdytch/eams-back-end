@@ -18,17 +18,17 @@ class AttendeeInvitationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_checker_creates_attendee_with_email_sends_invitation(): void
+    public function test_admin_creates_attendee_with_email_sends_no_invitation_until_resend(): void
     {
         Queue::fake();
 
         Mail::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'organization_level' => 'union',
             'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'John',
@@ -38,9 +38,15 @@ class AttendeeInvitationTest extends TestCase
 
         $response->assertCreated();
 
-        Mail::assertQueued(AttendeeAccountInviteMail::class);
+        Mail::assertNothingQueued();
 
         $attendee = Attendee::where('email_address', 'john@example.com')->first();
+        $this->assertNull($attendee->invite_token);
+
+        $this->actingAs($admin, 'sanctum')->postJson("/api/v1/attendees/{$attendee->id}/resend-invite")->assertOk();
+
+        Mail::assertQueued(AttendeeAccountInviteMail::class);
+        $attendee->refresh();
         $this->assertNotNull($attendee->invite_token);
         $this->assertNotNull($attendee->invited_at);
     }
@@ -78,11 +84,11 @@ class AttendeeInvitationTest extends TestCase
         Mail::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
         User::factory()->for($org)->create(['email' => 'existing@example.com']);
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+        $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'organization_level' => 'union',
             'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Bob',

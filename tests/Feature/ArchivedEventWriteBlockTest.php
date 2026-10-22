@@ -105,7 +105,7 @@ class ArchivedEventWriteBlockTest extends TestCase
             'attendee photo upload' => ['POST', 'attendees/:attendee/photo', [], $admins],
             'attendee photo remove' => ['DELETE', 'attendees/:attendee/photo', [], $admins],
             'attendee duplicate merge' => ['POST', 'attendees/duplicates/merge', ['primary_attendee_id' => ':attendee', 'duplicate_attendee_ids' => [':duplicate']], $admins],
-            'attendee store with event' => ['POST', 'attendees', ['first_name' => 'New', 'last_name' => 'Person', 'auto_register' => true, 'event_id' => ':event'], $staff],
+            'attendee store with event' => ['POST', 'attendees', ['first_name' => 'New', 'last_name' => 'Person', 'event_id' => ':event'], $admins],
             'checker event access grant' => ['PUT', 'users/:checker/event-access', ['event_ids' => [':event']], $admins],
         ];
     }
@@ -361,6 +361,7 @@ class ArchivedEventWriteBlockTest extends TestCase
     {
         $this->buildArchivedFixture();
         $activeCopy = $this->registerInActiveEvent($this->attendee);
+        DB::table('attendees')->where('id', $activeCopy->id)->update(['first_registered_at' => null, 'registration_completed_at' => null]);
 
         $this->actingAs($this->actor('org_admin'), 'sanctum')
             ->deleteJson("/api/v1/attendees/{$this->attendee->id}")

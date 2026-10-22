@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\EventStatus;
 use App\Models\Concerns\BelongsToOrganization;
+use Carbon\Carbon;
 use Database\Factories\EventFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -18,6 +19,9 @@ use Illuminate\Support\Str;
 #[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'speakers_public', 'created_by', 'invite_token', 'pick_mode', 'pick_min', 'pick_max'])]
 class Event extends Model
 {
+    /** Days after archiving when form uploads and generated ID cards are deleted. */
+    public const FILE_RETENTION_DAYS = 15;
+
     /** @use HasFactory<EventFactory> */
     use BelongsToOrganization, HasFactory;
 
@@ -85,6 +89,12 @@ class Event extends Model
     public function isArchived(): bool
     {
         return $this->archived_at !== null;
+    }
+
+    /** When the event's private files are deleted, or null while the event is not archived. */
+    public function filesDeletionAt(): ?Carbon
+    {
+        return $this->archived_at?->copy()->addDays(self::FILE_RETENTION_DAYS);
     }
 
     /**

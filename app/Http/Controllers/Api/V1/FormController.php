@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\FormStatus;
 use App\Http\Controllers\Controller;
+use App\Exports\FormAnswersExport;
 use App\Http\Requests\CopyFormRequest;
 use App\Http\Requests\ReorderFormsRequest;
 use App\Http\Requests\SaveFormRequest;
@@ -17,6 +18,7 @@ use App\Services\RegistrationCompleteness;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Validation\ValidationException;
 
 class FormController extends Controller
@@ -26,6 +28,15 @@ class FormController extends Controller
         $this->authorize('viewAny', [Form::class, $event]);
 
         return FormResource::collection($event->forms()->withCount('submissions')->with('fields.options')->get());
+    }
+
+    public function export(Event $event)
+    {
+        $this->authorize('export', [Form::class, $event]);
+
+        AuditLog::record('form_answers.exported', $event);
+
+        return Excel::download(new FormAnswersExport($event), "event-{$event->id}-form-answers.xlsx");
     }
 
     public function store(SaveFormRequest $request, Event $event, FormAuthoring $authoring)

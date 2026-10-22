@@ -4,9 +4,11 @@ namespace App\Models;
 
 use App\Enums\OrganizationLevel;
 use App\Models\Concerns\BelongsToOrganization;
+use App\Observers\AttendeeObserver;
 use App\Services\RegistrationCompleteness;
 use Database\Factories\AttendeeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -30,6 +32,7 @@ use Illuminate\Support\Str;
  * @property Carbon|null $registration_completed_at
  * @property Carbon|null $first_registered_at
  */
+#[ObservedBy(AttendeeObserver::class)]
 #[Fillable(['organization_id', 'event_id', 'qr_token', 'id_card_path', 'id_card_images_path', 'id_card_generated_at', 'registered_by', 'registered_at', 'registration_confirmed_at', 'registration_completed_at', 'first_registered_at', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at', 'merged_into_id', 'merged_by', 'merged_at'])]
 class Attendee extends Model
 {
@@ -105,6 +108,14 @@ class Attendee extends Model
         } while (static::withoutGlobalScopes()->where('invite_token', $token)->exists());
 
         return $token;
+    }
+
+    /**
+     * Link that lets an Attendee without a login create an account; null until an invite token is issued.
+     */
+    public function inviteUrl(): ?string
+    {
+        return $this->invite_token === null ? null : config('app.frontend_url').'/register?invite='.$this->invite_token.'&email='.urlencode($this->email_address);
     }
 
     public static function matchingName(?string $first, ?string $last, ?int $organizationId = null, ?int $exceptId = null, ?int $eventId = null): Collection

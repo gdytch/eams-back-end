@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Concerns\SendsRateLimitedMail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -9,7 +10,13 @@ use Illuminate\Notifications\Notification;
 
 class AttendeeQrClaimEmailCodeNotification extends Notification implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, SendsRateLimitedMail;
+
+    /** Auth mail goes first: workers drain `high` before `mail`. */
+    public function viaQueues(): array
+    {
+        return ['mail' => 'high'];
+    }
 
     public function __construct(public readonly string $code) {}
 

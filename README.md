@@ -77,8 +77,17 @@ header.
 - `GET /events/{event}/sessions/{session}/attendance`
 - `GET /audit-logs` — Super Admin sees all, Org Admin sees their own organization only
 
-A queue worker must be running for ID card generation to process outside of tests (test env uses
-the `sync` queue driver): `php artisan queue:work`.
+A queue worker must be running for ID cards and all mail to process outside of tests (test env uses
+the `sync` queue driver). Run it with both queues, highest priority first:
+
+```bash
+php artisan queue:work --queue=high,mail,default
+```
+
+- `high`: auth mail (verify email, reset password, QR claim code).
+- `mail`: welcome and invite mails. `default`: everything else (ID cards, exports).
+- All mail shares one rate limit, `MAIL_RATE_LIMIT_PER_MINUTE` (default 20). Over the limit a job is
+  released back to the queue and retried, up to 2 hours; a send that still fails is logged only.
 
 ## Scope
 

@@ -35,6 +35,11 @@ return [
     |
     */
 
+    /*
+    | Shared cap on queued mail sends per minute (SMTP provider limit).
+    */
+    'rate_limit_per_minute' => env('MAIL_RATE_LIMIT_PER_MINUTE', 20),
+
     'mailers' => [
 
         'smtp' => [

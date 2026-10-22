@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\User;
+use App\Concerns\SendsRateLimitedMail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -12,9 +13,12 @@ use Illuminate\Queue\SerializesModels;
 
 class UserAccountInviteMail extends Mailable implements ShouldQueue
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsRateLimitedMail, SerializesModels;
 
-    public function __construct(public User $user) {}
+    public function __construct(public User $user)
+    {
+        $this->onQueue('mail');
+    }
 
     public function envelope(): Envelope
     {

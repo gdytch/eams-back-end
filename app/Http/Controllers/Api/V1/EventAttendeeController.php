@@ -11,20 +11,17 @@ use App\Http\Resources\EventAttendeeResource;
 use App\Http\Resources\IdCardGridDownloadResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Jobs\PrepareIdCardGridDownloadJob;
-use App\Mail\AttendeeRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\IdCardGridDownload;
 use App\Models\User;
-use App\Services\AttendeeInvitationService;
 use App\Services\AttendeeRegistrationService;
 use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
@@ -32,7 +29,6 @@ use SimpleSoftwareIO\QrCode\Facades\QrCode;
 class EventAttendeeController extends Controller
 {
     public function __construct(
-        private AttendeeInvitationService $invitationService,
         private AttendeeRegistrationService $registrationService,
     ) {}
 
@@ -80,8 +76,6 @@ class EventAttendeeController extends Controller
         $override = (bool) ($data['override_duplicate'] ?? false);
 
         return DB::transaction(function () use ($data, $override, $event, $request) {
-            $attendeeWasJustCreated = false;
-
             if (! empty($data['attendee_id'])) {
                 $source = Attendee::findOrFail($data['attendee_id']);
 
@@ -119,25 +113,13 @@ class EventAttendeeController extends Controller
                     'registration_confirmed_at' => now(),
                     'created_by' => $request->user()->id,
                 ]);
-
-                $attendeeWasJustCreated = true;
             }
 
             AuditLog::record('event_registration.created', $attendee, ['attendee_id' => $attendee->id]);
 
             GenerateAttendeeIdCardJob::dispatch($attendee);
 
-            // Send welcome email if attendee has an email
-            // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
-            // $email = $attendee->email_address ?? $attendee->user?->email;
-            // if ($email) {
-            //     Mail::to($email)->send(new AttendeeRegistrationWelcomeMail($attendee));
-            // }
-
-            // Send account invitation if attendee was just created
-            if ($attendeeWasJustCreated) {
-                $this->invitationService->sendIfEligible($attendee, $request->user());
-            }
+            // The Attendee model queues the welcome (or merged welcome + invite) mail on first full registration.
 
             return EventAttendeeResource::make($attendee)->response()->setStatusCode(201);
         });

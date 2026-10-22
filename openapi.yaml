@@ -2687,6 +2687,8 @@ paths:
         original scan time; if omitted, defaults to the current server time.
         A scan for an archived event gets status `event_archived` with message
         `This event is archived.`, even when `scanned_at` is before the archive time.
+        A Draft Attendee (never fully registered) gets status `error` with message `Registration incomplete.`;
+        a once-registered Attendee that is now incomplete is admitted and the result carries `incomplete: true`.
       requestBody:
         required: true
         content:
@@ -4244,6 +4246,18 @@ components:
         mobile_no: { type: string, maxLength: 20, nullable: true }
         email_address: { type: string, format: email, nullable: true }
         remarks: { type: string, nullable: true }
+        registration_status: { type: string, nullable: true, enum: [registered, incomplete, draft], description: "Null when the Attendee has no event. `draft` never fully registered (no QR token, no ID card, scans refused); `incomplete` was registered and is now incomplete (QR kept, scans admitted with an `incomplete` note)." }
+        registration_completed_at: { type: string, format: date-time, nullable: true, description: "Current state; cleared when the Attendee becomes incomplete." }
+        first_registered_at: { type: string, format: date-time, nullable: true, description: "Set once on first full registration, never cleared." }
+        registration_confirmed_at: { type: string, format: date-time, nullable: true, description: "The Finish confirmation; cleared when the Attendee becomes incomplete." }
+        completeness:
+          type: object
+          description: "Per-step state in wizard order (event Attendees only); open the first step with `complete: false`."
+          additionalProperties:
+            type: object
+            properties:
+              complete: { type: boolean }
+              missing: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -4932,6 +4946,8 @@ components:
             type: object
             properties:
               data: { $ref: "#/components/schemas/AttendanceRecord" }
+              incomplete: { type: boolean, description: "Present and true when the Attendee was registered once and is now incomplete (scan admitted)." }
+              note: { type: string, description: "`Registration incomplete.` when `incomplete` is true." }
 
     AuditLogList:
       description: OK

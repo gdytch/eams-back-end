@@ -26,7 +26,13 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
      */
     public function handle(): void
     {
-        $attendee = $this->attendee;
+        $attendee = $this->attendee->refresh();
+
+        // A Draft Attendee has no QR token and no ID card.
+        if ($attendee->qr_token === null) {
+            return;
+        }
+
         $attendee->loadMissing(['event', 'union', 'mission', 'church']);
 
         $event = $attendee->event;

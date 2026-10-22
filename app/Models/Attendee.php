@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\OrganizationLevel;
 use App\Models\Concerns\BelongsToOrganization;
+use App\Services\RegistrationCompleteness;
 use Database\Factories\AttendeeFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,8 +26,11 @@ use Illuminate\Support\Str;
  * @property int|null $registered_by
  * @property Carbon|null $registered_at
  * @property int|null $legacy_registration_id
+ * @property Carbon|null $registration_confirmed_at
+ * @property Carbon|null $registration_completed_at
+ * @property Carbon|null $first_registered_at
  */
-#[Fillable(['organization_id', 'event_id', 'qr_token', 'id_card_path', 'id_card_images_path', 'id_card_generated_at', 'registered_by', 'registered_at', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at', 'merged_into_id', 'merged_by', 'merged_at'])]
+#[Fillable(['organization_id', 'event_id', 'qr_token', 'id_card_path', 'id_card_images_path', 'id_card_generated_at', 'registered_by', 'registered_at', 'registration_confirmed_at', 'registration_completed_at', 'first_registered_at', 'organization_level', 'union_id', 'mission_id', 'church_id', 'first_name', 'middle_name', 'last_name', 'mobile_no', 'email_address', 'remarks', 'photo_paths', 'created_by', 'user_id', 'invite_token', 'invited_at', 'merged_into_id', 'merged_by', 'merged_at'])]
 class Attendee extends Model
 {
     /** @use HasFactory<AttendeeFactory> */
@@ -40,6 +44,9 @@ class Attendee extends Model
             'invited_at' => 'datetime',
             'merged_at' => 'datetime',
             'registered_at' => 'datetime',
+            'registration_confirmed_at' => 'datetime',
+            'registration_completed_at' => 'datetime',
+            'first_registered_at' => 'datetime',
             'id_card_generated_at' => 'datetime',
             'id_card_images_path' => 'array',
         ];
@@ -55,8 +62,7 @@ class Attendee extends Model
             // Never trust client input: the organization always follows the event.
             if ($attendee->event_id !== null) {
                 $attendee->organization_id = Event::withoutGlobalScopes()->whereKey($attendee->event_id)->value('organization_id');
-                $attendee->qr_token ??= static::generateUniqueQrToken($attendee->event_id);
-                $attendee->registered_at ??= now();
+                app(RegistrationCompleteness::class)->apply($attendee);
             }
 
             $attendee->normalized_name = static::normalizeName(

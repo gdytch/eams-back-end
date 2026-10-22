@@ -44,6 +44,7 @@ class AttendeeRegistrationService
             ...$prefill,
             'event_id' => $event->id,
             'registered_by' => $registeredBy?->id,
+            'registration_confirmed_at' => $registeredBy !== null && $registeredBy->id === $source->user_id ? null : now(),
             'created_by' => $registeredBy?->id ?? $source->created_by,
         ]);
 

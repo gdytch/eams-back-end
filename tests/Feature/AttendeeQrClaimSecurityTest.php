@@ -71,6 +71,8 @@ class AttendeeQrClaimSecurityTest extends TestCase
             'email_address' => null,
         ]);
         $registration = $this->registerInEvent(Event::factory()->for($organization), $attendee);
+        // An email-less Attendee is incomplete; give it the QR token it would have had before this release.
+        Attendee::withoutEvents(fn () => $registration->forceFill(['qr_token' => Attendee::generateUniqueQrToken($registration->event_id)])->save());
 
         for ($attempt = 1; $attempt <= 10; $attempt++) {
             $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.'.$attempt])

@@ -110,6 +110,7 @@ class AttendeeController extends Controller
 
         $data['created_by'] = $request->user()->id;
         $data['registered_by'] = $request->user()->id;
+        $data['registration_confirmed_at'] = now();
 
         return DB::transaction(function () use ($data, $request) {
             $attendee = Attendee::create($data);

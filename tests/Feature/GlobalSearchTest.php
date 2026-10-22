@@ -42,8 +42,8 @@ class GlobalSearchTest extends TestCase
         $church = Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'Meridian Church']);
         $firstEvent = Event::factory()->for($organization)->create(['name' => 'Meridian Spring']);
         $secondEvent = Event::factory()->for($organization)->create(['name' => 'Meridian Autumn']);
-        $firstAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Meridian', 'last_name' => 'First', 'mobile_no' => '09171234567']);
-        $secondAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Meridian', 'last_name' => 'Second']);
+        $firstAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Meridian', 'last_name' => 'First', 'mobile_no' => '09171234567', 'email_address' => 'first@example.com', 'organization_level' => 'union', 'union_id' => $union->id, 'registration_confirmed_at' => now()]);
+        $secondAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Meridian', 'last_name' => 'Second', 'mobile_no' => '09171230000', 'email_address' => 'second@example.com', 'organization_level' => 'union', 'union_id' => $union->id, 'registration_confirmed_at' => now()]);
         $firstRegistration = $this->registerInEvent($firstEvent, $firstAttendee);
         $this->registerInEvent($secondEvent, $secondAttendee);
         $session = EventSession::factory()->for($firstEvent)->create(['name' => 'Meridian Session']);

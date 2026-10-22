@@ -19,7 +19,8 @@ class DashboardRegistrationInsights
     public function build(Builder $events): array
     {
         $registrations = Attendee::query()
-            ->whereIn('event_id', (clone $events)->select('events.id'));
+            ->whereIn('event_id', (clone $events)->select('events.id'))
+            ->whereNotNull('first_registered_at');
 
         $territories = $this->territoryBreakdown(clone $registrations);
         $dailyCounts = $this->dailyRegistrationCounts(clone $registrations);
@@ -50,9 +51,9 @@ class DashboardRegistrationInsights
     private function dailyRegistrationCounts(Builder $registrations): Collection
     {
         return $registrations
-            ->whereBetween('registered_at', [today()->subDays(13), now()])
-            ->selectRaw('DATE(registered_at) as date, COUNT(*) as total')
-            ->groupByRaw('DATE(registered_at)')
+            ->whereBetween('first_registered_at', [today()->subDays(13), now()])
+            ->selectRaw('DATE(first_registered_at) as date, COUNT(*) as total')
+            ->groupByRaw('DATE(first_registered_at)')
             ->pluck('total', 'date');
     }
 

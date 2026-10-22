@@ -4,8 +4,8 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Resources\AttendeeDashboardResource;
+use App\Http\Resources\EventAttendeeResource;
 use App\Http\Resources\EventProgramResource;
-use App\Http\Resources\EventRegistrationResource;
 use App\Http\Resources\SpeakerResource;
 use App\Models\Attendee;
 use App\Models\Event;
@@ -55,7 +55,7 @@ class AttendeeDashboardController extends Controller
             ->orderBy('created_at', 'desc')
             ->get();
 
-        return EventRegistrationResource::collection($registrations);
+        return EventAttendeeResource::collection($registrations);
     }
 
     /**

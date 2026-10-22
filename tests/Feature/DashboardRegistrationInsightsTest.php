@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Church;
 use App\Models\Event;
 use App\Models\Mission;
 use App\Models\Organization;
@@ -23,14 +24,20 @@ class DashboardRegistrationInsightsTest extends TestCase
         $union = Union::factory()->for($organization)->create(['name' => 'Shared name']);
         $mission = Mission::factory()->for($organization)->for($union)->create(['name' => 'Shared name']);
         $events = Event::factory()->for($organization)->count(2)->create();
+        $church = Church::factory()->for($organization)->for($union)->for($mission)->create();
         foreach (['union', 'mission', null] as $level) {
             $attendee = Attendee::factory()->for($organization)->create([
                 'organization_level' => $level,
                 'union_id' => $union->id,
                 'mission_id' => $mission->id,
+                'church_id' => $church->id,
             ]);
             foreach ($events as $event) {
                 $registration = $this->registerInEvent($event, $attendee, ['registered_at' => now()]);
+                if ($level === null) {
+                    // Registered before territory was required.
+                    $this->legacyRegistered($registration);
+                }
                 if ($level === 'mission') {
                     AttendanceRecord::factory()->for($registration)->count(2)->create(['check_in_at' => now()]);
                 }
@@ -86,10 +93,19 @@ class DashboardRegistrationInsightsTest extends TestCase
         $organization = Organization::factory()->create();
         $union = Union::factory()->for($organization)->create();
         $attendee = Attendee::factory()->for($organization)->create(['organization_level' => 'mission', 'union_id' => $union->id, 'mission_id' => null]);
-        $this->registerInEvent(Event::factory()->for($organization), $attendee, ['registered_at' => now()->subDays(20)]);
+        $registration = $this->registerInEvent(Event::factory()->for($organization), $attendee, ['registered_at' => now()->subDays(20)]);
+        $this->legacyRegistered($registration, now()->subDays(20));
         $this->getJson('/api/v1/dashboard')->assertOk()
             ->assertJsonPath('registrations_by_organization_level.0.organization_name', 'Unassigned')
             ->assertJsonPath('registrations_by_organization_level.0.organization_level', 'mission')
             ->assertJsonPath('registration_summary.last_14_days', 0);
+    }
+
+    /** An Attendee registered before the completeness rule: first registered, whatever its territory. */
+    private function legacyRegistered(Attendee $attendee, ?\DateTimeInterface $at = null): Attendee
+    {
+        Attendee::withoutEvents(fn () => $attendee->forceFill(['first_registered_at' => $at ?? now(), 'registered_at' => $at ?? now()])->save());
+
+        return $attendee;
     }
 }

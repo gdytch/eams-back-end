@@ -21,13 +21,14 @@ class SsoLoginTest extends TestCase
     use LazilyRefreshDatabase;
 
     #[Test]
-    public function brand_new_user_with_email_in_attendee_prioritizes_attendee_organization(): void
+    public function brand_new_user_links_the_attendee_and_ignores_the_event_invite_organization(): void
     {
         $attendeeOrg = Organization::factory()->create();
         $inviteOrg = Organization::factory()->create();
 
+        $attendeeEvent = Event::factory()->for($attendeeOrg)->create();
         $attendee = Attendee::factory()
-            ->for($attendeeOrg)
+            ->for($attendeeEvent)
             ->state(['email_address' => 'newuser@example.com'])
             ->create();
 
@@ -61,8 +62,7 @@ class SsoLoginTest extends TestCase
 
         $user = User::where('email', 'newuser@example.com')->first();
         $this->assertNotNull($user);
-        // Verify attendee organization is used, not invite_token organization
-        $this->assertEquals($attendeeOrg->id, $user->organization_id);
+        $this->assertNull($user->organization_id);
 
         $attendee->refresh();
         $this->assertEquals($user->id, $attendee->user_id);
@@ -73,7 +73,7 @@ class SsoLoginTest extends TestCase
     {
         $org = Organization::factory()->create();
         $attendee = Attendee::factory()
-            ->for($org)
+            ->for(Event::factory()->for($org)->create())
             ->state(['email_address' => 'newuser@example.com'])
             ->create();
 
@@ -109,7 +109,7 @@ class SsoLoginTest extends TestCase
         $this->assertNotNull($user);
         $this->assertEquals(UserRole::Attendee, $user->role);
         $this->assertNotNull($user->email_verified_at);
-        $this->assertEquals($org->id, $user->organization_id);
+        $this->assertNull($user->organization_id);
 
         // Verify attendee was linked to the user
         $attendee->refresh();
@@ -124,7 +124,7 @@ class SsoLoginTest extends TestCase
     }
 
     #[Test]
-    public function brand_new_user_with_valid_invite_token_sets_organization(): void
+    public function brand_new_user_with_event_invite_token_gets_no_organization(): void
     {
         $org = Organization::factory()->create();
         $event = Event::factory()
@@ -157,7 +157,8 @@ class SsoLoginTest extends TestCase
 
         $user = User::where('email', 'attendee@company.com')->first();
         $this->assertNotNull($user);
-        $this->assertEquals($org->id, $user->organization_id);
+        $this->assertNull($user->organization_id);
+        $this->assertDatabaseCount('attendees', 0);
     }
 
     #[Test]
@@ -304,7 +305,7 @@ class SsoLoginTest extends TestCase
     }
 
     #[Test]
-    public function unregistered_user_can_self_register_with_sso_territory(): void
+    public function sso_sign_up_ignores_territory_fields_and_creates_no_attendee(): void
     {
         $organization = Organization::factory()->create();
         $union = Union::factory()->for($organization)->create();
@@ -336,13 +337,8 @@ class SsoLoginTest extends TestCase
         $response->assertJson(['is_new_user' => true]);
 
         $user = User::where('email', 'self-register@example.com')->firstOrFail();
-        $this->assertDatabaseHas('attendees', [
-            'user_id' => $user->id,
-            'organization_id' => $organization->id,
-            'organization_level' => 'union',
-            'union_id' => $union->id,
-            'mission_id' => null,
-        ]);
+        $this->assertNull($user->organization_id);
+        $this->assertDatabaseCount('attendees', 0);
     }
 
     #[Test]
@@ -408,7 +404,7 @@ class SsoLoginTest extends TestCase
     }
 
     #[Test]
-    public function unregistered_email_without_invite_token_returns_validation_error(): void
+    public function unregistered_email_without_invite_token_creates_user(): void
     {
         $socialiteUser = $this->createSocialiteUser('google', '12345', 'unregistered@example.com', 'User Name');
 
@@ -430,12 +426,13 @@ class SsoLoginTest extends TestCase
             'token' => 'valid_token',
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['email']);
+        $response->assertCreated();
+        $this->assertNotNull(User::where('email', 'unregistered@example.com')->first());
+        $this->assertDatabaseCount('attendees', 0);
     }
 
     #[Test]
-    public function unregistered_email_with_invalid_invite_token_returns_validation_error(): void
+    public function unregistered_email_with_unknown_invite_token_creates_user_unverified(): void
     {
         $socialiteUser = $this->createSocialiteUser('google', '12345', 'unregistered@example.com', 'User Name');
 
@@ -458,8 +455,8 @@ class SsoLoginTest extends TestCase
             'invite_token' => 'invalid_token_that_does_not_exist',
         ]);
 
-        $response->assertStatus(422);
-        $response->assertJsonValidationErrors(['email']);
+        $response->assertCreated();
+        $this->assertNotNull(User::where('email', 'unregistered@example.com')->first());
     }
 
     #[Test]
@@ -497,7 +494,7 @@ class SsoLoginTest extends TestCase
 
         $user = User::where('email', 'newattendee@example.com')->first();
         $this->assertNotNull($user);
-        $this->assertEquals($org->id, $user->organization_id);
+        $this->assertNull($user->organization_id);
     }
 
     /**

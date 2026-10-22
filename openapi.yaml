@@ -97,6 +97,11 @@ paths:
         Authenticate using OAuth credentials from Google, Microsoft, or Facebook.
         The client obtains an OAuth access token from the provider's native SDK
         and exchanges it with this endpoint for a Sanctum bearer token.
+
+        A new user is created with no Attendee and no `organization_id`. When the provider vouches for the
+        email (Google, verified), the email is marked verified and the user is linked at once to every Attendee
+        without a login that has that email, across all events (see "Linking rule" in the event-scoped
+        registration spec). Other providers leave the email unverified, so nothing is linked.
       security: []
       parameters:
         - name: provider
@@ -120,7 +125,7 @@ paths:
                 invite_token:
                   type: string
                   nullable: true
-                  description: Optional event invite token to assign organization_id and trigger automated event registration
+                  description: Optional Attendee invite token. When it belongs to an Attendee with the signed-in email, the email counts as verified and the link runs. Event invite tokens are ignored.
       responses:
         "201":
           description: New user created and authenticated
@@ -163,23 +168,20 @@ paths:
       tags: [Auth]
       summary: Register a new user account
       description: >
-        Create a new user account and obtain a bearer token.
-        An email verification notification is sent upon successful registration, unless the account
-        is claimed via `invite_token` (see below).
+        Create a new user account (no Attendee, no `organization_id`) and obtain a bearer token.
+        An email verification notification is sent unless the email is verified by `invite_token`.
 
 
-        **Attendee invitation claiming**: when an admin or attendance checker creates an attendee
-        record with an email address (and no linked user account yet), an invitation email is sent
-        containing a unique `invite_token` and a link to this registration flow (the frontend has no
-        dedicated "sign up" entry point otherwise — registration is normally only reached via an
-        event's public registration link). Passing that `invite_token` here:
-          - links the new user to the existing attendee record (`user_id`), so their prior event
-            registrations, ID cards, and attendance history are immediately visible in their dashboard
-          - inherits the attendee's `organization_id`
-          - automatically marks the email as verified (skipping the verification email) **only if**
-            the submitted `email` matches the attendee's `email_address` exactly
+        **Linking rule**: an Attendee without a login is linked to the user only once the user's email is
+        verified. Signing up with an email that matches an Attendee does not link it. Verifying the email
+        (`GET /auth/email/verify/{id}/{hash}`, SSO, or using an invite link) links every Attendee without a
+        login that has that email, across all events, skipping events where the user already has an
+        Attendee. Each link is audited as `attendee.linked`.
 
-        An invite token can only be used once; it is unknown/expired if already claimed.
+
+        **Attendee invitation**: an Attendee invite token (30-day expiry) whose Attendee has the submitted
+        `email` marks the email verified and links at once. A token for another email does not verify.
+        An event invite token is accepted and has no effect on linking.
       security: []
       requestBody:
         required: true
@@ -205,7 +207,7 @@ paths:
                   {
                     type: string,
                     nullable: true,
-                    description: "Token from an attendee account-invitation email. Must reference an attendee that has not yet been claimed by another user.",
+                    description: "Attendee invite token (not expired, Attendee has no login) or an event invite token. Anything else is rejected with a 422 on `invite_token`.",
                   }
       responses:
         "201":
@@ -222,7 +224,7 @@ paths:
                     }
                   user: { $ref: "#/components/schemas/User" }
         "422":
-          description: Validation failed (duplicate email, weak password, missing fields, unknown/already-claimed invite_token, etc.)
+          description: Validation failed (duplicate user email, weak password, missing fields, unknown/expired invite_token, etc.)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ValidationError" }
@@ -481,10 +483,6 @@ paths:
         with attendance summaries, spotlight cards for next upcoming event and latest past event, and comprehensive
         statistics including attendance rate percentage. Returns an empty profile if the user has no linked Attendee
         master record yet.
-
-        Archived events are always listed as read-only past events, whatever their dates, and never as
-        upcoming or `next_event`. `has_upcoming_events` is false when there is nothing upcoming, for the
-        "no upcoming events" empty state.
       responses:
         "200": { $ref: "#/components/responses/AttendeeDashboardItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -515,7 +513,7 @@ paths:
           operational, scanning-focused view — whether the checker is restricted to specific
           events (`event_checker_access`) or has full org access, today's sessions to scan,
           upcoming events, and the checker's own scan activity (today/all-time counts plus the
-          last 10 scans they personally recorded). Archived events are left out of every figure.
+          last 10 scans they personally recorded).
 
         All three variants share a common `role`, `user`, and `generated_at` envelope.
       responses:
@@ -621,7 +619,9 @@ paths:
     get:
       tags: [Users]
       summary: List users
-      description: Super Admin sees all users; everyone else sees only their own organization's users.
+      description: >
+        Super Admin sees all users; everyone else sees only their own organization's users.
+        Users with `role = attendee` are never listed, whatever the `role` filter.
       parameters:
         - $ref: "#/components/parameters/Page"
       responses:
@@ -990,27 +990,49 @@ paths:
       summary: List churches
       parameters:
         - $ref: "#/components/parameters/Page"
+        - { name: mission_id, in: query, schema: { type: integer } }
+        - name: unverified
+          in: query
+          description: Only unverified churches. Honoured for org_admin and super_admin only.
+          schema: { type: boolean }
       responses:
         "200": { $ref: "#/components/responses/ChurchList" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
     post:
       tags: [Territories]
       summary: Create a church
+      description: |
+        The mission must belong to the union. A church is identified by normalized name plus normalized address
+        (case-insensitive, trimmed, whitespace collapsed) within its mission. Churches created by org_admin or
+        super_admin are verified on creation; others start unverified.
+        Same name and address: 422 with `existing_church`. Same name, other address: 422 with `existing_churches`
+        unless `confirm_same_name` is true. A similar name creates the church and returns `similar_churches`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [union_id, mission_id, name]
+              required: [union_id, mission_id, name, address]
               properties:
                 organization_id: { type: integer }
                 union_id: { type: integer }
                 mission_id: { type: integer }
                 name: { type: string, maxLength: 255 }
-                address: { type: string, maxLength: 255, nullable: true }
+                address: { type: string, maxLength: 255 }
+                confirm_same_name: { type: boolean }
       responses:
-        "201": { $ref: "#/components/responses/ChurchItem" }
+        "201":
+          description: Created. `similar_churches` lists churches with a similar name in the mission ("Did you mean...?").
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Church" }
+                  similar_churches:
+                    type: array
+                    items: { $ref: "#/components/schemas/Church" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -1028,7 +1050,7 @@ paths:
     put:
       tags: [Territories]
       summary: Update a church
-      description: Also accepts `PATCH`.
+      description: Also accepts `PATCH`. `address`, when sent, is required. Same duplicate rules as create.
       requestBody:
         required: true
         content:
@@ -1040,7 +1062,8 @@ paths:
                 union_id: { type: integer }
                 mission_id: { type: integer }
                 name: { type: string, maxLength: 255 }
-                address: { type: string, maxLength: 255, nullable: true }
+                address: { type: string, maxLength: 255 }
+                confirm_same_name: { type: boolean }
       responses:
         "200": { $ref: "#/components/responses/ChurchItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -1055,6 +1078,45 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /churches/{church}/verify:
+    parameters:
+      - $ref: "#/components/parameters/ChurchId"
+    post:
+      tags: [Territories]
+      summary: Verify a church
+      description: org_admin of the organization or super_admin. 422 when the church has no address.
+      responses:
+        "200": { $ref: "#/components/responses/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /churches/{church}/merge:
+    parameters:
+      - $ref: "#/components/parameters/ChurchId"
+    post:
+      tags: [Territories]
+      summary: Merge a church into another church of the same mission
+      description: |
+        org_admin of the organization or super_admin. Repoints `church_id` on Attendees of non-archived events,
+        nulls it on Attendees of archived events, deletes the source church and writes an audit log entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_church_id]
+              properties:
+                target_church_id: { type: integer }
+      responses:
+        "200": { $ref: "#/components/responses/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   # ---------------------------------------------------------------- Attendees
   /attendees:
@@ -1153,9 +1215,8 @@ paths:
       tags: [Attendees]
       summary: Export attendees as Excel or PDF
       description: >
-        Export all attendees or filter by event registration. Returns a downloadable file
-        in the specified format with styled headers and formatting. Supports optional name search
-        and event_id filtering.
+        Export one event's attendees. event_id is required. Returns a downloadable file
+        in the specified format with styled headers and formatting. Supports optional name search.
       parameters:
         - name: format
           in: query
@@ -1164,9 +1225,9 @@ paths:
           description: Export file format (defaults to xlsx).
         - name: event_id
           in: query
-          required: false
+          required: true
           schema: { type: integer }
-          description: If provided, exports only attendees registered to this event.
+          description: Event whose attendees are exported.
         - name: search
           in: query
           required: false
@@ -1188,6 +1249,7 @@ paths:
                 description: PDF document with styled table
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /attendees/{attendee}:
     parameters:
@@ -1313,8 +1375,7 @@ paths:
         Checkers only see events they have access to: every event in their organization by
         default, or a restricted subset if `event_checker_access` rows exist for them (see
         `PUT /users/{user}/event-access`). Archived events are left out unless `archived=1`,
-        which returns only archived events. Checkers never see archived events, even with
-        `archived=1`; their `event_checker_access` rows are kept and the event returns on unarchive.
+        which returns only archived events.
       parameters:
         - $ref: "#/components/parameters/Page"
         - name: archived
@@ -1370,9 +1431,6 @@ paths:
     get:
       tags: [Events]
       summary: Get an event
-      description: >
-        404 for checkers while the event is archived. The same applies to the event's session,
-        roster, attendance, quick-stats, registration, ID card and program read endpoints.
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -2629,6 +2687,8 @@ paths:
         original scan time; if omitted, defaults to the current server time.
         A scan for an archived event gets status `event_archived` with message
         `This event is archived.`, even when `scanned_at` is before the archive time.
+        A Draft Attendee (never fully registered) gets status `error` with message `Registration incomplete.`;
+        a once-registered Attendee that is now incomplete is admitted and the result carries `incomplete: true`.
       requestBody:
         required: true
         content:
@@ -3156,8 +3216,7 @@ paths:
       summary: Search across the caller's accessible records
       description: >
         Results are grouped by category. Pass `category` to page through one group. Scoped to
-        `event_id` unless `all_events` is true. Checkers get no results from archived events.
-        Throttled to 60 requests per minute.
+        `event_id` unless `all_events` is true. Throttled to 60 requests per minute.
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 2, maxLength: 150 } }
         - { name: event_id, in: query, schema: { type: integer, minimum: 1 } }
@@ -3232,6 +3291,8 @@ paths:
       tags: [Public]
       summary: List unions for public forms
       security: []
+      parameters:
+        - &publicEventParam { name: event, in: query, description: "Event invite token. Limits the list to the event's organization; 404 when unknown.", schema: { type: string } }
       responses:
         "200":
           description: Unions with id, name, code and organization_id
@@ -3257,6 +3318,7 @@ paths:
       security: []
       parameters:
         - { name: union_id, in: query, schema: { type: integer } }
+        - *publicEventParam
       responses:
         "200":
           description: Missions with id, name and code
@@ -3273,6 +3335,35 @@ paths:
                         id: { type: integer }
                         name: { type: string }
                         code: { type: string, nullable: true }
+
+  /public/churches:
+    get:
+      tags: [Public]
+      summary: List churches of a mission for public forms
+      description: Verified and unverified churches alike. Never exposes the verification flag.
+      security: []
+      parameters:
+        - { name: mission_id, in: query, required: true, schema: { type: integer } }
+        - { name: event, in: query, required: true, description: "Event invite token. Limits the list to the event's organization; 404 when unknown.", schema: { type: string } }
+      responses:
+        "200":
+          description: Churches with id, name, address and mission_id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        address: { type: string, nullable: true }
+                        mission_id: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /public/programs/{publicSlug}:
     get:
@@ -3299,10 +3390,7 @@ paths:
     get:
       tags: [Public]
       summary: Get event landing page data by invite token
-      description: >
-        404 unless the event is published. An archived event returns 200 with `closed: true`
-        whatever its status (except draft, which stays 404); the landing page then shows a
-        closed state and hides registration.
+      description: 404 unless the event is published.
       security: []
       responses:
         "200":
@@ -3312,31 +3400,100 @@ paths:
               schema:
                 type: object
                 properties:
-                  data:
-                    type: object
-                    additionalProperties: true
-                    properties:
-                      closed:
-                        type: boolean
-                        description: True while the event is archived; registration is refused.
+                  data: { type: object, additionalProperties: true }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /public/event/{eventInviteToken}/register:
+  /public/event/{eventInviteToken}/registration:
     parameters:
       - $ref: "#/components/parameters/EventInviteToken"
-    post:
+    get:
       tags: [Public]
-      summary: Register the signed-in user for the event
+      summary: Resume the registration wizard
       description: >
-        Creates the user's attendee record if needed, then the registration, and queues the ID
-        card. 201 for a new registration, 200 if already registered. 404 unless the event is published.
-        403 with "This event is archived." when the event is archived; nothing is created.
+        Returns the signed-in user's Attendee for the event (`data` null before the first Basic info save)
+        and per-step completeness in `steps` (step => missing items). `status` is `verify_email` (409) when an
+        Attendee without a login holds the user's unverified email; verifying links it. 404 unless published.
       responses:
-        "200": { $ref: "#/components/responses/EventRegistrationItem" }
-        "201": { $ref: "#/components/responses/EventRegistrationItem" }
+        "200": { description: Attendee and steps }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "`status: verify_email`" }
+
+  /public/event/{eventInviteToken}/registration/basic-info:
+    parameters:
+      - $ref: "#/components/parameters/EventInviteToken"
+    put:
+      tags: [Public]
+      summary: Save Basic info
+      description: >
+        The first save creates the Draft Attendee (no QR token); later saves update the same row, also from
+        another device. The email always comes from the account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [first_name, last_name, mobile_no]
+              properties:
+                first_name: { type: string, maxLength: 100 }
+                middle_name: { type: string, nullable: true, maxLength: 100 }
+                last_name: { type: string, maxLength: 100 }
+                mobile_no: { type: string, maxLength: 20 }
+      responses:
+        "200": { description: Attendee and steps }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "`status: verify_email`" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /public/event/{eventInviteToken}/registration/territory:
+    parameters:
+      - $ref: "#/components/parameters/EventInviteToken"
+    put:
+      tags: [Public]
+      summary: Save Territory
+      description: >
+        Union-level needs the union; mission-level needs union, mission and church, each inside its parent.
+        422 when Basic info was not saved yet. Regenerates the ID card when a registered Attendee's territory changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [organization_level, union_id]
+              properties:
+                organization_level: { type: string, enum: [union, mission] }
+                union_id: { type: integer }
+                mission_id: { type: integer, nullable: true }
+                church_id: { type: integer, nullable: true }
+      responses:
+        "200": { description: Attendee and steps }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "`status: verify_email`" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /public/event/{eventInviteToken}/registration/finish:
+    post:
+      tags: [Public]
+      summary: Finish registration
+      description: >
+        Records the confirmation and runs the completeness rule. On the first full registration sets
+        `registration_completed_at`, `first_registered_at` and the QR token, and queues the ID card.
+        422 with the missing step names in `errors.steps` when incomplete.
+      parameters:
+        - $ref: "#/components/parameters/EventInviteToken"
+      responses:
+        "200": { description: Attendee and steps }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "`status: verify_email`" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /public/attendee-claims/status:
     post:
@@ -3361,7 +3518,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  status: { type: string, enum: [unclaimed, claimed] }
+                  status:
+                    type: string
+                    enum: [unclaimed, claimed, unavailable]
+                    description: "`unavailable` when the Attendee has an email and cannot be claimed by QR."
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { description: Too many requests }
@@ -3371,8 +3531,8 @@ paths:
       tags: [Public]
       summary: Verify identity for an unclaimed ID card QR code
       description: >
-        Matches name, union and mission against the attendee behind `qr_token` and returns a
-        short-lived claim token. Throttled to 10 requests per minute plus a per-registration attempt limit.
+        Matches name, union and mission against the Attendee behind `qr_token` and returns a
+        short-lived claim token. Refused (422 on `qr_token`) when the Attendee has a login or an email. Throttled to 10 requests per minute plus a per-registration attempt limit.
       security: []
       requestBody:
         required: true
@@ -3398,7 +3558,7 @@ paths:
                   claim_token: { type: string }
                   requires_email:
                     type: boolean
-                    description: True when the attendee has no email and must verify one before completing.
+                    description: Always true; the Attendee has no email, so one must be verified before completing.
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { description: Too many requests }
 
@@ -3457,9 +3617,9 @@ paths:
       tags: [Public]
       summary: Complete a QR claim by creating the account
       description: >
-        Creates a user with the given password, links it to the attendee and returns an API token.
-        Sends email verification when the email was not verified during the claim. Throttled to 6
-        requests per minute.
+        Creates a user with the given password and the email verified during the claim, links it to the
+        scanned Attendee (the email is saved on it), then links every other Attendee without a login that
+        has that email. Returns an API token. Throttled to 6 requests per minute.
       security: []
       requestBody:
         required: true
@@ -3615,7 +3775,6 @@ components:
       properties:
         registration_id: { type: integer, description: "EventRegistration id" }
         event: { $ref: "#/components/schemas/Event" }
-        archived: { type: boolean, description: "Always false: archived events are listed as past events" }
         qr_token: { type: string, description: "Opaque token for QR code check-in" }
         id_card_ready: { type: boolean, description: "Whether the ID card has been generated" }
         id_card_url:
@@ -3643,14 +3802,10 @@ components:
 
     PastEventData:
       type: object
-      description: Event registration data for a past or archived event (read-only).
+      description: Event registration data for a past event.
       properties:
         registration_id: { type: integer, description: "EventRegistration id" }
         event: { $ref: "#/components/schemas/Event" }
-        archived: { type: boolean, description: "True when the event is archived" }
-        qr_token: { type: string, description: "Opaque token for QR code check-in" }
-        id_card_ready: { type: boolean, description: "Whether the ID card has been generated" }
-        id_card_url: { type: string, description: "URL to download the ID card PDF" }
         attendance_summary: { $ref: "#/components/schemas/AttendanceSummary" }
 
     EventRegistrationStats:
@@ -3669,8 +3824,8 @@ components:
       description: Aggregate statistics for the attendee.
       properties:
         total_events_registered: { type: integer, description: "Total events the attendee is registered for" }
-        total_upcoming_events: { type: integer, description: "Non-archived events with end_date >= today" }
-        total_past_events: { type: integer, description: "Events with end_date < today, plus archived events" }
+        total_upcoming_events: { type: integer, description: "Events with end_date >= today" }
+        total_past_events: { type: integer, description: "Events with end_date < today" }
         total_sessions_attended: { type: integer, description: "Total sessions checked in to" }
         total_sessions_available: { type: integer, description: "Total sessions across past events" }
         attendance_rate: { type: number, format: float, description: "Percentage (0-100) of available sessions attended, rounded to 1 decimal" }
@@ -3680,9 +3835,6 @@ components:
       properties:
         profile: { $ref: "#/components/schemas/AttendeeProfileData" }
         account: { $ref: "#/components/schemas/AttendeeAccountData" }
-        has_upcoming_events:
-          type: boolean
-          description: "False when upcoming_events is empty, e.g. when every registered event is archived"
         upcoming_events:
           type: array
           items: { $ref: "#/components/schemas/UpcomingEventData" }
@@ -4030,7 +4182,7 @@ components:
           description: >
             Whether this checker has explicit event_checker_access rows (true = restricted to
             accessible_events_count events only; false = full organization access, the default).
-        accessible_events_count: { type: integer, description: "Accessible events that are not archived" }
+        accessible_events_count: { type: integer }
         upcoming_events:
           type: array
           description: "Next 5 upcoming accessible events, ordered by start_date ascending."
@@ -4132,6 +4284,8 @@ components:
         mission_id: { type: integer }
         name: { type: string }
         address: { type: string, nullable: true }
+        verified_at: { type: string, format: date-time, nullable: true, description: "Admin resources only (org_admin, super_admin)." }
+        verified_by: { type: integer, nullable: true, description: "Admin resources only." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -4168,6 +4322,18 @@ components:
         mobile_no: { type: string, maxLength: 20, nullable: true }
         email_address: { type: string, format: email, nullable: true }
         remarks: { type: string, nullable: true }
+        registration_status: { type: string, nullable: true, enum: [registered, incomplete, draft], description: "Null when the Attendee has no event. `draft` never fully registered (no QR token, no ID card, scans refused); `incomplete` was registered and is now incomplete (QR kept, scans admitted with an `incomplete` note)." }
+        registration_completed_at: { type: string, format: date-time, nullable: true, description: "Current state; cleared when the Attendee becomes incomplete." }
+        first_registered_at: { type: string, format: date-time, nullable: true, description: "Set once on first full registration, never cleared." }
+        registration_confirmed_at: { type: string, format: date-time, nullable: true, description: "The Finish confirmation; cleared when the Attendee becomes incomplete." }
+        completeness:
+          type: object
+          description: "Per-step state in wizard order (event Attendees only); open the first step with `complete: false`."
+          additionalProperties:
+            type: object
+            properties:
+              complete: { type: boolean }
+              missing: { type: array, items: { type: string } }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -4856,6 +5022,8 @@ components:
             type: object
             properties:
               data: { $ref: "#/components/schemas/AttendanceRecord" }
+              incomplete: { type: boolean, description: "Present and true when the Attendee was registered once and is now incomplete (scan admitted)." }
+              note: { type: string, description: "`Registration incomplete.` when `incomplete` is true." }
 
     AuditLogList:
       description: OK

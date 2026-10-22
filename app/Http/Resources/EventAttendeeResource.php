@@ -8,7 +8,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /**
  * The registration view of an Attendee row (one person in one event): `id` and `attendee_id` are both the Attendee id.
  */
-class EventRegistrationResource extends JsonResource
+class EventAttendeeResource extends JsonResource
 {
     /**
      * Transform the resource into an array.

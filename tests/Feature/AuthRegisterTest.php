@@ -2,36 +2,99 @@
 
 namespace Tests\Feature;
 
-use App\Enums\OrganizationLevel;
 use App\Enums\UserRole;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\Mission;
 use App\Models\Organization;
-use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\URL;
 use Tests\TestCase;
 
 class AuthRegisterTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_public_event_claim_keeps_approved_email_merge_flow(): void
+    public function test_sign_up_with_an_attendee_email_does_not_link_until_verified(): void
     {
-        $org = Organization::factory()->create();
-        $union = Union::factory()->for($org)->create();
-        $event = Event::factory()->for($org)->create();
-        $attendee = Attendee::factory()->for($org)->create(['email_address' => 'claim@example.com']);
+        $event = Event::factory()->create();
+        $attendee = Attendee::factory()->for($event)->create(['email_address' => 'claim@example.com']);
+
         $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
             'email' => 'claim@example.com',
-            'organization_id' => $org->id,
-            'union_id' => $union->id,
             'invite_token' => $event->invite_token,
         ]));
+
         $response->assertCreated();
-        $this->assertSame($response->json('user.id'), $attendee->fresh()->user_id);
-        $this->assertNull(User::find($attendee->fresh()->user_id)->email_verified_at);
+        $this->assertNull($attendee->fresh()->user_id);
+        $this->assertNull(User::find($response->json('user.id'))->email_verified_at);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'attendee.linked']);
+    }
+
+    public function test_verifying_the_email_links_every_attendee_with_that_email_across_events(): void
+    {
+        [$first, $second, $third] = Event::factory()->count(3)->create()->all();
+        $a = Attendee::factory()->for($first)->create(['email_address' => 'Multi@Example.com']);
+        $b = Attendee::factory()->for($second)->create(['email_address' => 'multi@example.com']);
+        $other = Attendee::factory()->for($third)->create(['email_address' => 'someone-else@example.com']);
+        $user = User::factory()->unverified()->create(['email' => 'multi@example.com', 'role' => UserRole::Attendee]);
+        $existing = Attendee::factory()->for($second)->create(['user_id' => $user->id, 'email_address' => 'elsewhere@example.com']);
+
+        $url = URL::temporarySignedRoute('verification.verify', now()->addHour(), ['id' => $user->id, 'hash' => sha1($user->email)]);
+        $this->getJson($url)->assertOk();
+
+        $this->assertSame($user->id, $a->fresh()->user_id);
+        $this->assertNull($b->fresh()->user_id, 'the user already has an Attendee in that event');
+        $this->assertNull($other->fresh()->user_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'attendee.linked', 'auditable_id' => $a->id]);
+        $this->assertDatabaseMissing('audit_logs', ['action' => 'attendee.linked', 'auditable_id' => $b->id]);
+        $this->assertNotNull($existing->fresh());
+    }
+
+    public function test_attendee_invite_link_verifies_the_email_and_links(): void
+    {
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create([
+            'email_address' => 'invited@example.com',
+            'invite_token' => Attendee::generateUniqueInviteToken(),
+            'invited_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
+            'email' => 'invited@example.com',
+            'invite_token' => $attendee->invite_token,
+        ]));
+
+        $response->assertCreated();
+        $user = User::find($response->json('user.id'));
+        $this->assertNotNull($user->email_verified_at);
+        $this->assertNull($user->organization_id);
+        $this->assertSame($user->id, $attendee->fresh()->user_id);
+        $this->assertNull($attendee->fresh()->invite_token);
+    }
+
+    public function test_attendee_invite_link_for_another_email_does_not_verify(): void
+    {
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create([
+            'email_address' => 'invited@example.com',
+            'invite_token' => Attendee::generateUniqueInviteToken(),
+            'invited_at' => now(),
+        ]);
+
+        $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
+            'email' => 'other@example.com',
+            'invite_token' => $attendee->invite_token,
+        ]));
+
+        $response->assertCreated();
+        $this->assertNull(User::find($response->json('user.id'))->email_verified_at);
+        $this->assertNull($attendee->fresh()->user_id);
+    }
+
+    public function test_unknown_invite_token_is_rejected(): void
+    {
+        $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload(['invite_token' => 'nope']))
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['invite_token']);
     }
 
     public function test_expired_personal_attendee_invite_cannot_be_claimed(): void
@@ -50,18 +113,12 @@ class AuthRegisterTest extends TestCase
 
     private function validRegistrationPayload(array $overrides = []): array
     {
-        $organization = Organization::factory()->create();
-        $union = Union::factory()->for($organization)->create();
-
         return array_merge([
             'first_name' => 'John',
             'last_name' => 'Smith',
             'email' => 'john@example.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
-            'organization_id' => $organization->id,
-            'union_id' => $union->id,
-            'organization_level' => OrganizationLevel::Union->value,
         ], $overrides);
     }
 
@@ -172,167 +229,27 @@ class AuthRegisterTest extends TestCase
         ]);
     }
 
-    public function test_registration_fails_without_organization_id(): void
+    public function test_sign_up_creates_the_user_only(): void
     {
-        $payload = $this->validRegistrationPayload();
-        unset($payload['organization_id']);
+        $payload = $this->validRegistrationPayload(['middle_name' => 'Alexander']);
 
         $response = $this->postJson('/api/v1/auth/register', $payload);
 
-        $response->assertUnprocessable()->assertJsonValidationErrors(['organization_id']);
-    }
-
-    public function test_registration_fails_without_union_id(): void
-    {
-        $payload = $this->validRegistrationPayload();
-        unset($payload['union_id']);
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertUnprocessable()->assertJsonValidationErrors(['union_id']);
-    }
-
-    public function test_registration_fails_without_organization_level(): void
-    {
-        $payload = $this->validRegistrationPayload();
-        unset($payload['organization_level']);
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertUnprocessable()->assertJsonValidationErrors(['organization_level']);
-    }
-
-    public function test_registration_succeeds_with_mission_id_optional(): void
-    {
-        $payload = $this->validRegistrationPayload();
-        // mission_id intentionally omitted
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertCreated();
-        $this->assertDatabaseHas('users', ['email' => $payload['email']]);
-    }
-
-    public function test_registration_fails_when_union_id_not_in_organization(): void
-    {
-        $organization = Organization::factory()->create();
-        $union = Union::factory()->create(); // Different organization
-
-        $payload = $this->validRegistrationPayload([
-            'organization_id' => $organization->id,
-            'union_id' => $union->id,
-        ]);
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertUnprocessable()->assertJsonValidationErrors(['union_id']);
-    }
-
-    public function test_registration_fails_when_mission_id_not_in_organization(): void
-    {
-        $organization = Organization::factory()->create();
-        $union = Union::factory()->for($organization)->create();
-        $differentOrgMission = Mission::factory()->create(); // Different organization
-
-        $payload = $this->validRegistrationPayload([
-            'organization_id' => $organization->id,
-            'union_id' => $union->id,
-            'mission_id' => $differentOrgMission->id,
-        ]);
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertUnprocessable()->assertJsonValidationErrors(['mission_id']);
-    }
-
-    public function test_self_registration_creates_attendee_record(): void
-    {
-        $payload = $this->validRegistrationPayload([
-            'middle_name' => 'Alexander',
-        ]);
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertCreated();
+        $response->assertCreated()->assertJsonMissingPath('user.attendee');
         $user = User::where('email', $payload['email'])->first();
-
-        $this->assertDatabaseHas('attendees', [
-            'user_id' => $user->id,
-            'organization_id' => $payload['organization_id'],
-            'union_id' => $payload['union_id'],
-            'mission_id' => null,
-            'organization_level' => $payload['organization_level'],
-            'first_name' => $payload['first_name'],
-            'middle_name' => $payload['middle_name'],
-            'last_name' => $payload['last_name'],
-            'email_address' => $payload['email'],
-        ]);
+        $this->assertNull($user->organization_id);
+        $this->assertDatabaseCount('attendees', 0);
     }
 
-    public function test_self_registration_with_mission_id_creates_attendee_with_mission(): void
+    public function test_sign_up_ignores_territory_fields(): void
     {
         $organization = Organization::factory()->create();
-        $union = Union::factory()->for($organization)->create();
-        $mission = Mission::factory()->for($union)->for($organization)->create();
 
-        $payload = $this->validRegistrationPayload([
+        $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
             'organization_id' => $organization->id,
-            'union_id' => $union->id,
-            'mission_id' => $mission->id,
-            'organization_level' => OrganizationLevel::Mission->value,
-        ]);
+        ]))->assertCreated();
 
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertCreated();
-        $user = User::where('email', $payload['email'])->first();
-
-        $this->assertDatabaseHas('attendees', [
-            'user_id' => $user->id,
-            'mission_id' => $mission->id,
-            'organization_level' => OrganizationLevel::Mission->value,
-        ]);
-    }
-
-    public function test_invite_token_registration_preserves_attendee_organization(): void
-    {
-        $organization = Organization::factory()->create();
-        $union = Union::factory()->for($organization)->create();
-        $mission = Mission::factory()->for($union)->for($organization)->create();
-
-        // Create an attendee with different org data
-        $oldOrganization = Organization::factory()->create();
-        $oldUnion = Union::factory()->for($oldOrganization)->create();
-        $attendee = Attendee::factory()->for($oldOrganization)->create([
-            'email_address' => 'test@example.com',
-            'union_id' => $oldUnion->id,
-            'organization_level' => OrganizationLevel::Union->value,
-            'invite_token' => Attendee::generateUniqueInviteToken(),
-            'invited_at' => now(),
-        ]);
-
-        $payload = $this->validRegistrationPayload([
-            'email' => 'test@example.com',
-            'organization_id' => $organization->id,
-            'union_id' => $union->id,
-            'mission_id' => $mission->id,
-            'organization_level' => OrganizationLevel::Mission->value,
-            'invite_token' => $attendee->invite_token,
-        ]);
-
-        $response = $this->postJson('/api/v1/auth/register', $payload);
-
-        $response->assertCreated();
-        $user = User::where('email', $payload['email'])->first();
-
-        // Claiming must not move an existing attendee into a different tenant.
-        $attendee->refresh();
-        $this->assertSame($user->id, $attendee->user_id);
-        $this->assertSame($oldOrganization->id, $attendee->organization_id);
-        $this->assertSame($oldOrganization->id, $user->organization_id);
-        $this->assertSame($oldUnion->id, $attendee->union_id);
-        $this->assertNull($attendee->mission_id);
-        $this->assertSame(OrganizationLevel::Union->value, $attendee->organization_level->value);
-        $this->assertNull($attendee->invite_token);
+        $this->assertNull(User::where('email', 'john@example.com')->value('organization_id'));
+        $this->assertDatabaseCount('attendees', 0);
     }
 }

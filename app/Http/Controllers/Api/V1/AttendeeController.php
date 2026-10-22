@@ -10,9 +10,9 @@ use App\Http\Requests\StoreAttendeeRequest;
 use App\Http\Requests\UpdateAttendeeRequest;
 use App\Http\Requests\UploadAttendeePhotoRequest;
 use App\Http\Resources\AttendeeResource;
-use App\Http\Resources\EventRegistrationResource;
+use App\Http\Resources\EventAttendeeResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
-use App\Mail\EventRegistrationWelcomeMail;
+use App\Mail\AttendeeRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AttendeeDuplicateDismissal;
 use App\Models\AuditLog;
@@ -110,6 +110,7 @@ class AttendeeController extends Controller
 
         $data['created_by'] = $request->user()->id;
         $data['registered_by'] = $request->user()->id;
+        $data['registration_confirmed_at'] = now();
 
         return DB::transaction(function () use ($data, $request) {
             $attendee = Attendee::create($data);
@@ -123,11 +124,11 @@ class AttendeeController extends Controller
 
             // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
             // if ($attendee->email_address) {
-            //     Mail::to($attendee->email_address)->send(new EventRegistrationWelcomeMail($attendee));
+            //     Mail::to($attendee->email_address)->send(new AttendeeRegistrationWelcomeMail($attendee));
             // }
 
             return AttendeeResource::make($attendee)
-                ->additional(['registration' => EventRegistrationResource::make($attendee)])
+                ->additional(['registration' => EventAttendeeResource::make($attendee)])
                 ->response()->setStatusCode(201);
         });
     }
@@ -505,13 +506,21 @@ class AttendeeController extends Controller
     }
 
     /**
-     * Export attendees in Excel or PDF format, optionally filtered by event_id.
+     * Export one event's attendees in Excel or PDF format.
      */
     public function export(Request $request)
     {
         $this->authorize('viewAny', Attendee::class);
 
-        $query = Attendee::query();
+        $request->validate([
+            'event_id' => ['required', 'integer'],
+            'format' => ['nullable', 'in:xlsx,pdf'],
+        ]);
+
+        $event = Event::findOrFail($request->integer('event_id'));
+        $this->authorize('viewStaffData', $event);
+
+        $query = Attendee::query()->where('event_id', $event->id);
 
         if (! $request->user()->isSuperAdmin()) {
             $query->where('organization_id', $request->user()->organization_id);
@@ -525,17 +534,10 @@ class AttendeeController extends Controller
             });
         }
 
-        $eventId = $request->input('event_id');
-        if ($eventId) {
-            $event = Event::findOrFail($eventId);
-            $this->authorize('viewStaffData', $event);
-            $query->where('event_id', $eventId);
-        }
-
         $attendees = $query->with(['union', 'mission', 'church'])->orderBy('last_name')->orderBy('first_name')->get();
         $format = $request->query('format', 'xlsx');
 
-        AuditLog::record('attendee.exported', null, ['format' => $format, 'event_id' => $eventId]);
+        AuditLog::record('attendee.exported', null, ['format' => $format, 'event_id' => $event->id]);
         $attendees->each(function ($attendee) {
             $organizationName = $attendee->union?->code ?? '';
             if ($attendee->organization_level !== null) {
@@ -548,7 +550,7 @@ class AttendeeController extends Controller
             $attendee->organization_name = $organizationName;
         });
         if ($format === 'pdf') {
-            return $this->exportPdf($attendees, $eventId);
+            return $this->exportPdf($attendees, $event);
         }
 
         $export = new AttendeeExport($attendees);
@@ -556,17 +558,11 @@ class AttendeeController extends Controller
         return Excel::download($export, 'attendees.xlsx');
     }
 
-    private function exportPdf($attendees, $eventId)
+    private function exportPdf($attendees, Event $event)
     {
-        $eventName = null;
-        if ($eventId) {
-            $event = Event::find($eventId);
-            $eventName = $event?->name;
-        }
-
         $pdf = Pdf::loadView('pdf.attendees-report', [
             'attendees' => $attendees,
-            'eventName' => $eventName,
+            'eventName' => $event->name,
         ]);
 
         return $pdf->download('attendees.pdf');
@@ -590,6 +586,10 @@ class AttendeeController extends Controller
         if ($attendees->pluck('organization_id')->unique()->count() !== 1
             || $attendees->map(fn (Attendee $attendee) => Attendee::normalizeName($attendee->first_name, $attendee->last_name))->unique()->count() !== 1) {
             abort(422, 'Attendees must be active duplicates from one organization.');
+        }
+
+        if ($attendees->pluck('event_id')->unique()->count() !== 1) {
+            abort(422, 'Attendees must be duplicates registered for the same event.');
         }
 
         return $attendees->sortBy('id')->values();

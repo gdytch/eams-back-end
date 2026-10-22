@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api\V1;
 
-use App\Enums\EventStatus;
 use App\Enums\SsoProvider;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
@@ -15,9 +14,9 @@ use App\Http\Requests\SsoLoginRequest;
 use App\Http\Resources\UserResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
-use App\Models\Event;
 use App\Models\User;
 use App\Models\UserIdentity;
+use App\Services\AttendeeLinkingService;
 use App\Services\AttendeeQrClaimService;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Events\Verified;
@@ -50,66 +49,17 @@ class AuthController extends Controller
         ]);
     }
 
-    public function register(RegisterRequest $request): JsonResponse
+    public function register(RegisterRequest $request, AttendeeLinkingService $linking): JsonResponse
     {
         $data = $request->validated();
 
-        return DB::transaction(function () use ($data, $request) {
-            // Resolve the invited attendee if an attendee invite token is provided
-            $attendee = null;
-            $event = null;
-            $attendeeMatchMethod = null; // 'personal_token' or 'email_merge'
-
-            if ($request->filled('invite_token')) {
-                // First check if it's an attendee invite token
-                $attendee = Attendee::withoutGlobalScopes()
-                    ->where('invite_token', $data['invite_token'])
-                    ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
-                    ->whereNull('user_id')
-                    ->lockForUpdate()
-                    ->first();
-
-                // If not found, check if it's an event invite token
-                if ($attendee === null) {
-                    $event = Event::withoutGlobalScopes()
-                        ->where('invite_token', $data['invite_token'])
-                        ->first();
-
-                    // If event token, try to find unclaimed attendee by email in same org
-                    if ($event !== null) {
-                        $attendee = Attendee::withoutGlobalScopes()
-                            ->where('email_address', $data['email'])
-                            ->whereNull('user_id')
-                            ->lockForUpdate()
-                            ->first();
-
-                        if ($attendee !== null && $attendee->organization_id !== null && $attendee->organization_id !== $event->organization_id) {
-                            // Different org, don't merge
-                            $attendee = null;
-                        } elseif ($attendee !== null) {
-                            $attendeeMatchMethod = 'email_merge';
-                        }
-                    }
-                } else {
-                    $attendeeMatchMethod = 'personal_token';
-                }
-
-                if ($attendee === null && $event === null) {
-                    throw ValidationException::withMessages(['invite_token' => 'Invalid or expired invite.']);
-                }
-            }
+        return DB::transaction(function () use ($data, $linking) {
+            // Using an Attendee invite link for the invited address verifies that address.
+            $inviteVerifiesEmail = $linking->inviteVouchesForEmail($data['invite_token'] ?? null, $data['email']);
 
             $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
                 ->filter()
                 ->implode(' '));
-
-            $organizationId = $attendee?->organization_id ?? $data['organization_id'];
-
-            // Mark email verified only if attendee email matches by personal token
-            $emailVerifiedAt = null;
-            if ($attendeeMatchMethod === 'personal_token' && $attendee && $attendee->email_address === $data['email']) {
-                $emailVerifiedAt = now();
-            }
 
             $user = User::create([
                 'name' => $name,
@@ -119,48 +69,11 @@ class AuthController extends Controller
                 'middle_name' => $data['middle_name'] ?? null,
                 'last_name' => $data['last_name'],
                 'role' => UserRole::Attendee,
-                'organization_id' => $organizationId,
-                'email_verified_at' => $emailVerifiedAt,
+                'email_verified_at' => $inviteVerifiesEmail ? now() : null,
             ]);
 
-            // Link the user to the attendee and clear the invite token, or create a new attendee for self-registered users
-            if ($attendee) {
-                $attendeeData = [
-                    'user_id' => $user->id,
-                    'invite_token' => null,
-                ];
-                if ($data['organization_id'] === $attendee->organization_id) {
-                    $attendeeData += [
-                        'organization_level' => $data['organization_level'],
-                        'union_id' => $data['union_id'],
-                        'mission_id' => $data['mission_id'] ?? null,
-                    ];
-                }
-                $attendee->update($attendeeData);
+            $linking->linkVerifiedEmail($user);
 
-                if ($attendeeMatchMethod === 'personal_token') {
-                    AuditLog::record('attendee.invite_claimed', $attendee, ['user_id' => $user->id]);
-                } else {
-                    AuditLog::record('attendee.email_merged', $attendee, ['user_id' => $user->id]);
-                }
-            } else {
-                // Self-registration: create a new attendee linked to this user
-                $attendee = Attendee::create([
-                    'user_id' => $user->id,
-                    'organization_id' => $organizationId,
-                    'organization_level' => $data['organization_level'],
-                    'union_id' => $data['union_id'],
-                    'mission_id' => $data['mission_id'] ?? null,
-                    'first_name' => $data['first_name'],
-                    'middle_name' => $data['middle_name'] ?? null,
-                    'last_name' => $data['last_name'],
-                    'email_address' => $data['email'],
-                ]);
-
-                AuditLog::record('attendee.self_registered', $attendee, ['user_id' => $user->id]);
-            }
-
-            // Only fire Registered event if email is not yet verified (needs verification flow)
             if ($user->email_verified_at === null) {
                 event(new Registered($user));
             }
@@ -186,7 +99,7 @@ class AuthController extends Controller
         ]);
     }
 
-    public function sso(SsoLoginRequest $request, string $provider, AttendeeQrClaimService $claims): JsonResponse
+    public function sso(SsoLoginRequest $request, string $provider, AttendeeQrClaimService $claims, AttendeeLinkingService $linking): JsonResponse
     {
         $data = $request->validated();
         $ssoProvider = SsoProvider::tryFrom($provider);
@@ -201,175 +114,52 @@ class AuthController extends Controller
         abort_if(blank($socialiteUser->getEmail()), 422, 'Email permission is required to sign in.');
 
         if ($request->filled('claim_token')) {
-            return $this->claimWithSso($request->validated('claim_token'), $socialiteUser, $ssoProvider, $claims);
+            return $this->claimWithSso($request->validated('claim_token'), $socialiteUser, $ssoProvider, $claims, $linking);
         }
 
-        return DB::transaction(function () use ($data, $socialiteUser, $ssoProvider, $request) {
+        return DB::transaction(function () use ($data, $socialiteUser, $ssoProvider, $linking) {
             $providerId = $socialiteUser->getId();
+            $wasNewUser = false;
 
-            // Try to find existing identity
             $identity = UserIdentity::where('provider', $ssoProvider->value)
                 ->where('provider_id', $providerId)
                 ->first();
 
             if ($identity !== null) {
                 $user = $identity->user;
-                $wasNewUser = false;
             } else {
-                // Try to match by email (for account linking)
                 $user = User::withoutGlobalScopes()
                     ->where('email', $socialiteUser->getEmail())
                     ->first();
 
-                if ($user !== null && ! $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser)) {
+                $providerVouchesForEmail = $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser);
+
+                if ($user !== null && ! $providerVouchesForEmail) {
                     throw ValidationException::withMessages([
                         'email' => 'This provider has not verified your email. Sign in with your existing account or reset its password.',
                     ]);
                 }
 
                 if ($user === null) {
-                    // Check if email exists in attendee table
-                    $attendee = Attendee::withoutGlobalScopes()
-                        ->where('email_address', $socialiteUser->getEmail())
-                        ->whereNull('user_id')
-                        ->lockForUpdate()
-                        ->first();
+                    $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
 
-                    // Check invite token (can be event or attendee token)
-                    $inviteEvent = null;
-                    $inviteAttendee = null;
-
-                    if ($request->filled('invite_token')) {
-                        // First check if it's an event invite token
-                        $inviteEvent = Event::withoutGlobalScopes()
-                            ->where('invite_token', $request->validated('invite_token'))
-                            ->where('status', EventStatus::Published)
-                            ->first();
-
-                        // If not found, check if it's an attendee invite token
-                        if ($inviteEvent === null) {
-                            $inviteAttendee = Attendee::withoutGlobalScopes()
-                                ->where('invite_token', $request->validated('invite_token'))
-                                ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
-                                ->whereNull('user_id')
-                                ->lockForUpdate()
-                                ->first();
-                        }
-                    }
-
-                    if ($attendee !== null && ! $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser) && $inviteEvent === null && $inviteAttendee === null) {
-                        throw ValidationException::withMessages([
-                            'email' => 'This provider has not verified your email. Use your invitation link or sign in with your existing account.',
-                        ]);
-                    }
-
-                    $hasRegistrationTerritory = $request->filled('organization_id')
-                        && $request->filled('organization_level')
-                        && $request->filled('union_id');
-
-                    // Validate: either attendee exists, a valid invite was provided, or the registration dialog supplied a territory
-                    if ($attendee === null && $inviteEvent === null && $inviteAttendee === null && ! $hasRegistrationTerritory) {
-                        throw ValidationException::withMessages([
-                            'email' => 'This email is not registered. Please contact your administrator.',
-                        ]);
-                    }
-
-                    // Resolve organization: prioritize attendee, then invite (event or attendee), then self-registration territory
-                    $organizationId = $attendee?->organization_id
-                        ?? $inviteAttendee?->organization_id
-                        ?? $inviteEvent?->organization_id
-                        ?? $data['organization_id'];
-
-                    // An existing attendee record is the authoritative source for the user's name.
-                    $attendeeToLink = $attendee ?? $inviteAttendee;
-                    $name = $attendeeToLink !== null
-                        ? trim(collect([$attendeeToLink->first_name, $attendeeToLink->middle_name, $attendeeToLink->last_name])->filter()->implode(' '))
-                        : ($socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@'));
-                    $firstName = $attendeeToLink?->first_name ?? (Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@'));
-                    $middleName = $attendeeToLink?->middle_name;
-                    $lastName = $attendeeToLink?->last_name ?? (Str::contains($name, ' ') ? Str::after($name, ' ') : '');
+                    // An Attendee invite link for this address verifies it even when the provider does not.
+                    $inviteVerifiesEmail = $linking->inviteVouchesForEmail($data['invite_token'] ?? null, $socialiteUser->getEmail());
 
                     $user = User::create([
                         'name' => $name,
                         'email' => $socialiteUser->getEmail(),
                         'password' => Hash::make(Str::random(40)),
-                        'first_name' => $firstName,
-                        'middle_name' => $middleName,
-                        'last_name' => $lastName,
+                        'first_name' => Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@'),
+                        'middle_name' => null,
+                        'last_name' => Str::contains($name, ' ') ? Str::after($name, ' ') : '',
                         'role' => UserRole::Attendee,
-                        'organization_id' => $organizationId,
-                        'email_verified_at' => $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser) ? now() : null,
+                        'email_verified_at' => $providerVouchesForEmail || $inviteVerifiesEmail ? now() : null,
                     ]);
 
-                    // Link the user to the attendee if found (either from pre-existing attendee or invite attendee)
-                    if ($attendeeToLink !== null) {
-                        $attendeeToLink->update([
-                            'user_id' => $user->id,
-                            'invite_token' => null,
-                        ]);
-                        $this->syncSsoTerritory($request, $attendeeToLink);
-
-                        AuditLog::record('attendee.sso_merged', $attendeeToLink, ['user_id' => $user->id]);
-                    } else {
-                        // Self-registration: create a new attendee linked to this user
-                        $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
-                        $firstName = Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@');
-                        $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
-                        $attendee = Attendee::create([
-                            'user_id' => $user->id,
-                            'organization_id' => $organizationId,
-                            'organization_level' => $data['organization_level'] ?? null,
-                            'union_id' => $data['union_id'] ?? null,
-                            'mission_id' => $data['mission_id'] ?? null,
-                            'first_name' => $firstName,
-                            'middle_name' => $data['middle_name'] ?? null,
-                            'last_name' => $lastName,
-                            'email_address' => $socialiteUser->getEmail(),
-                        ]);
-
-                        AuditLog::record('attendee.self_registered', $attendee, ['user_id' => $user->id]);
-                    }
-
                     $wasNewUser = true;
-                } else {
-                    $wasNewUser = false;
-
-                    // Check if existing user should be merged with an attendee
-                    $attendee = Attendee::withoutGlobalScopes()
-                        ->where('email_address', $user->email)
-                        ->whereNull('user_id')
-                        ->lockForUpdate()
-                        ->first();
-
-                    if ($attendee !== null) {
-                        // Link the attendee to the user if organization_id matches or user doesn't have one
-                        $this->mergeExistingSsoAttendee($request, $user, $attendee);
-                    } elseif (
-                        $request->filled('organization_id')
-                        && $request->filled('organization_level')
-                        && $request->filled('union_id')
-                    ) {
-                        // Self-registration: create a new attendee linked to this user
-                        $name = $socialiteUser->getName() ?? Str::before($socialiteUser->getEmail(), '@');
-                        $firstName = Str::before($name, ' ') ?: Str::before($socialiteUser->getEmail(), '@');
-                        $lastName = Str::contains($name, ' ') ? Str::after($name, ' ') : '';
-                        $attendee = Attendee::create([
-                            'user_id' => $user->id,
-                            'organization_id' => $data['organization_id'],
-                            'organization_level' => $data['organization_level'],
-                            'union_id' => $data['union_id'],
-                            'mission_id' => $data['mission_id'] ?? null,
-                            'first_name' => $firstName,
-                            'middle_name' => $data['middle_name'] ?? null,
-                            'last_name' => $lastName,
-                            'email_address' => $socialiteUser->getEmail(),
-                        ]);
-
-                        AuditLog::record('attendee.self_registered', $attendee, ['user_id' => $user->id]);
-                    }
                 }
 
-                // Create the identity link
                 UserIdentity::create([
                     'user_id' => $user->id,
                     'provider' => $ssoProvider->value,
@@ -378,26 +168,19 @@ class AuthController extends Controller
                 ]);
             }
 
-            $this->syncAttendeeNameToUser($user);
-
-            // Set organization_id from invite_token if currently null
-            if ($user->organization_id === null && $request->filled('invite_token')) {
-                $event = Event::withoutGlobalScopes()
-                    ->where('invite_token', $request->validated('invite_token'))
-                    ->where('status', EventStatus::Published)
-                    ->first();
-
-                if ($event !== null) {
-                    $user->update(['organization_id' => $event->organization_id]);
-                }
-            }
-
-            // Mark email as verified if not already
             if ($user->email_verified_at === null
                 && strcasecmp($user->email, (string) $socialiteUser->getEmail()) === 0
                 && $this->hasAuthoritativeEmail($ssoProvider, $socialiteUser)) {
-                $user->update(['email_verified_at' => now()]);
+                // Whoever signed up with this address before the owner proved it must not keep access.
+                $user->forceFill([
+                    'email_verified_at' => now(),
+                    'password' => Hash::make(Str::random(40)),
+                ])->save();
+                $user->tokens()->delete();
             }
+
+            $linking->linkVerifiedEmail($user);
+            $this->syncAttendeeNameToUser($user->load('attendee'));
 
             if ($user->email_verified_at === null && $wasNewUser) {
                 event(new Registered($user));
@@ -410,47 +193,8 @@ class AuthController extends Controller
                 'token' => $user->createToken('api')->plainTextToken,
                 'user' => UserResource::make($user),
                 'is_new_user' => $wasNewUser,
-
             ], $wasNewUser ? 201 : 200);
         });
-    }
-
-    private function syncSsoTerritory(SsoLoginRequest $request, Attendee $attendee): void
-    {
-        if ($request->validated('organization_id') !== $attendee->organization_id) {
-            return;
-        }
-
-        foreach (['organization_level', 'union_id', 'mission_id'] as $field) {
-            if ($request->filled($field)) {
-                $attendee->update([$field => $request->validated($field)]);
-            }
-        }
-    }
-
-    private function mergeExistingSsoAttendee(SsoLoginRequest $request, User $user, Attendee $attendee): void
-    {
-        if ($user->organization_id !== null && $user->organization_id !== $attendee->organization_id) {
-            return;
-        }
-
-        $user->update([
-            'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
-            'first_name' => $attendee->first_name,
-            'middle_name' => $attendee->middle_name,
-            'last_name' => $attendee->last_name,
-        ]);
-        $attendee->update([
-            'user_id' => $user->id,
-            'invite_token' => null,
-        ]);
-        $this->syncSsoTerritory($request, $attendee);
-
-        if ($user->organization_id === null) {
-            $user->update(['organization_id' => $attendee->organization_id]);
-        }
-
-        AuditLog::record('attendee.sso_merged', $attendee, ['user_id' => $user->id]);
     }
 
     private function hasAuthoritativeEmail(SsoProvider $provider, mixed $socialiteUser): bool
@@ -481,7 +225,7 @@ class AuthController extends Controller
         ]);
     }
 
-    private function claimWithSso(string $claimToken, $socialiteUser, SsoProvider $provider, AttendeeQrClaimService $claims): JsonResponse
+    private function claimWithSso(string $claimToken, $socialiteUser, SsoProvider $provider, AttendeeQrClaimService $claims, AttendeeLinkingService $linking): JsonResponse
     {
         $claim = $claims->claim($claimToken);
         if ($claim === null) {
@@ -492,23 +236,27 @@ class AuthController extends Controller
             throw ValidationException::withMessages(['claim_token' => 'Too many attempts. Scan your ID card again.']);
         }
 
-        $result = DB::transaction(function () use ($claim, $socialiteUser, $provider) {
+        $result = DB::transaction(function () use ($claim, $socialiteUser, $provider, $linking) {
             $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($claim['attendee_id']);
             if ($attendee === null || $attendee->user_id !== null) {
                 throw ValidationException::withMessages(['claim_token' => 'This attendee already has an account.']);
             }
 
-            $email = strtolower($socialiteUser->getEmail());
-            if (filled($attendee->email_address) && strtolower($attendee->email_address) !== $email) {
-                throw ValidationException::withMessages(['email' => 'Use the email address saved with your attendee record. You can ask the event coordinator for assistance.']);
+            if (filled($attendee->email_address)) {
+                throw ValidationException::withMessages(['claim_token' => 'This attendee already has an email address.']);
             }
 
-            if (blank($attendee->email_address) && (! ($claim['email_verified'] ?? false) || strtolower($claim['email'] ?? '') !== $email)) {
+            $email = strtolower($socialiteUser->getEmail());
+            if (! ($claim['email_verified'] ?? false) || strtolower($claim['email'] ?? '') !== $email) {
                 throw ValidationException::withMessages(['email' => 'Verify this email before continuing with SSO.']);
             }
 
             if (User::withoutGlobalScopes()->where('email', $email)->exists()) {
                 throw ValidationException::withMessages(['email' => 'This email address already has an account.']);
+            }
+
+            if ($linking->emailTakenInEvent($email, $attendee)) {
+                throw ValidationException::withMessages(['email' => 'This email address is already registered for this event. Sign in with it and verify it instead.']);
             }
 
             if (UserIdentity::query()->where('provider', $provider->value)->where('provider_id', $socialiteUser->getId())->exists()) {
@@ -523,7 +271,6 @@ class AuthController extends Controller
                 'middle_name' => $attendee->middle_name,
                 'last_name' => $attendee->last_name,
                 'role' => UserRole::Attendee,
-                'organization_id' => $attendee->organization_id,
                 'email_verified_at' => now(),
             ]);
 
@@ -532,6 +279,7 @@ class AuthController extends Controller
                 'email_address' => $email,
                 'invite_token' => null,
             ]);
+            $linking->linkVerifiedEmail($user);
 
             UserIdentity::create([
                 'user_id' => $user->id,
@@ -599,7 +347,7 @@ class AuthController extends Controller
         });
     }
 
-    public function verifyEmail(Request $request, string $id, string $hash): JsonResponse
+    public function verifyEmail(Request $request, string $id, string $hash, AttendeeLinkingService $linking): JsonResponse
     {
         $user = User::withoutGlobalScopes()->findOrFail($id);
 
@@ -611,7 +359,10 @@ class AuthController extends Controller
             return response()->json(['message' => 'Email already verified.'], 200);
         }
 
-        $user->markEmailAsVerified();
+        DB::transaction(function () use ($user, $linking): void {
+            $user->markEmailAsVerified();
+            $linking->linkVerifiedEmail($user);
+        });
 
         event(new Verified($user));
 
@@ -647,11 +398,11 @@ class AuthController extends Controller
         ]);
     }
 
-    public function acceptInvite(AcceptUserInviteRequest $request): JsonResponse
+    public function acceptInvite(AcceptUserInviteRequest $request, AttendeeLinkingService $linking): JsonResponse
     {
         $data = $request->validated();
 
-        return DB::transaction(function () use ($data) {
+        return DB::transaction(function () use ($data, $linking) {
             $user = User::withoutGlobalScopes()
                 ->where('invite_token', $data['token'])
                 ->where('email', $data['email'])
@@ -678,6 +429,7 @@ class AuthController extends Controller
             ]);
 
             AuditLog::record('user.invite_accepted', $user);
+            $linking->linkVerifiedEmail($user);
 
             return response()->json([
                 'token' => $user->createToken('api')->plainTextToken,

@@ -261,6 +261,7 @@ class AttendanceController extends Controller
                 $result['status'] = 'created';
                 $result['message'] = 'Attendance recorded successfully.';
                 $result['attendance_record_id'] = $attendance->id;
+                $result['incomplete'] = $attendee->registration_completed_at === null;
             } catch (ValidationException $e) {
                 // Handle validation exceptions (already checked in, session not open, etc).
                 $messages = $e->errors();
@@ -317,6 +318,10 @@ class AttendanceController extends Controller
         bool $isBatchSync = false,
         bool $overrideFlag = false
     ) {
+        if ($attendee->first_registered_at === null) {
+            throw ValidationException::withMessages(['attendee_id' => 'Registration incomplete.']);
+        }
+
         $existing = AttendanceRecord::where('attendee_id', $attendee->id)
             ->where('event_session_id', $session->id)
             ->first();
@@ -360,6 +365,7 @@ class AttendanceController extends Controller
             }
 
             return AttendanceRecordResource::make($attendance->load(['attendee.union', 'attendee.mission']))
+                ->additional($attendee->registration_completed_at === null ? ['incomplete' => true, 'note' => 'Registration incomplete.'] : [])
                 ->response()
                 ->setStatusCode(201);
         });

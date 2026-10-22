@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\OrganizationLevel;
+use App\Http\Requests\Concerns\ValidatesTerritory;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
@@ -10,9 +11,27 @@ use Illuminate\Validation\Rule;
 
 class UpdateAttendeeRequest extends FormRequest
 {
+    use ValidatesTerritory;
+
     public function authorize(): Response|bool
     {
         return Gate::forUser($this->user())->inspect('update', $this->route('attendee'));
+    }
+
+    protected function currentTerritory(): ?array
+    {
+        if (! $this->hasAny(['organization_level', 'union_id', 'mission_id', 'church_id'])) {
+            return null;
+        }
+
+        $attendee = $this->route('attendee');
+
+        return [
+            'organization_level' => $this->input('organization_level', $attendee->organization_level?->value),
+            'union_id' => $this->input('union_id', $attendee->union_id),
+            'mission_id' => $this->input('mission_id', $attendee->mission_id),
+            'church_id' => $this->input('church_id', $attendee->church_id),
+        ];
     }
 
     /**

@@ -2,9 +2,11 @@
 
 namespace Database\Factories;
 
+use App\Enums\OrganizationLevel;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Services\ImageUploadService;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Http\UploadedFile;
@@ -30,10 +32,21 @@ class AttendeeFactory extends Factory
             'first_name' => fake()->firstName(),
             'middle_name' => fake()->optional()->firstName(),
             'last_name' => fake()->lastName(),
-            'mobile_no' => fake()->optional(0.7)->phoneNumber(),
-            'email_address' => fake()->optional(0.7)->safeEmail(),
+            'mobile_no' => fake()->phoneNumber(),
+            'email_address' => fake()->safeEmail(),
+            // Fully registered by default; use draft() for an Attendee that never finished.
+            'organization_level' => OrganizationLevel::Union,
+            'union_id' => fn (array $attributes) => Union::factory()->create([
+                'organization_id' => $attributes['organization_id'],
+            ])->id,
+            'registration_confirmed_at' => now(),
             'remarks' => fake()->optional(0.3)->sentence(),
         ];
+    }
+
+    public function draft(): static
+    {
+        return $this->state(['registration_confirmed_at' => null]);
     }
 
     /**

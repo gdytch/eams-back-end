@@ -9,6 +9,7 @@ use App\Models\Event;
 use App\Models\EventProgram;
 use App\Models\EventRegistration;
 use App\Models\EventSession;
+use App\Models\IdCardGridDownload;
 use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\User;
@@ -39,6 +40,42 @@ class ArchivedEventReadPathsTest extends TestCase
         $this->getJson("/api/v1/public/event/{$event->invite_token}")
             ->assertOk()
             ->assertJsonPath('data.closed', false);
+    }
+
+    public function test_public_invite_of_an_archived_event_in_any_non_draft_status_returns_the_closed_state(): void
+    {
+        foreach ([EventStatus::Completed, EventStatus::Cancelled] as $status) {
+            $event = Event::factory()->create(['status' => $status, 'archived_at' => now()]);
+
+            $this->getJson("/api/v1/public/event/{$event->invite_token}")
+                ->assertOk()
+                ->assertJsonPath('data.id', $event->id)
+                ->assertJsonPath('data.closed', true);
+        }
+    }
+
+    public function test_public_invite_of_an_archived_draft_event_is_not_found(): void
+    {
+        $event = Event::factory()->create(['status' => EventStatus::Draft, 'archived_at' => now()]);
+
+        $this->getJson("/api/v1/public/event/{$event->invite_token}")->assertNotFound();
+    }
+
+    public function test_public_invite_of_a_non_archived_unpublished_event_is_still_not_found(): void
+    {
+        $event = Event::factory()->create(['status' => EventStatus::Completed]);
+
+        $this->getJson("/api/v1/public/event/{$event->invite_token}")->assertNotFound();
+    }
+
+    public function test_self_registration_to_an_archived_unpublished_event_is_not_found(): void
+    {
+        $event = Event::factory()->create(['status' => EventStatus::Completed, 'archived_at' => now()]);
+        $user = User::factory()->attendee()->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register")
+            ->assertNotFound();
     }
 
     public function test_self_registration_to_an_archived_event_is_refused(): void
@@ -156,6 +193,9 @@ class ArchivedEventReadPathsTest extends TestCase
         foreach ($this->checkerReadPaths($event, $session) as $path) {
             $this->actingAs($checker, 'sanctum')->getJson($path)->assertNotFound();
         }
+        $this->actingAs($checker, 'sanctum')
+            ->postJson("/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all")
+            ->assertNotFound();
 
         $this->actingAs($checker, 'sanctum')->getJson('/api/v1/search?q='.urlencode($event->name).'&category=events')
             ->assertOk()
@@ -223,6 +263,41 @@ class ArchivedEventReadPathsTest extends TestCase
         }
     }
 
+    public function test_checker_dashboard_leaves_out_scans_on_archived_events(): void
+    {
+        [$checker, $event, $session] = $this->checkerAssignedToEvent();
+        $active = Event::factory()->for($event->organization)->create();
+        $activeSession = EventSession::factory()->for($active)->create();
+        $activeRegistration = EventRegistration::factory()->for($active)->for(Attendee::factory()->for($event->organization))->create();
+        $checker->accessibleEvents()->attach($active);
+        AttendanceRecord::factory()->for($event->registrations()->first())->for($session, 'eventSession')->create(['recorded_by' => $checker->id]);
+        $activeScan = AttendanceRecord::factory()->for($activeRegistration)->for($activeSession, 'eventSession')->create(['recorded_by' => $checker->id]);
+        $event->forceFill(['archived_at' => now()])->save();
+
+        $this->actingAs($checker, 'sanctum')->getJson('/api/v1/dashboard')
+            ->assertOk()
+            ->assertJsonCount(1, 'recent_scans')
+            ->assertJsonPath('recent_scans.0.id', $activeScan->id)
+            ->assertJsonPath('recent_scans.0.event_id', $active->id)
+            ->assertJsonPath('my_scan_stats.today', 1)
+            ->assertJsonPath('my_scan_stats.total', 1);
+    }
+
+    public function test_archived_event_is_hidden_from_a_checker_before_registration_ownership_is_checked(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create(['archived_at' => now()]);
+        $own = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org)->for($checker))->create();
+
+        $this->actingAs($checker, 'sanctum')
+            ->get("/api/v1/events/{$event->id}/registrations/{$own->id}/id-card")
+            ->assertNotFound();
+        $this->actingAs($checker, 'sanctum')
+            ->getJson("/api/v1/events/{$event->id}/registrations/{$own->id}/id-card-image")
+            ->assertNotFound();
+    }
+
     /**
      * @return array{0: User, 1: EventRegistration, 2: Event, 3: EventSession}
      */
@@ -265,6 +340,8 @@ class ArchivedEventReadPathsTest extends TestCase
     private function checkerReadPaths(Event $event, EventSession $session): array
     {
         $registrationId = $event->registrations()->value('id');
+        $gridDownloadId = IdCardGridDownload::query()->where('event_id', $event->id)->value('id')
+            ?? IdCardGridDownload::factory()->for($event)->create()->id;
 
         return [
             "/api/v1/events/{$event->id}",
@@ -277,6 +354,10 @@ class ArchivedEventReadPathsTest extends TestCase
             "/api/v1/events/{$event->id}/registrations/{$registrationId}",
             "/api/v1/events/{$event->id}/registrations/{$registrationId}/id-card",
             "/api/v1/events/{$event->id}/registrations/{$registrationId}/id-card-image",
+            "/api/v1/events/{$event->id}/registrations/id-cards/bulk-download?registration_ids[]={$registrationId}",
+            "/api/v1/events/{$event->id}/registrations/id-cards/download-all",
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$gridDownloadId}",
+            "/api/v1/events/{$event->id}/registrations/id-cards/grid-download/{$gridDownloadId}/file",
             "/api/v1/events/{$event->id}/program",
             "/api/v1/events/{$event->id}/program/items",
         ];

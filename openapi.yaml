@@ -3277,8 +3277,9 @@ paths:
       tags: [Public]
       summary: Get event landing page data by invite token
       description: >
-        404 unless the event is published. An archived event still returns 200 with
-        `closed: true`; the landing page then shows a closed state and hides registration.
+        404 unless the event is published. An archived event returns 200 with `closed: true`
+        whatever its status (except draft, which stays 404); the landing page then shows a
+        closed state and hides registration.
       security: []
       responses:
         "200":

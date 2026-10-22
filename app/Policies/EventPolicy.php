@@ -44,8 +44,12 @@ class EventPolicy
         return $user->isSuperAdmin();
     }
 
-    public function manageIdCards(User $user, Event $event): bool
+    public function manageIdCards(User $user, Event $event): Response|bool
     {
+        if ($event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         return ($user->isSuperAdmin() || (($user->isOrgAdmin() || $user->isChecker()) && $user->organization_id === $event->organization_id))
             && $user->hasAccessToEvent($event);
     }

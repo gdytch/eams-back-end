@@ -48,12 +48,12 @@ class EventRegistrationPolicy
 
     public function downloadIdCard(User $user, EventRegistration $eventRegistration): Response|bool
     {
-        if ($user->isAttendee()) {
-            return $eventRegistration->attendee?->user_id === $user->id;
-        }
-
         if ($eventRegistration->event->isHiddenFrom($user)) {
             return Response::denyAsNotFound();
+        }
+
+        if ($user->isAttendee()) {
+            return $eventRegistration->attendee?->user_id === $user->id;
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $eventRegistration->event->organization_id)
@@ -62,12 +62,12 @@ class EventRegistrationPolicy
 
     public function viewIdCardImage(User $user, EventRegistration $eventRegistration): Response|bool
     {
-        if ($user->isAttendee()) {
-            return $eventRegistration->attendee?->user_id === $user->id;
-        }
-
         if ($eventRegistration->event->isHiddenFrom($user)) {
             return Response::denyAsNotFound();
+        }
+
+        if ($user->isAttendee()) {
+            return $eventRegistration->attendee?->user_id === $user->id;
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $eventRegistration->event->organization_id)

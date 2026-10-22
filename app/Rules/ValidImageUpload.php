@@ -39,6 +39,12 @@ class ValidImageUpload implements ValidationRule
             return;
         }
 
+        if ($value instanceof UploadedFile && $this->maxBytes !== null && $value->getSize() > $this->maxBytes) {
+            $fail('The '.$attribute.' must not be larger than '.round($this->maxBytes / 1048576, 1).' MB.');
+
+            return;
+        }
+
         try {
             $binary = ImageInput::toBinary($value, $this->maxBytes);
         } catch (InvalidArgumentException $e) {
@@ -53,8 +59,13 @@ class ValidImageUpload implements ValidationRule
         finfo_close($finfo);
 
         if (! in_array($mime, $this->allowedMimes, true)) {
-            $fail('The '.$attribute.' must be a '.($this->allowedMimes === ['image/png'] ? 'PNG' : 'PNG or JPEG').' image.');
+            $fail('The '.$attribute.' must be '.$this->describeAllowed().'.');
 
+            return;
+        }
+
+        // A PDF has no raster dimensions to check.
+        if ($mime === 'application/pdf') {
             return;
         }
 
@@ -63,5 +74,14 @@ class ValidImageUpload implements ValidationRule
         } catch (InvalidArgumentException) {
             $fail('The '.$attribute.' has invalid or unsupported image dimensions.');
         }
+    }
+
+    private function describeAllowed(): string
+    {
+        if (in_array('application/pdf', $this->allowedMimes, true)) {
+            return 'a PNG, JPEG or PDF file';
+        }
+
+        return $this->allowedMimes === ['image/png'] ? 'a PNG image' : 'a PNG or JPEG image';
     }
 }

@@ -16,6 +16,7 @@ class AttendeeDashboardData
         return [
             'profile' => null,
             'account' => $user,
+            'has_upcoming_events' => false,
             'upcoming_events' => [],
             'past_events' => [],
             'next_event' => null,
@@ -62,6 +63,7 @@ class AttendeeDashboardData
         return [
             'profile' => $attendee,
             'account' => $user,
+            'has_upcoming_events' => $upcomingEvents->isNotEmpty(),
             'upcoming_events' => $upcomingEvents->values()->all(),
             'past_events' => $pastEvents->values()->all(),
             'next_event' => $upcomingEvents->first(),
@@ -89,11 +91,16 @@ class AttendeeDashboardData
         ];
     }
 
+    /**
+     * Split registrations into upcoming and past events. Archived events are always past, whatever their dates.
+     *
+     * @return array{0: Collection<int, Attendee>, 1: Collection<int, Attendee>}
+     */
     private function sortedRegistrations(Collection $registrations): array
     {
         [$upcoming, $past] = $registrations->partition(
-            fn (Attendee $registration): bool => $registration->event->end_date->isFuture()
-                || $registration->event->end_date->isToday()
+            fn (Attendee $registration): bool => ! $registration->event->isArchived()
+                && ($registration->event->end_date->isFuture() || $registration->event->end_date->isToday())
         );
 
         return [
@@ -104,21 +111,14 @@ class AttendeeDashboardData
 
     private function upcomingEvents(Collection $registrations): Collection
     {
-        return $registrations->map(fn (Attendee $registration): array => [
-            'registration_id' => $registration->id,
-            'event' => $registration->event,
-            'qr_token' => $registration->qr_token,
-            'id_card_ready' => $registration->id_card_generated_at !== null,
-            'id_card_url' => "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",
+        return $registrations->map(fn (Attendee $registration): array => $this->registrationEntry($registration) + [
             'next_session' => $this->nextSession($registration->event),
         ]);
     }
 
     private function pastEvents(Collection $registrations): Collection
     {
-        return $registrations->map(fn (Attendee $registration): array => [
-            'registration_id' => $registration->id,
-            'event' => $registration->event,
+        return $registrations->map(fn (Attendee $registration): array => $this->registrationEntry($registration) + [
             'attendance_summary' => [
                 'sessions_total' => $registration->event->sessions->count(),
                 'sessions_attended' => $registration->attendanceRecords
@@ -128,6 +128,23 @@ class AttendeeDashboardData
                     ->count(),
             ],
         ]);
+    }
+
+    /**
+     * Fields shared by upcoming and past entries, including what the ID card view and download need.
+     *
+     * @return array{registration_id: int, event: Event, archived: bool, qr_token: string|null, id_card_ready: bool, id_card_url: string}
+     */
+    private function registrationEntry(Attendee $registration): array
+    {
+        return [
+            'registration_id' => $registration->id,
+            'event' => $registration->event,
+            'archived' => $registration->event->isArchived(),
+            'qr_token' => $registration->qr_token,
+            'id_card_ready' => $registration->id_card_generated_at !== null,
+            'id_card_url' => "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",
+        ];
     }
 
     private function overviewStats(Collection $registrations, Collection $upcoming, Collection $past, Collection $pastEvents): array

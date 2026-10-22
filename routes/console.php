@@ -9,3 +9,4 @@ Artisan::command('inspire', function () {
 })->purpose('Display an inspiring quote');
 
 Schedule::command('app:clear-temporary-id-card-grid-downloads')->daily();
+Schedule::command('app:release-stale-draft-picks')->daily();

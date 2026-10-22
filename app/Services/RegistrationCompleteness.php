@@ -45,7 +45,7 @@ class RegistrationCompleteness
             'union_id' => 'Add your union',
             'mission_id' => 'Add your mission',
             'church_id' => 'Add your church',
-            'breakout_picks' => 'Choose your breakouts',
+            'breakout_picks' => 'Pick your breakouts',
             'confirmation' => 'Finish your registration',
         ];
 

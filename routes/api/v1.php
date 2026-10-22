@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\EventProgramBuilderController;
 use App\Http\Controllers\Api\V1\EventProgramController;
 use App\Http\Controllers\Api\V1\EventProgramItemController;
 use App\Http\Controllers\Api\V1\EventSessionController;
+use App\Http\Controllers\Api\V1\FormController;
 use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
@@ -152,6 +153,12 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'store'])->scopeBindings();
         Route::get('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'show'])->scopeBindings();
         Route::delete('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'destroy'])->scopeBindings();
+
+        Route::put('events/{event}/forms/order', [FormController::class, 'order']);
+        Route::post('events/{event}/forms/copy', [FormController::class, 'copy']);
+        Route::apiResource('events.forms', FormController::class)->scoped();
+        Route::post('events/{event}/forms/{form}/publish', [FormController::class, 'publish'])->scopeBindings();
+        Route::post('events/{event}/forms/{form}/unpublish', [FormController::class, 'unpublish'])->scopeBindings();
 
         Route::put('events/{event}/program', [EventProgramBuilderController::class, 'metadata']);
         // The breakout program has one fixed day, so it only exposes sections and parts.

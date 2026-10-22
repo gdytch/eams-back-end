@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\BreakoutProgramController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
+use App\Http\Controllers\Api\V1\EventBreakoutPickController;
 use App\Http\Controllers\Api\V1\EventController;
 use App\Http\Controllers\Api\V1\EventProgramBuilderController;
 use App\Http\Controllers\Api\V1\EventProgramController;
@@ -144,6 +145,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::apiResource('events.sessions', EventSessionController::class);
 
+        Route::put('events/{event}/breakout-picks', [EventBreakoutPickController::class, 'update']);
         Route::apiResource('events.breakouts', BreakoutController::class)->scoped();
         Route::post('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'store'])->scopeBindings();
         Route::get('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'show'])->scopeBindings();

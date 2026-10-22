@@ -31,6 +31,10 @@ class EventDashboardReport
                 'venue' => $event->venue,
                 'status' => $event->status,
             ],
+            'incomplete' => [
+                'draft' => $event->attendees()->withRegistrationStatus('draft')->count(),
+                'once_registered' => $event->attendees()->withRegistrationStatus('incomplete')->count(),
+            ],
             'attendance' => $this->attendanceSummary($event, $registrations, $sessions),
             'sessions' => $this->sessionSummary($sessions, $registrations->count()),
             'top_check_ins_by_organization' => $this->topCheckInsByOrganization($organizationRows, $attendanceRateTrend),
@@ -44,7 +48,9 @@ class EventDashboardReport
      */
     private function registrations(Event $event): Collection
     {
+        // Drafts are never Expected, so they stay out of the roster counts.
         return $event->attendees()
+            ->whereNotNull('first_registered_at')
             ->with([
                 'union',
                 'mission',

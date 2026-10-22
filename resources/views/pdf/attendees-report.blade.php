@@ -72,6 +72,7 @@
                 <th>Mobile No.</th>
                 <th>Email Address</th>
                 <th>Remarks</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody>
@@ -85,6 +86,7 @@
                     <td>{{ $attendee->mobile_no ?? '' }}</td>
                     <td>{{ $attendee->email_address ?? '' }}</td>
                     <td>{{ $attendee->remarks ?? '' }}</td>
+                    <td>{{ $attendee->registration_status_label }}</td>
                 </tr>
             @endforeach
         </tbody>

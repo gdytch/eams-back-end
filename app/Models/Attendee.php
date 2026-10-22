@@ -131,6 +131,30 @@ class Attendee extends Model
             ->collect();
     }
 
+    /**
+     * Filter by registration status: draft, incomplete or registered.
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeWithRegistrationStatus(Builder $query, string $status): void
+    {
+        match ($status) {
+            'registered' => $query->whereNotNull('registration_completed_at'),
+            'incomplete' => $query->whereNull('registration_completed_at')->whereNotNull('first_registered_at'),
+            'draft' => $query->whereNull('first_registered_at'),
+        };
+    }
+
+    public function registrationStatus(): ?string
+    {
+        return match (true) {
+            $this->event_id === null => null,
+            $this->registration_completed_at !== null => 'registered',
+            $this->first_registered_at !== null => 'incomplete',
+            default => 'draft',
+        };
+    }
+
     public function union(): BelongsTo
     {
         return $this->belongsTo(Union::class);

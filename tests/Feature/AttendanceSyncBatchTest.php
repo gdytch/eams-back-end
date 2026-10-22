@@ -194,7 +194,7 @@ class AttendanceSyncBatchTest extends TestCase
         ]);
     }
 
-    public function test_sync_batch_still_accepts_a_deprecated_event_registration_id(): void
+    public function test_sync_batch_rejects_the_removed_event_registration_id(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
@@ -205,24 +205,13 @@ class AttendanceSyncBatchTest extends TestCase
             'end_time' => now()->addHours(4)->format('H:i:s'),
         ]);
         $attendee = $this->registeredAttendee($org, $event);
-        $attendee->forceFill(['legacy_registration_id' => 4242])->save();
-        $otherEventAttendee = $this->registeredAttendee($org, Event::factory()->for($org)->create());
-        $otherEventAttendee->forceFill(['legacy_registration_id' => 4243])->save();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', [
+        $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', [
             'scans' => [
                 ['client_ref' => 'old', 'event_id' => $event->id, 'session_id' => $session->id, 'event_registration_id' => 4242, 'method' => 'manual'],
-                ['client_ref' => 'wrong-event', 'event_id' => $event->id, 'session_id' => $session->id, 'event_registration_id' => 4243, 'method' => 'manual'],
-                ['client_ref' => 'unknown', 'event_id' => $event->id, 'session_id' => $session->id, 'event_registration_id' => 9999, 'method' => 'manual'],
             ],
-        ]);
-
-        $response->assertOk()
-            ->assertJsonPath('results.0.status', 'created')
-            ->assertJsonPath('results.1.status', 'error')
-            ->assertJsonPath('results.2.status', 'error');
-        $this->assertDatabaseHas('attendance_records', ['attendee_id' => $attendee->id, 'event_session_id' => $session->id]);
-        $this->assertDatabaseCount('attendance_records', 1);
+        ])->assertUnprocessable()->assertJsonValidationErrors(['scans.0.attendee_id']);
+        $this->assertDatabaseCount('attendance_records', 0);
     }
 
     public function test_sync_batch_rejects_an_attendee_id_from_another_event(): void

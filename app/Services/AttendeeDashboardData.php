@@ -109,9 +109,28 @@ class AttendeeDashboardData
             'event' => $registration->event,
             'qr_token' => $registration->qr_token,
             'id_card_ready' => $registration->id_card_generated_at !== null,
-            'id_card_url' => "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",
+            'id_card_url' => $registration->first_registered_at === null
+                ? null
+                : "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",
+            'banner' => $this->banner($registration),
             'next_session' => $this->nextSession($registration->event),
         ]);
+    }
+
+    /** @return array{status: string, missing: array<int, string>, qr_and_id_card_work: bool}|null */
+    private function banner(Attendee $registration): ?array
+    {
+        $status = $registration->registrationStatus();
+
+        if ($status === null || $status === 'registered') {
+            return null;
+        }
+
+        return [
+            'status' => $status,
+            'missing' => app(RegistrationCompleteness::class)->missingLabels($registration),
+            'qr_and_id_card_work' => $status === 'incomplete',
+        ];
     }
 
     private function pastEvents(Collection $registrations): Collection

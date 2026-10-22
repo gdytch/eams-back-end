@@ -14,14 +14,6 @@ class EventSessionRosterEntryResource extends JsonResource
      */
     public function toArray(Request $request): array
     {
-        $attendanceStatus = 'Absent';
-
-        if ($this->session_check_in_at !== null) {
-            $attendanceStatus = 'Present';
-        } elseif (! $this->session_has_started) {
-            $attendanceStatus = 'Session Not Yet Occurred';
-        }
-
         return [
             'attendee_id' => $this->id,
             // Deprecated alias of attendee_id, removed in Release 2.
@@ -41,9 +33,13 @@ class EventSessionRosterEntryResource extends JsonResource
             'organization_level' => $this->organization_level,
             'union_code' => $this->union?->code,
             'mission_code' => $this->mission?->code,
-            'attendance_status' => $attendanceStatus,
+            'attendance_status' => $this->attendance_status?->label(),
             'check_in_at' => $this->session_check_in_at,
             'check_out_at' => $this->session_check_out_at,
+            'via_breakout' => $this->session_via_breakout_id === null ? null : [
+                'id' => $this->session_via_breakout_id,
+                'title' => $this->via_breakout_title,
+            ],
         ];
     }
 }

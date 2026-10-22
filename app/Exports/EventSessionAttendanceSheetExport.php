@@ -18,12 +18,20 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
         $this->session = $session;
     }
 
+    public function headings(): array
+    {
+        return [...parent::headings(), 'Via Breakout'];
+    }
+
     public function collection(): Collection
     {
+        $breakoutTitles = $this->event->breakouts()->pluck('title', 'id');
+
         return $this->event->attendees()
+            ->inAttendanceOf($this->session)
             ->with('union', 'mission', 'attendanceRecords')
             ->get()
-            ->map(function ($registration) {
+            ->map(function ($registration) use ($breakoutTitles) {
                 $attendanceRecord = $registration->attendanceRecords->firstWhere('event_session_id', $this->session->id);
                 $checkInAt = $attendanceRecord?->check_in_at;
                 $checkOutAt = $attendanceRecord?->check_out_at;
@@ -31,7 +39,7 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
                 $status = match (true) {
                     $checkOutAt !== null => 'Checked Out',
                     $checkInAt !== null => 'Checked In',
-                    default => 'Absent',
+                    default => $this->session->attendanceStatus(false, $registration->first_registered_at)?->label(),
                 };
 
                 return [
@@ -44,6 +52,7 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
                     'Check-in Time' => $checkInAt?->format('Y-m-d H:i:s') ?? '',
                     'Check-out Time' => $checkOutAt?->format('Y-m-d H:i:s') ?? '',
                     'Remarks' => $registration->remarks ?? '',
+                    'Via Breakout' => $breakoutTitles[$attendanceRecord?->via_breakout_id] ?? '',
                 ];
             });
     }

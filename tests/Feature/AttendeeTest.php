@@ -393,7 +393,7 @@ class AttendeeTest extends TestCase
         $account = User::factory()->attendee()->unverified()->create();
         $attendee = Attendee::factory()->for($org)->for($account, 'user')->create();
         $event = Event::factory()->for($org)->create();
-        $registration = $this->registerInEvent($event, $attendee);
+        $registration = $this->registerInEvent($event, $attendee, ['first_registered_at' => now()->subYear()]);
         $attended = EventSession::factory()->for($event)->create(['session_date' => now()->subDays(2)]);
         $absent = EventSession::factory()->for($event)->create(['session_date' => now()->subDay()]);
         $upcoming = EventSession::factory()->for($event)->create(['session_date' => now()->addDay()]);
@@ -495,7 +495,7 @@ class AttendeeTest extends TestCase
         $event = Event::factory()->for($org)->create();
 
         // Register attendee to event
-        $registration = $this->registerInEvent($event, $attendee, ['registered_by' => $checker->id]);
+        $registration = $this->registerInEvent($event, $attendee, ['registered_by' => $checker->id, 'first_registered_at' => now()->subYear()]);
 
         // Create sessions (1 past with check-in, 1 past without check-in, 1 future)
         $pastSessionWithCheckin = EventSession::factory()
@@ -532,7 +532,7 @@ class AttendeeTest extends TestCase
         $attendee = Attendee::factory()->for($org)->create(['created_by' => $checker->id]);
         $event = Event::factory()->for($org)->create();
 
-        $registration = $this->registerInEvent($event, $attendee, ['registered_by' => $checker->id]);
+        $registration = $this->registerInEvent($event, $attendee, ['registered_by' => $checker->id, 'first_registered_at' => now()->subYear()]);
 
         // Create 3 sessions: past, current/future, future
         $pastSession = EventSession::factory()

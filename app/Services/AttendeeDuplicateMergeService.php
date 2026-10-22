@@ -163,15 +163,16 @@ class AttendeeDuplicateMergeService
             ->get()
             ->groupBy('attendee_id');
 
-        $primaryRecords = $records->get($primary->id, collect())->keyBy('event_session_id');
+        $primaryRecords = $records->get($primary->id, collect())->keyBy(fn (AttendanceRecord $record) => $record->event_session_id ?? 'b'.$record->breakout_id);
         $mergedAttendanceCount = 0;
 
         foreach ($sources as $source) {
             foreach ($records->get($source->id, collect()) as $sourceRecord) {
-                $targetRecord = $primaryRecords->get($sourceRecord->event_session_id);
+                $slotKey = $sourceRecord->event_session_id ?? 'b'.$sourceRecord->breakout_id;
+                $targetRecord = $primaryRecords->get($slotKey);
                 if ($targetRecord === null) {
                     $sourceRecord->update(['attendee_id' => $primary->id]);
-                    $primaryRecords->put($sourceRecord->event_session_id, $sourceRecord);
+                    $primaryRecords->put($slotKey, $sourceRecord);
 
                     continue;
                 }

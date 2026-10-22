@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\AttendanceStatus;
 use App\Enums\OrganizationLevel;
 use App\Exports\AttendeeExport;
 use App\Http\Controllers\Controller;
@@ -413,7 +414,7 @@ class AttendeeController extends Controller
             ->values()
             ->all();
         $absentCount = $registration->event->sessions
-            ->filter(fn ($session) => $session->endsAt()->isPast() && ! in_array($session->id, $checkedInSessionIds, true))
+            ->filter(fn ($session) => $session->attendanceStatus(in_array($session->id, $checkedInSessionIds, true), $registration->first_registered_at) === AttendanceStatus::Absent)
             ->count();
 
         return [

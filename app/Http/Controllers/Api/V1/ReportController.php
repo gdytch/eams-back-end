@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\AttendanceStatus;
 use App\Exports\AttendeeSummaryExport;
 use App\Exports\EventAttendanceExport;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\EventAttendanceSummaryResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\Organization;
+use App\Services\BreakoutAttendanceReport;
 use App\Services\DashboardRegistrationInsights;
 use App\Services\EventDashboardReport;
 use App\Services\OrganizationAttendanceOverview;
@@ -21,6 +24,7 @@ use Maatwebsite\Excel\Facades\Excel;
 class ReportController extends Controller
 {
     public function __construct(
+        private BreakoutAttendanceReport $breakoutReport,
         private DashboardRegistrationInsights $registrationInsights,
         private EventDashboardReport $eventDashboardReport,
         private OrganizationAttendanceOverview $attendanceOverview,
@@ -31,23 +35,17 @@ class ReportController extends Controller
 
         $this->authorize('viewRoster', $session);
 
-        $totalRegistered = $event->attendees()->count();
-        $present = $event->attendees()
-            ->whereHas('attendanceRecords', fn ($query) => $query
-                ->where('event_session_id', $session->id)
-                ->whereNotNull('check_in_at'))
-            ->count();
+        $counts = $session->attendanceCounts($event);
 
         return response()->json([
             'event_id' => $event->id,
             'session_id' => $session->id,
-            'total_registered' => $totalRegistered,
+            'total_registered' => $event->attendees()->expectedAt($session)->count(),
             'attendance' => [
-                'present' => $present,
-                'absent' => $totalRegistered - $present,
-                'attendance_rate' => $totalRegistered > 0
-                    ? round(($present / $totalRegistered) * 100, 1)
-                    : 0,
+                'present' => $counts['present'],
+                'absent' => $counts['absent'],
+                'upcoming' => $counts['upcoming'],
+                'attendance_rate' => $counts['rate'],
             ],
         ]);
     }
@@ -79,8 +77,11 @@ class ReportController extends Controller
         // Fetch paginated attendance records with related data
         $perPage = $request->input('per_page', 10);
         $attendanceRecords = $event->attendees()
+            ->whereNotNull('first_registered_at')
             ->with([
                 'attendanceRecords.eventSession',
+                'attendanceRecords.breakout',
+                'attendanceRecords.viaBreakout',
                 'attendanceRecords.recordedBy',
                 'union',
                 'mission',
@@ -100,6 +101,9 @@ class ReportController extends Controller
                     'mission' => $registration->mission?->name ?? 'N/A',
                     'session' => $attendanceRecord->eventSession?->name ?? 'N/A',
                     'session_date' => $attendanceRecord->eventSession?->session_date?->toDateString() ?? 'N/A',
+                    'breakout' => $attendanceRecord->breakout?->title,
+                    'via_breakout' => $attendanceRecord->viaBreakout?->title,
+                    'is_walk_in' => $attendanceRecord->is_walk_in,
                     'check_in_at' => $attendanceRecord->check_in_at?->format('Y-m-d H:i:s'),
                     'check_out_at' => $attendanceRecord->check_out_at?->format('Y-m-d H:i:s'),
                     'method' => $attendanceRecord->method?->value ?? 'manual',
@@ -107,7 +111,7 @@ class ReportController extends Controller
                     'status' => match (true) {
                         $attendanceRecord->check_out_at !== null => 'Checked Out',
                         $attendanceRecord->check_in_at !== null => 'Checked In',
-                        default => 'Absent',
+                        default => 'Not checked in',
                     },
                 ]);
             }
@@ -134,6 +138,30 @@ class ReportController extends Controller
     }
 
     /**
+     * Every breakout with capacity, picks and attendance counts.
+     */
+    public function breakoutReport(Event $event)
+    {
+        $this->authorize('viewStaffData', $event);
+
+        AuditLog::record('report.breakout_attendance_viewed', $event);
+
+        return response()->json(['data' => $this->breakoutReport->overview($event)->values()]);
+    }
+
+    /**
+     * Drill-down roster of one breakout: Expected pick holders plus walk-ins.
+     */
+    public function breakoutRoster(Event $event, Breakout $breakout)
+    {
+        $this->authorize('viewStaffData', $event);
+
+        AuditLog::record('report.breakout_roster_viewed', $event, ['breakout_id' => $breakout->id]);
+
+        return response()->json(['data' => $this->breakoutReport->roster($event, $breakout)->values()]);
+    }
+
+    /**
      * Export event attendance report in Excel or PDF format.
      * Optional session_id query parameter to export only a specific session's attendance.
      */
@@ -143,23 +171,29 @@ class ReportController extends Controller
 
         $format = $request->query('format', 'xlsx');
         $sessionId = $request->query('session_id');
+        $breakoutId = $request->query('breakout_id');
 
-        $session = null;
-        if ($sessionId) {
-            $session = $event->sessions()->findOrFail($sessionId);
-        }
+        $session = $sessionId ? $event->sessions()->findOrFail($sessionId) : null;
+        $breakout = $breakoutId && ! $session ? $event->breakouts()->whereKey($breakoutId)->firstOrFail() : null;
 
         AuditLog::record('report.event_attendance_exported', $event, ['format' => $format, 'session_id' => $sessionId]);
 
-        if ($format === 'pdf') {
-            return $this->exportEventAttendanceAsPdf($event, $session);
+        // Session-only exports hold no breakout data; every other export of an event with breakouts does.
+        if (! $session && $event->breakouts()->exists()) {
+            AuditLog::record('breakout_attendance.exported', $event, ['format' => $format, 'breakout_id' => $breakout?->id]);
         }
 
-        $filename = $sessionId
-            ? "event-{$event->id}-session-{$session->id}-attendance.xlsx"
-            : "event-{$event->id}-attendance.xlsx";
+        if ($format === 'pdf') {
+            return $this->exportEventAttendanceAsPdf($event, $session, $breakout);
+        }
 
-        return Excel::download(new EventAttendanceExport($event, $session), $filename);
+        $filename = match (true) {
+            $session !== null => "event-{$event->id}-session-{$session->id}-attendance.xlsx",
+            $breakout !== null => "event-{$event->id}-breakout-{$breakout->id}-attendance.xlsx",
+            default => "event-{$event->id}-attendance.xlsx",
+        };
+
+        return Excel::download(new EventAttendanceExport($event, $session, $breakout), $filename);
     }
 
     /**
@@ -181,7 +215,7 @@ class ReportController extends Controller
         AuditLog::record('report.attendee_summary_exported', $event);
 
         return Excel::download(
-            new AttendeeSummaryExport($this->buildAttendeeSummary($event)),
+            new AttendeeSummaryExport($this->buildAttendeeSummary($event), $event->breakouts()->exists()),
             "event-{$event->id}-attendance-summary.xlsx",
         );
     }
@@ -189,17 +223,23 @@ class ReportController extends Controller
     private function buildAttendeeSummary(Event $event)
     {
         $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get();
-        $started = $sessions->filter(fn ($session) => now()->greaterThanOrEqualTo($session->startsAt()));
-        $startedCount = $started->count();
+        $breakouts = $event->breakouts()->get();
         $levelOrder = ['union' => 0, 'mission' => 1];
 
         return $event->attendees()
+            ->whereNotNull('first_registered_at')
             ->with(['union', 'mission', 'attendanceRecords' => fn ($q) => $q->whereNotNull('check_in_at')])
+            ->when($breakouts->isNotEmpty(), fn ($q) => $q->with('breakouts:breakouts.id'))
             ->get()
-            ->map(function ($registration) use ($sessions, $started, $startedCount) {
+            ->map(function ($registration) use ($sessions, $breakouts) {
                 $attendee = $registration;
-                $presentIds = $registration->attendanceRecords->pluck('event_session_id')->unique();
+                $presentIds = $registration->attendanceRecords->pluck('event_session_id')->filter()->unique();
+                $breakoutPresentIds = $registration->attendanceRecords->pluck('breakout_id')->filter()->unique();
                 $present = $presentIds->count();
+                $status = fn ($session) => $session->attendanceStatus($presentIds->contains($session->id), $registration->first_registered_at);
+                $absent = $sessions->filter(fn ($s) => $status($s) === AttendanceStatus::Absent);
+                $upcoming = $sessions->filter(fn ($s) => $status($s) === AttendanceStatus::Upcoming);
+                $presentEnded = $sessions->filter(fn ($s) => $presentIds->contains($s->id) && $s->hasEnded() && $s->isExpected($registration->first_registered_at))->count();
 
                 return [
                     'event_registration_id' => $registration->id,
@@ -214,13 +254,20 @@ class ReportController extends Controller
                     'mission' => $attendee->mission,
                     'present' => $present,
                     'present_sessions' => $sessions->whereIn('id', $presentIds)->pluck('name')->values(),
-                    'absent_sessions' => $started->whereNotIn('id', $presentIds)->pluck('name')->values(),
-                    'remaining_sessions' => $sessions->diff($started)->whereNotIn('id', $presentIds)->pluck('name')->values(),
-                    'absent' => $started->whereNotIn('id', $presentIds)->count(),
-                    'remaining' => $sessions->diff($started)->whereNotIn('id', $presentIds)->count(),
-                    'attendance_rating' => $startedCount > 0 ? round($present / $startedCount * 100, 1) : 0,
+                    'absent_sessions' => $absent->pluck('name')->values(),
+                    'remaining_sessions' => $upcoming->pluck('name')->values(),
+                    'absent' => $absent->count(),
+                    'remaining' => $upcoming->count(),
+                    // Breakouts stay out of the sessions-only rating; Absent counts held picks that ended unattended.
+                    'breakout_present' => $breakoutPresentIds->count(),
+                    'breakout_absent' => $breakouts->filter(fn ($b) => $registration->breakouts->contains('id', $b->id)
+                        && $b->attendanceStatus($breakoutPresentIds->contains($b->id), $registration->first_registered_at) === AttendanceStatus::Absent)->count(),
+                    'attendance_rating' => $presentEnded + $absent->count() > 0
+                        ? round($presentEnded / ($presentEnded + $absent->count()) * 100, 1)
+                        : 0,
                 ];
             })
+            ->reject(fn ($row) => $row['present'] + $row['absent'] + $row['remaining'] + $row['breakout_present'] + $row['breakout_absent'] === 0)
             ->sort(fn ($a, $b) => $this->summarySortKey($a, $levelOrder) <=> $this->summarySortKey($b, $levelOrder));
     }
 
@@ -259,19 +306,21 @@ class ReportController extends Controller
     {
         $sessions = $event->sessions()->with(['attendanceRecords' => fn ($q) => $q->with('attendee')])->get();
 
-        $totalRegistered = $event->attendees()->count();
+        $totalRegistered = $event->attendees()->whereNotNull('first_registered_at')->count();
         $totalCheckedIn = 0;
         $totalCheckedOut = 0;
+        $totalAbsent = 0;
 
         $sessionSummaries = [];
 
         foreach ($sessions as $session) {
-            $sessionRegistered = $event->attendees()->count();
-            $sessionCheckedIn = $session->attendanceRecords()->whereNotNull('check_in_at')->count();
+            $counts = $session->attendanceCounts($event);
+            $sessionCheckedIn = $counts['present'];
             $sessionCheckedOut = $session->attendanceRecords()->whereNotNull('check_out_at')->count();
 
             $totalCheckedIn += $sessionCheckedIn;
             $totalCheckedOut += $sessionCheckedOut;
+            $totalAbsent += $counts['absent'];
 
             $sessionSummaries[] = [
                 'session_id' => $session->id,
@@ -279,10 +328,12 @@ class ReportController extends Controller
                 'session_date' => $session->session_date->toDateString(),
                 'start_time' => $session->start_time,
                 'end_time' => $session->end_time,
-                'registered' => $sessionRegistered,
+                'registered' => $event->attendees()->expectedAt($session)->count(),
                 'checked_in' => $sessionCheckedIn,
                 'checked_out' => $sessionCheckedOut,
-                'no_show' => $sessionRegistered - $sessionCheckedIn,
+                'no_show' => $counts['absent'],
+                'upcoming' => $counts['upcoming'],
+                'attendance_rate' => $counts['rate'],
             ];
         }
 
@@ -292,16 +343,18 @@ class ReportController extends Controller
             'total_registered' => $totalRegistered,
             'total_checked_in' => $totalCheckedIn,
             'total_checked_out' => $totalCheckedOut,
-            'total_no_show' => ($totalRegistered * $sessions->count()) - $totalCheckedIn,
+            'total_no_show' => $totalAbsent,
             'sessions' => $sessionSummaries,
         ];
     }
 
-    private function exportEventAttendanceAsPdf(Event $event, ?EventSession $session = null)
+    private function exportEventAttendanceAsPdf(Event $event, ?EventSession $session = null, ?Breakout $breakout = null)
     {
-        $registrations = $event->attendees()->with('union', 'mission', 'attendanceRecords')->get();
-
-        if ($session) {
+        if ($breakout) {
+            $sessions = (new EventSession)->newCollection();
+            $filename = "event-{$event->id}-breakout-{$breakout->id}-attendance.pdf";
+            $includeDetailedRoster = true;
+        } elseif ($session) {
             // Export only the specific session - include detailed roster
             $sessions = (new EventSession)->newCollection([$session]);
             $filename = "event-{$event->id}-session-{$session->id}-attendance.pdf";
@@ -323,24 +376,22 @@ class ReportController extends Controller
         $sessionDetailedRosters = [];
 
         foreach ($sessions as $sess) {
-            $checkedIn = $sess->checked_in_count;
-            $checkedOut = $sess->checked_out_count;
-            $total = $registrations->count();
-            $noShow = $total - $checkedIn;
+            $counts = $sess->attendanceCounts($event);
 
             $sessionSummaries[] = [
                 'name' => $sess->name,
                 'date' => $sess->session_date->format('M d, Y'),
-                'total_registered' => $total,
-                'checked_in' => $checkedIn,
-                'checked_out' => $checkedOut,
-                'no_show' => $noShow,
-                'check_in_rate' => $total > 0 ? round(($checkedIn / $total) * 100, 1) : 0,
+                'total_registered' => $event->attendees()->expectedAt($sess)->count(),
+                'checked_in' => $counts['present'],
+                'checked_out' => $sess->checked_out_count,
+                'no_show' => $counts['absent'],
+                'check_in_rate' => $counts['rate'],
             ];
 
             // Only prepare detailed roster when viewing a single session
             if ($includeDetailedRoster) {
-                $sessionRoster = $registrations->map(fn ($reg) => $this->mapRegistrationToRow($reg, $reg->attendanceRecords->firstWhere('event_session_id', $sess->id)));
+                $sessionRoster = $event->attendees()->inAttendanceOf($sess)->with('union', 'mission', 'attendanceRecords.viaBreakout')->get()
+                    ->map(fn ($reg) => $this->mapRegistrationToRow($reg, $sess, $reg->attendanceRecords->firstWhere('event_session_id', $sess->id)));
 
                 $sessionDetailedRosters[] = [
                     'name' => $sess->name,
@@ -350,7 +401,21 @@ class ReportController extends Controller
             }
         }
 
+        // Breakouts follow the same detail rule as sessions: a roster only for a single export.
+        $breakoutSummaries = $session ? collect() : $this->breakoutReport->overview($event)
+            ->when($breakout, fn ($rows) => $rows->where('breakout_id', $breakout->id));
+        $breakoutRosters = $includeDetailedRoster
+            ? $event->breakouts()->whereIn('id', $breakoutSummaries->pluck('breakout_id'))->orderBy('date')->orderBy('start_time')->orderBy('id')->get()
+                ->map(fn (Breakout $b) => [
+                    'title' => $b->title,
+                    'date' => $b->date->toDateString(),
+                    'rows' => $this->breakoutReport->roster($event, $b)->all(),
+                ])->all()
+            : [];
+
         $pdf = Pdf::loadView('pdf.event-attendance-report', [
+            'breakoutSummaries' => $breakoutSummaries->values()->all(),
+            'breakoutRosters' => $breakoutRosters,
             'event' => $event,
             'sessionSummaries' => $sessionSummaries,
             'sessionDetailedRosters' => $sessionDetailedRosters,
@@ -360,7 +425,7 @@ class ReportController extends Controller
         return $pdf->download($filename);
     }
 
-    private function mapRegistrationToRow($registration, $attendanceRecord): array
+    private function mapRegistrationToRow($registration, EventSession $session, $attendanceRecord): array
     {
         $checkInAt = $attendanceRecord?->check_in_at;
         $checkOutAt = $attendanceRecord?->check_out_at;
@@ -368,10 +433,11 @@ class ReportController extends Controller
         $status = match (true) {
             $checkOutAt !== null => 'Checked Out',
             $checkInAt !== null => 'Checked In',
-            default => 'Absent',
+            default => $session->attendanceStatus(false, $registration->first_registered_at)?->label(),
         };
 
         return [
+            'via_breakout' => $attendanceRecord?->viaBreakout?->title ?? '',
             'first_name' => $registration->first_name,
             'last_name' => $registration->last_name,
             'union' => $registration->union?->code ?? 'N/A',

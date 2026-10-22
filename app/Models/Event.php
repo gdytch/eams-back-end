@@ -107,6 +107,7 @@ class Event extends Model
         return $this->pick_mode === null ? null : [$this->pick_min, $this->pick_max];
     }
 
+    /** @return HasMany<Breakout, $this> */
     public function breakouts(): HasMany
     {
         return $this->hasMany(Breakout::class);

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToOrganization;
+use App\Models\Concerns\HasAttendanceStatus;
 use Database\Factories\BreakoutFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -11,18 +12,20 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Carbon;
 
 #[Fillable(['organization_id', 'event_id', 'title', 'description', 'date', 'start_time', 'end_time', 'room', 'capacity', 'topics'])]
 class Breakout extends Model
 {
     /** @use HasFactory<BreakoutFactory> */
-    use BelongsToOrganization, HasFactory;
+    use BelongsToOrganization, HasAttendanceStatus, HasFactory;
 
     protected function casts(): array
     {
         return ['date' => 'date:Y-m-d', 'topics' => 'array', 'capacity' => 'integer'];
     }
 
+    /** @return BelongsTo<Event, $this> */
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
@@ -41,6 +44,21 @@ class Breakout extends Model
     public function program(): HasOne
     {
         return $this->hasOne(EventProgram::class);
+    }
+
+    public function startsAt(): Carbon
+    {
+        return Carbon::parse($this->date->toDateString().' '.$this->start_time);
+    }
+
+    public function endsAt(): Carbon
+    {
+        return Carbon::parse($this->date->toDateString().' '.$this->end_time);
+    }
+
+    public function checkInOpensAt(): Carbon
+    {
+        return $this->startsAt()->subMinutes($this->event->check_in_window_minutes);
     }
 
     public function isOverbooked(int $picks): bool

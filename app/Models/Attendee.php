@@ -148,6 +148,50 @@ class Attendee extends Model
         };
     }
 
+    /**
+     * Expected at a slot: fully registered for the first time before it ended.
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeExpectedAt(Builder $query, EventSession|Breakout $slot): void
+    {
+        $query->where('attendees.first_registered_at', '<', $slot->endsAt())
+            // At a breakout only current pick holders are Expected; walk-ins never are.
+            ->when($slot instanceof Breakout, fn (Builder $q) => $q->whereHas('breakouts', fn ($picks) => $picks->whereKey($slot->id)));
+    }
+
+    /**
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopePresentAt(Builder $query, EventSession|Breakout $slot): void
+    {
+        $query->whereHas('attendanceRecords', fn ($records) => $records
+            ->where(AttendanceRecord::slotColumn($slot), $slot->id)
+            ->whereNotNull('check_in_at'));
+    }
+
+    /**
+     * Expected at a slot with no check-in: Absent once it ended, Upcoming before.
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeNotCheckedInAt(Builder $query, EventSession|Breakout $slot): void
+    {
+        $query->expectedAt($slot)->whereDoesntHave('attendanceRecords', fn ($records) => $records
+            ->where(AttendanceRecord::slotColumn($slot), $slot->id)
+            ->whereNotNull('check_in_at'));
+    }
+
+    /**
+     * Who attendance reports list for a slot: Expected Attendees plus anyone checked in (walk-ins).
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeInAttendanceOf(Builder $query, EventSession|Breakout $slot): void
+    {
+        $query->where(fn ($q) => $q->expectedAt($slot)->orWhere(fn ($p) => $p->presentAt($slot)));
+    }
+
     public function registrationStatus(): ?string
     {
         return match (true) {
@@ -158,11 +202,13 @@ class Attendee extends Model
         };
     }
 
+    /** @return BelongsTo<Union, $this> */
     public function union(): BelongsTo
     {
         return $this->belongsTo(Union::class);
     }
 
+    /** @return BelongsTo<Mission, $this> */
     public function mission(): BelongsTo
     {
         return $this->belongsTo(Mission::class);

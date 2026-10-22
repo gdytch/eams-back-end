@@ -129,7 +129,7 @@ class UserController extends Controller
                 DB::afterCommit(fn () => $user->sendEmailVerificationNotification());
             }
 
-            // Sync name fields to linked attendee
+            // Sync name fields to the latest linked attendee; earlier events keep their own copy
             if ($user->attendee !== null) {
                 $attendeeUpdate = [];
                 if (isset($data['first_name'])) {
@@ -143,7 +143,7 @@ class UserController extends Controller
                 }
 
                 if ($attendeeUpdate) {
-                    $user->attendee()->update($attendeeUpdate);
+                    $user->attendee->update($attendeeUpdate);
                 }
             }
 
@@ -200,7 +200,7 @@ class UserController extends Controller
 
         // Sync photo to linked attendee (same paths, no re-processing)
         if ($user->attendee !== null) {
-            $user->attendee()->update(['photo_paths' => $paths]);
+            $user->attendee->update(['photo_paths' => $paths]);
         }
 
         AuditLog::record('user.photo_updated', $user);
@@ -221,7 +221,7 @@ class UserController extends Controller
 
         // Sync removal to linked attendee
         if ($user->attendee !== null) {
-            $user->attendee()->update(['photo_paths' => null]);
+            $user->attendee->update(['photo_paths' => null]);
         }
 
         AuditLog::record('user.photo_removed', $user);

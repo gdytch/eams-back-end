@@ -16,7 +16,6 @@ use App\Http\Resources\UserResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\User;
 use App\Models\UserIdentity;
 use App\Services\AttendeeQrClaimService;
@@ -494,12 +493,7 @@ class AuthController extends Controller
         }
 
         $result = DB::transaction(function () use ($claim, $socialiteUser, $provider) {
-            $registration = EventRegistration::query()->lockForUpdate()->find($claim['registration_id']);
-            if ($registration === null) {
-                throw ValidationException::withMessages(['claim_token' => 'Your verification session is no longer available.']);
-            }
-
-            $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($registration->attendee_id);
+            $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($claim['attendee_id']);
             if ($attendee === null || $attendee->user_id !== null) {
                 throw ValidationException::withMessages(['claim_token' => 'This attendee already has an account.']);
             }

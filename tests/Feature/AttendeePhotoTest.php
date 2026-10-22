@@ -3,11 +3,13 @@
 namespace Tests\Feature;
 
 use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -231,11 +233,12 @@ class AttendeePhotoTest extends TestCase
     {
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
+        Queue::fake();
 
         $response = $this->actingAs($admin, 'sanctum')->postJson(
             '/api/v1/attendees',
             [
-                'organization_id' => $org->id,
+                'event_id' => Event::factory()->for($org)->create()->id,
                 'first_name' => 'John',
                 'last_name' => 'Doe',
                 'profile_photo_path' => '/some/path.jpg',

@@ -17,7 +17,6 @@ use App\Models\Attendee;
 use App\Models\AttendeeDuplicateDismissal;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Services\AttendeeDashboardData;
 use App\Services\AttendeeDuplicateMergeService;
 use App\Services\AttendeeInvitationService;
@@ -64,9 +63,7 @@ class AttendeeController extends Controller
         if ($eventId = $request->input('event_id')) {
             $event = Event::findOrFail($eventId);
             $this->authorize('viewStaffData', $event);
-            $query->whereHas('registrations', function ($q) use ($eventId) {
-                $q->where('event_id', $eventId);
-            });
+            $query->where('event_id', $eventId);
         }
 
         $query->with(['union', 'mission', 'church']);
@@ -91,19 +88,17 @@ class AttendeeController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage.
+     * Store a newly created resource in storage: one Attendee, which is the person's registration in the event.
      */
     public function store(StoreAttendeeRequest $request)
     {
         $data = $request->validated();
         $override = (bool) ($data['override_duplicate'] ?? false);
-        $autoRegister = (bool) ($data['auto_register'] ?? false);
-        $eventId = $data['event_id'] ?? null;
-        unset($data['override_duplicate'], $data['auto_register'], $data['event_id']);
+        $event = $request->event();
+        unset($data['override_duplicate'], $data['auto_register']);
 
         if (! $override) {
-            $organizationId = $data['organization_id'] ?? $request->user()->organization_id;
-            $duplicates = Attendee::matchingName($data['first_name'], $data['last_name'], $organizationId);
+            $duplicates = Attendee::matchingName($data['first_name'], $data['last_name'], $event->organization_id, eventId: $event->id);
 
             if ($duplicates->isNotEmpty()) {
                 return response()->json([
@@ -114,36 +109,25 @@ class AttendeeController extends Controller
         }
 
         $data['created_by'] = $request->user()->id;
+        $data['registered_by'] = $request->user()->id;
 
-        return DB::transaction(function () use ($data, $request, $autoRegister, $eventId) {
+        return DB::transaction(function () use ($data, $request) {
             $attendee = Attendee::create($data);
 
             AuditLog::record('attendee.created', $attendee);
+            AuditLog::record('event_registration.created', $attendee, ['attendee_id' => $attendee->id]);
 
             $this->invitationService->sendIfEligible($attendee, $request->user());
 
-            $registration = null;
+            GenerateAttendeeIdCardJob::dispatch($attendee);
 
-            if ($autoRegister && $eventId) {
-                $event = Event::findOrFail($eventId);
-
-                $registration = $event->registrations()->create([
-                    'attendee_id' => $attendee->id,
-                    'registered_by' => $request->user()->id,
-                ]);
-
-                AuditLog::record('event_registration.created', $registration, ['attendee_id' => $attendee->id]);
-
-                GenerateAttendeeIdCardJob::dispatch($registration);
-
-                // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
-                // if ($attendee->email_address) {
-                //     Mail::to($attendee->email_address)->send(new EventRegistrationWelcomeMail($registration));
-                // }
-            }
+            // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
+            // if ($attendee->email_address) {
+            //     Mail::to($attendee->email_address)->send(new EventRegistrationWelcomeMail($attendee));
+            // }
 
             return AttendeeResource::make($attendee)
-                ->additional(['registration' => $registration ? EventRegistrationResource::make($registration) : null])
+                ->additional(['registration' => EventRegistrationResource::make($attendee)])
                 ->response()->setStatusCode(201);
         });
     }
@@ -172,14 +156,14 @@ class AttendeeController extends Controller
 
         $perPage = min(max($request->integer('per_page', 10), 1), 50);
         $page = max($request->integer('page', 1), 1);
-        $groupQuery = Attendee::query()->select('id', 'organization_id', 'first_name', 'last_name');
+        $groupQuery = Attendee::query()->select('id', 'organization_id', 'event_id', 'first_name', 'last_name');
 
         if ($request->user()->isSuperAdmin() && $request->filled('organization_id')) {
             $groupQuery->where('organization_id', $request->integer('organization_id'));
         }
 
         $groups = $groupQuery->get()
-            ->groupBy(fn (Attendee $attendee) => $attendee->organization_id.'|'.Attendee::normalizeName($attendee->first_name, $attendee->last_name))
+            ->groupBy(fn (Attendee $attendee) => $attendee->event_id.'|'.$attendee->organization_id.'|'.Attendee::normalizeName($attendee->first_name, $attendee->last_name))
             ->filter(fn ($attendees) => $attendees->count() > 1)
             ->map(function ($attendees) {
                 $first = $attendees->first();
@@ -201,14 +185,14 @@ class AttendeeController extends Controller
         $data = $pageGroups->map(function ($group) use ($request, $organizationNames) {
             $attendees = Attendee::query()
                 ->whereIn('id', $group->ids)
-                ->with(['union', 'mission', 'church', 'registrations.event', 'registrations.attendanceRecords'])
+                ->with(['union', 'mission', 'church', 'event', 'attendanceRecords'])
                 ->orderBy('created_at')
                 ->get();
 
             $members = $attendees->map(function (Attendee $attendee) use ($request) {
-                $attendee->setAttribute('duplicate_registration_count', $attendee->registrations->count());
-                $attendee->setAttribute('duplicate_attendance_count', $attendee->registrations->sum(fn ($registration) => $registration->attendanceRecords->count()));
-                $attendee->setAttribute('duplicate_event_names', $attendee->registrations->pluck('event.name')->filter()->unique()->values()->all());
+                $attendee->setAttribute('duplicate_registration_count', 1);
+                $attendee->setAttribute('duplicate_attendance_count', $attendee->attendanceRecords->count());
+                $attendee->setAttribute('duplicate_event_names', array_filter([$attendee->event?->name]));
                 $attendee->setAttribute('duplicate_has_linked_account', $attendee->user_id !== null);
 
                 return (new AttendeeResource($attendee))->resolve($request);
@@ -317,7 +301,7 @@ class AttendeeController extends Controller
         if ($eventId !== null) {
             $event = Event::findOrFail($eventId);
             abort_unless($request->user()->can('viewStaffData', $event)
-                || ($attendee->user_id === $request->user()->id && EventRegistration::where('attendee_id', $attendee->id)->where('event_id', $event->id)->exists()), 403);
+                || ($attendee->user_id === $request->user()->id && $attendee->event_id === $event->id), 403);
             $eventStats = $this->eventStats($attendee, $event);
         }
 
@@ -335,14 +319,11 @@ class AttendeeController extends Controller
 
     private function eventStats(Attendee $attendee, Event $event): ?array
     {
-        $registration = EventRegistration::where('attendee_id', $attendee->id)
-            ->where('event_id', $event->id)
-            ->with(['attendanceRecords', 'event.sessions'])
-            ->first();
-
-        if ($registration === null) {
+        if ($attendee->event_id !== $event->id) {
             return null;
         }
+
+        $registration = $attendee->loadMissing(['attendanceRecords', 'event.sessions']);
 
         $checkedInSessionIds = $registration->attendanceRecords
             ->filter(fn ($record) => $record->check_in_at !== null)
@@ -360,7 +341,7 @@ class AttendeeController extends Controller
             'present_count' => count($checkedInSessionIds),
             'absent_count' => $absentCount,
             'total_sessions' => $registration->event->sessions->count(),
-            'registration_count' => $attendee->registrations()->count(),
+            'registration_count' => $attendee->personRegistrations()->count(),
             'qr_token' => $registration->qr_token,
         ];
     }
@@ -369,7 +350,7 @@ class AttendeeController extends Controller
     {
         $attendee->loadMissing('user');
         $viewer = $request->user();
-        $registrationQuery = $attendee->registrations()
+        $registrationQuery = $attendee->personRegistrations()
             ->with(['event.sessions', 'attendanceRecords'])
             ->whereHas('event')
             ->orderByDesc('registered_at');
@@ -397,6 +378,11 @@ class AttendeeController extends Controller
         $override = (bool) ($data['override_duplicate'] ?? false);
         unset($data['override_duplicate']);
 
+        // A linked attendee's email mirrors the user account and is read-only.
+        if ($attendee->user_id !== null) {
+            unset($data['email_address']);
+        }
+
         $nameChanged = array_key_exists('first_name', $data) || array_key_exists('last_name', $data);
         if ($nameChanged && ! $override) {
             $firstName = $data['first_name'] ?? $attendee->first_name;
@@ -404,7 +390,7 @@ class AttendeeController extends Controller
             $normalizedName = Attendee::normalizeName($firstName, $lastName);
 
             if ($normalizedName !== Attendee::normalizeName($attendee->first_name, $attendee->last_name)) {
-                $duplicates = Attendee::matchingName($firstName, $lastName, $attendee->organization_id, $attendee->id);
+                $duplicates = Attendee::matchingName($firstName, $lastName, $attendee->organization_id, $attendee->id, $attendee->event_id);
 
                 if ($duplicates->isNotEmpty()) {
                     return response()->json([
@@ -442,7 +428,7 @@ class AttendeeController extends Controller
             }
 
             // regenerate ID card if the attendee's name, union, mission, organization_leve has changed and they have an existing registration
-            if ($attendee->registrations()->exists() && (
+            if ($attendee->event_id !== null && (
                 isset($data['first_name']) ||
                 isset($data['middle_name']) ||
                 isset($data['last_name']) ||
@@ -450,9 +436,7 @@ class AttendeeController extends Controller
                 isset($data['mission_id']) ||
                 isset($data['organization_level'])
             )) {
-                foreach ($attendee->registrations as $registration) {
-                    GenerateAttendeeIdCardJob::dispatch($registration);
-                }
+                GenerateAttendeeIdCardJob::dispatch($attendee);
             }
 
             AuditLog::record('attendee.updated', $attendee, $data);
@@ -545,9 +529,7 @@ class AttendeeController extends Controller
         if ($eventId) {
             $event = Event::findOrFail($eventId);
             $this->authorize('viewStaffData', $event);
-            $query->whereHas('registrations', function ($q) use ($eventId) {
-                $q->where('event_id', $eventId);
-            });
+            $query->where('event_id', $eventId);
         }
 
         $attendees = $query->with(['union', 'mission', 'church'])->orderBy('last_name')->orderBy('first_name')->get();

@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['event_registration_id', 'event_session_id', 'check_in_at', 'check_out_at', 'method', 'recorded_by'])]
+#[Fillable(['attendee_id', 'event_session_id', 'check_in_at', 'check_out_at', 'method', 'recorded_by'])]
 class AttendanceRecord extends Model
 {
     /** @use HasFactory<AttendanceRecordFactory> */
@@ -24,9 +24,10 @@ class AttendanceRecord extends Model
         ];
     }
 
-    public function eventRegistration(): BelongsTo
+    /** @return BelongsTo<Attendee, $this> */
+    public function attendee(): BelongsTo
     {
-        return $this->belongsTo(EventRegistration::class);
+        return $this->belongsTo(Attendee::class);
     }
 
     public function eventSession(): BelongsTo

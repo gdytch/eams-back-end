@@ -2,17 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Church;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AttendeeTest extends TestCase
@@ -21,12 +22,17 @@ class AttendeeTest extends TestCase
 
     public function test_attendee_can_be_created_with_new_contact_fields(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $union = Union::factory()->for($org)->create();
         $mission = Mission::factory()->for($org)->for($union)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'mobile_no' => '+1234567890',
@@ -45,10 +51,15 @@ class AttendeeTest extends TestCase
 
     public function test_attendee_contact_fields_are_optional(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'Jane',
             'last_name' => 'Smith',
         ]);
@@ -64,10 +75,15 @@ class AttendeeTest extends TestCase
 
     public function test_email_address_must_be_valid(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'email_address' => 'invalid-email',
@@ -79,10 +95,15 @@ class AttendeeTest extends TestCase
 
     public function test_mobile_no_has_max_length(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'mobile_no' => str_repeat('1', 21),
@@ -94,6 +115,8 @@ class AttendeeTest extends TestCase
 
     public function test_attendee_can_be_assigned_to_church(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $union = Union::factory()->for($org)->create();
@@ -101,6 +124,9 @@ class AttendeeTest extends TestCase
         $church = Church::factory()->for($org)->for($union)->for($mission)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'church_id' => $church->id,
@@ -155,6 +181,8 @@ class AttendeeTest extends TestCase
 
     public function test_church_id_must_belong_to_same_org(): void
     {
+        Queue::fake();
+
         $orgA = Organization::factory()->create();
         $orgB = Organization::factory()->create();
         $checkerA = User::factory()->checker()->for($orgA)->create();
@@ -163,6 +191,9 @@ class AttendeeTest extends TestCase
         $churchB = Church::factory()->for($orgB)->for($unionB)->for($missionB)->create();
 
         $response = $this->actingAs($checkerA, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checkerA->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checkerA->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'church_id' => $churchB->id,
@@ -189,7 +220,7 @@ class AttendeeTest extends TestCase
 
         $response->assertOk();
         $response->assertJsonPath('data.mobile_no', '555-1234');
-        $response->assertJsonPath('data.email_address', 'new@example.com');
+        $response->assertJsonPath('data.email_address', 'old@example.com'); // linked email mirrors the account and is read-only
         $response->assertJsonPath('data.remarks', 'Updated info');
     }
 
@@ -358,7 +389,7 @@ class AttendeeTest extends TestCase
         $account = User::factory()->attendee()->unverified()->create();
         $attendee = Attendee::factory()->for($org)->for($account, 'user')->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = $this->registerInEvent($event, $attendee);
         $attended = EventSession::factory()->for($event)->create(['session_date' => now()->subDays(2)]);
         $absent = EventSession::factory()->for($event)->create(['session_date' => now()->subDay()]);
         $upcoming = EventSession::factory()->for($event)->create(['session_date' => now()->addDay()]);
@@ -413,9 +444,9 @@ class AttendeeTest extends TestCase
         $restricted = Event::factory()->for($org)->create();
         $foreign = Event::factory()->for($otherOrg)->create();
         $checker->accessibleEvents()->sync([$allowed->id]);
-        EventRegistration::factory()->for($allowed)->for($attendee)->create();
-        EventRegistration::factory()->for($restricted)->for($attendee)->create();
-        EventRegistration::factory()->for($foreign)->for($attendee)->create();
+        $this->registerInEvent($allowed, $attendee);
+        $this->registerInEvent($restricted, $attendee);
+        $this->registerInEvent($foreign, $attendee);
 
         $response = $this->actingAs($checker, 'sanctum')
             ->getJson("/api/v1/attendees/{$attendee->id}?include=dashboard");
@@ -460,10 +491,7 @@ class AttendeeTest extends TestCase
         $event = Event::factory()->for($org)->create();
 
         // Register attendee to event
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for($attendee)
-            ->create(['registered_by' => $checker->id]);
+        $registration = $this->registerInEvent($event, $attendee, ['registered_by' => $checker->id]);
 
         // Create sessions (1 past with check-in, 1 past without check-in, 1 future)
         $pastSessionWithCheckin = EventSession::factory()
@@ -500,10 +528,7 @@ class AttendeeTest extends TestCase
         $attendee = Attendee::factory()->for($org)->create(['created_by' => $checker->id]);
         $event = Event::factory()->for($org)->create();
 
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for($attendee)
-            ->create(['registered_by' => $checker->id]);
+        $registration = $this->registerInEvent($event, $attendee, ['registered_by' => $checker->id]);
 
         // Create 3 sessions: past, current/future, future
         $pastSession = EventSession::factory()
@@ -530,16 +555,17 @@ class AttendeeTest extends TestCase
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
-        $attendee = Attendee::factory()->for($org)->create(['created_by' => $checker->id]);
+        $user = User::factory()->attendee()->for($org)->create();
+        $attendee = Attendee::factory()->for($org)->for($user)->create(['created_by' => $checker->id]);
 
         $event1 = Event::factory()->for($org)->create();
         $event2 = Event::factory()->for($org)->create();
         $event3 = Event::factory()->for($org)->create();
 
-        // Register to all 3 events
-        EventRegistration::factory()->for($event1)->for($attendee)->create(['registered_by' => $checker->id]);
-        EventRegistration::factory()->for($event2)->for($attendee)->create(['registered_by' => $checker->id]);
-        EventRegistration::factory()->for($event3)->for($attendee)->create(['registered_by' => $checker->id]);
+        // The same person registers in all 3 events: one Attendee row per event, linked through the user account.
+        $attendee = $this->registerInEvent($event1, $attendee, ['registered_by' => $checker->id]);
+        $this->registerInEvent($event2, $attendee, ['registered_by' => $checker->id]);
+        $this->registerInEvent($event3, $attendee, ['registered_by' => $checker->id]);
 
         $response = $this->actingAs($checker, 'sanctum')->getJson("/api/v1/attendees/{$attendee->id}?event_id={$event1->id}");
 
@@ -547,54 +573,49 @@ class AttendeeTest extends TestCase
         $response->assertJsonPath('event_stats.registration_count', 3);
     }
 
-    public function test_attendee_can_be_auto_registered_to_an_event_on_creation(): void
+    public function test_created_attendee_is_the_event_registration(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
-            'auto_register' => true,
             'event_id' => $event->id,
         ]);
 
         $response->assertCreated();
         $attendeeId = $response->json('data.id');
+        $response->assertJsonPath('data.event_id', $event->id);
         $response->assertJsonPath('registration.event_id', $event->id);
         $response->assertJsonPath('registration.attendee_id', $attendeeId);
-        $this->assertDatabaseHas('event_registrations', [
+        $this->assertNotNull($response->json('registration.qr_token'));
+        $this->assertDatabaseHas('attendees', [
+            'id' => $attendeeId,
             'event_id' => $event->id,
-            'attendee_id' => $attendeeId,
+            'organization_id' => $org->id,
+            'registered_by' => $checker->id,
         ]);
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, fn ($job) => $job->attendee->id === $attendeeId);
     }
 
-    public function test_attendee_is_not_registered_when_auto_register_is_not_requested(): void
+    public function test_attendee_create_requires_an_event_id(): void
     {
-        $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
-        Event::factory()->for($org)->create();
+        Queue::fake();
 
-        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
-            'first_name' => 'Jane',
-            'last_name' => 'Smith',
-        ]);
-
-        $response->assertCreated();
-        $response->assertJsonPath('registration', null);
-        $this->assertDatabaseCount('event_registrations', 0);
-    }
-
-    public function test_auto_register_requires_an_event_id(): void
-    {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
-            'auto_register' => true,
         ]);
 
         $response->assertUnprocessable();
@@ -603,12 +624,16 @@ class AttendeeTest extends TestCase
 
     public function test_auto_register_event_must_belong_to_the_attendees_organization(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $otherOrg = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($otherOrg)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
             'auto_register' => true,
@@ -617,6 +642,6 @@ class AttendeeTest extends TestCase
 
         // Checker lacks access to an event outside their organization, so authorization fails first.
         $response->assertForbidden();
-        $this->assertDatabaseCount('event_registrations', 0);
+        $this->assertDatabaseCount('attendees', 0);
     }
 }

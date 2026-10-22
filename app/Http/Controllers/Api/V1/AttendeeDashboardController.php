@@ -24,13 +24,15 @@ class AttendeeDashboardController extends Controller
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::with(['union', 'mission', 'church'])->where('user_id', $user->id)->first();
+        $attendee = Attendee::with(['union', 'mission', 'church'])->where('user_id', $user->id)->latest('id')->first();
 
         if ($attendee === null) {
             return AttendeeDashboardResource::make($dashboardData->emptyDashboard($user))->response();
         }
 
-        $registrations = $attendee->registrations()
+        $registrations = $user->attendees()
+            ->withoutGlobalScopes()
+            ->whereHas('event')
             ->with(['event.sessions', 'attendanceRecords'])
             ->get();
 
@@ -45,9 +47,10 @@ class AttendeeDashboardController extends Controller
         abort_unless($request->user()->isAttendee() || $request->user()->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
         $user = $request->user();
-        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
+        abort_unless($user->attendees()->withoutGlobalScopes()->exists(), 404);
 
-        $registrations = $attendee->registrations()
+        $registrations = $user->attendees()
+            ->withoutGlobalScopes()
             ->with(['event' => fn ($query) => $query->withoutGlobalScopes(), 'attendanceRecords'])
             ->orderBy('created_at', 'desc')
             ->get();
@@ -63,9 +66,9 @@ class AttendeeDashboardController extends Controller
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
         $event = Event::withoutGlobalScopes()->findOrFail($event);
-        $registration = $attendee->registrations()
+        $registration = $user->attendees()
+            ->withoutGlobalScopes()
             ->where('event_id', $event->id)
             ->with(['attendanceRecords' => fn ($query) => $query->whereNotNull('check_in_at')])
             ->firstOrFail();
@@ -85,10 +88,9 @@ class AttendeeDashboardController extends Controller
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
         $event = Event::withoutGlobalScopes()->findOrFail($event);
         abort_unless(
-            $attendee->registrations()->where('event_id', $event->id)->exists(),
+            $user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->exists(),
             404,
             'Registration not found.'
         );
@@ -103,9 +105,8 @@ class AttendeeDashboardController extends Controller
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::withoutGlobalScopes()->where('user_id', $user->id)->firstOrFail();
         $event = Event::withoutGlobalScopes()->findOrFail($eventId);
-        abort_unless($attendee->registrations()->where('event_id', $event->id)->exists(), 404, 'Registration not found.');
+        abort_unless($user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->exists(), 404, 'Registration not found.');
 
         return SpeakerResource::collection($event->speakers()->with('programItems')->get());
     }

@@ -12,7 +12,6 @@ use App\Models\EventProgram;
 use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Mission;
 use App\Models\Organization;
@@ -96,7 +95,7 @@ class GlobalSearchController extends Controller
         $events = Event::withoutGlobalScopes();
 
         if ($user->isAttendee()) {
-            return $events->whereHas('registrations.attendee', fn (Builder $query) => $query
+            return $events->whereHas('attendees', fn (Builder $query) => $query
                 ->withoutGlobalScopes()->where('user_id', $user->id));
         }
         if (! $user->isSuperAdmin()) {
@@ -122,7 +121,7 @@ class GlobalSearchController extends Controller
                 fn (User $record) => $this->item('user', $record->id, $record->name, $record->email),
             ],
             'attendees' => [
-                $this->matches(Attendee::query()->when($scoped || $user->isChecker(), fn (Builder $query) => $query->whereHas('registrations', fn (Builder $registrations) => $registrations->whereIn('event_id', (clone $events)->select('events.id')))), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like),
+                $this->matches(Attendee::query()->when($scoped || $user->isChecker(), fn (Builder $query) => $query->whereIn('event_id', (clone $events)->select('events.id'))), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like),
                 fn (Attendee $record) => $this->item('attendee', $record->id, $record->full_name, $record->email_address ?: $record->mobile_no),
             ],
             'unions' => [
@@ -147,11 +146,11 @@ class GlobalSearchController extends Controller
             ],
             'registrations' => [
                 $this->registrationQuery($user, $events, $like),
-                fn (EventRegistration $record) => $this->item('registration', $record->id, $record->attendee?->full_name ?: 'Registration', $record->attendee?->email_address, $record->event?->name, $record->event_id),
+                fn (Attendee $record) => $this->item('registration', $record->id, $record->full_name ?: 'Registration', $record->email_address, $record->event?->name, $record->event_id),
             ],
             'attendance' => [
                 $this->attendanceQuery($user, $events, $like),
-                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->eventRegistration?->attendee?->full_name ?: 'Attendance', $record->eventSession?->name, $record->eventRegistration?->event?->name, $record->eventRegistration?->event_id, ['session_id' => $record->event_session_id, 'registration_id' => $record->event_registration_id]),
+                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->attendee?->full_name ?: 'Attendance', $record->eventSession?->name, $record->attendee?->event?->name, $record->attendee?->event_id, ['session_id' => $record->event_session_id, 'registration_id' => $record->attendee_id]),
             ],
             'speakers' => [
                 $this->matches(Speaker::query()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($query) => $query->withoutGlobalScopes()]), ['name', 'designation', 'organization', 'bio'], $like),
@@ -167,37 +166,34 @@ class GlobalSearchController extends Controller
 
     private function registrationQuery(User $user, Builder $events, string $like): Builder
     {
-        $query = EventRegistration::query()
+        $query = Attendee::withoutGlobalScopes()
             ->whereIn('event_id', (clone $events)->select('events.id'))
-            ->with([
-                'attendee' => fn ($attendee) => $attendee->withoutGlobalScopes(),
-                'event' => fn ($event) => $event->withoutGlobalScopes(),
-            ]);
+            ->with(['event' => fn ($event) => $event->withoutGlobalScopes()]);
         if ($user->isAttendee()) {
-            $query->whereHas('attendee', fn (Builder $attendee) => $attendee->withoutGlobalScopes()->where('user_id', $user->id));
+            $query->where('user_id', $user->id);
         }
 
-        return $query->whereHas('attendee', fn (Builder $attendee) => $this->matches($attendee->withoutGlobalScopes(), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like));
+        return $this->matches($query, ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like);
     }
 
     private function attendanceQuery(User $user, Builder $events, string $like): Builder
     {
         $query = AttendanceRecord::query()
             ->whereNotNull('check_in_at')
-            ->whereHas('eventRegistration', function (Builder $registration) use ($user, $events) {
-                $registration->whereIn('event_id', (clone $events)->select('events.id'));
+            ->whereHas('attendee', function (Builder $attendee) use ($user, $events) {
+                $attendee->withoutGlobalScopes()->whereIn('event_id', (clone $events)->select('events.id'));
                 if ($user->isAttendee()) {
-                    $registration->whereHas('attendee', fn (Builder $attendee) => $attendee->withoutGlobalScopes()->where('user_id', $user->id));
+                    $attendee->where('user_id', $user->id);
                 }
             })
             ->with([
-                'eventRegistration.attendee' => fn ($attendee) => $attendee->withoutGlobalScopes(),
-                'eventRegistration.event' => fn ($event) => $event->withoutGlobalScopes(),
+                'attendee' => fn ($attendee) => $attendee->withoutGlobalScopes(),
+                'attendee.event' => fn ($event) => $event->withoutGlobalScopes(),
                 'eventSession',
             ]);
 
         return $query->where(function (Builder $match) use ($like) {
-            $match->whereHas('eventRegistration.attendee', fn (Builder $attendee) => $this->matches($attendee->withoutGlobalScopes(), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like))
+            $match->whereHas('attendee', fn (Builder $attendee) => $this->matches($attendee->withoutGlobalScopes(), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like))
                 ->orWhereHas('eventSession', fn (Builder $session) => $this->matches($session, ['name', 'description'], $like));
         });
     }

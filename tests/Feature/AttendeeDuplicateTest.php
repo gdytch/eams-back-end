@@ -6,7 +6,6 @@ use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\Union;
@@ -22,13 +21,17 @@ class AttendeeDuplicateTest extends TestCase
 
     public function test_creating_attendee_with_duplicate_name_returns_conflict(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $union = Union::factory()->for($org)->create();
-        $existing = Attendee::factory()->for($org)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
+        $event = Event::factory()->for($org)->create();
+        $existing = Attendee::factory()->for($event)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
         DB::table('attendees')->where('id', $existing->id)->update(['normalized_name' => 'stale value']);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => $event->id,
             'first_name' => 'juan',
             'last_name' => '  dela   cruz ',
             'organization_level' => 'union',
@@ -41,12 +44,16 @@ class AttendeeDuplicateTest extends TestCase
 
     public function test_creating_attendee_with_override_bypasses_duplicate_check(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $union = Union::factory()->for($org)->create();
-        Attendee::factory()->for($org)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
+        $event = Event::factory()->for($org)->create();
+        Attendee::factory()->for($event)->create(['first_name' => 'Juan', 'middle_name' => null, 'last_name' => 'Dela Cruz']);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => $event->id,
             'first_name' => 'Juan',
             'last_name' => 'Dela Cruz',
             'organization_level' => 'union',
@@ -156,19 +163,18 @@ class AttendeeDuplicateTest extends TestCase
             ->assertJsonPath('meta.total', 1);
     }
 
-    public function test_merge_transfers_registration_fills_blank_primary_fields_and_archives_source(): void
+    public function test_merge_fills_blank_primary_fields_regenerates_the_id_card_and_archives_source(): void
     {
         Queue::fake();
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
-        $primary = Attendee::factory()->for($org)->create([
+        $event = Event::factory()->for($org)->create();
+        $primary = Attendee::factory()->for($event)->create([
             'first_name' => 'Jose', 'middle_name' => null, 'last_name' => 'Rizal', 'mobile_no' => null, 'email_address' => null,
         ]);
-        $source = Attendee::factory()->for($org)->create([
+        $source = Attendee::factory()->for($event)->create([
             'first_name' => 'jose', 'middle_name' => null, 'last_name' => ' rizal ', 'mobile_no' => '09171234567', 'email_address' => 'jose.rizal@example.test',
         ]);
-        $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()->for($event)->for($source)->create();
 
         $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees/duplicates/merge', [
             'primary_attendee_id' => $primary->id,
@@ -177,7 +183,7 @@ class AttendeeDuplicateTest extends TestCase
 
         Queue::assertPushed(
             GenerateAttendeeIdCardJob::class,
-            fn (GenerateAttendeeIdCardJob $job): bool => $job->registration->is($registration)
+            fn (GenerateAttendeeIdCardJob $job): bool => $job->attendee->is($primary)
         );
 
         $this->assertDatabaseHas('attendees', [
@@ -186,14 +192,13 @@ class AttendeeDuplicateTest extends TestCase
             'email_address' => 'jose.rizal@example.test',
         ]);
         $this->assertDatabaseHas('attendees', ['id' => $source->id, 'merged_into_id' => $primary->id]);
-        $this->assertDatabaseHas('event_registrations', ['id' => $registration->id, 'attendee_id' => $primary->id]);
 
         $this->actingAs($admin, 'sanctum')->getJson("/api/v1/attendees/{$source->id}?include=dashboard")
             ->assertOk()
             ->assertJsonPath('data.id', $primary->id)
             ->assertJsonPath('merged_from_id', $source->id)
             ->assertJsonPath('profile_dashboard.stats.registration_count', 1)
-            ->assertJsonPath('profile_dashboard.registrations.0.id', $registration->id);
+            ->assertJsonPath('profile_dashboard.registrations.0.id', $primary->id);
     }
 
     public function test_name_changing_update_warns_and_override_allows_it(): void
@@ -219,19 +224,17 @@ class AttendeeDuplicateTest extends TestCase
         Queue::fake();
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
-        $primary = Attendee::factory()->for($org)->create(['first_name' => 'Luz', 'middle_name' => null, 'last_name' => 'Viminda']);
-        $source = Attendee::factory()->for($org)->create(['first_name' => 'luz', 'middle_name' => null, 'last_name' => ' viminda ']);
         $event = Event::factory()->for($org)->create();
+        $primary = Attendee::factory()->for($event)->create(['first_name' => 'Luz', 'middle_name' => null, 'last_name' => 'Viminda']);
+        $source = Attendee::factory()->for($event)->create(['first_name' => 'luz', 'middle_name' => null, 'last_name' => ' viminda ']);
         $session = EventSession::factory()->for($event)->create();
-        $primaryRegistration = EventRegistration::factory()->for($event)->for($primary)->create();
-        $sourceRegistration = EventRegistration::factory()->for($event)->for($source)->create();
         $earliestCheckIn = now()->subHour();
         $latestCheckOut = now()->addHour();
-        AttendanceRecord::factory()->for($primaryRegistration, 'eventRegistration')->for($session)->create([
+        AttendanceRecord::factory()->for($primary)->for($session)->create([
             'check_in_at' => $earliestCheckIn,
             'check_out_at' => now(),
         ]);
-        AttendanceRecord::factory()->for($sourceRegistration, 'eventRegistration')->for($session)->create([
+        AttendanceRecord::factory()->for($source)->for($session)->create([
             'check_in_at' => now()->subMinutes(30),
             'check_out_at' => $latestCheckOut,
         ]);
@@ -241,8 +244,9 @@ class AttendeeDuplicateTest extends TestCase
             'duplicate_attendee_ids' => [$source->id],
         ])->assertOk();
 
-        $this->assertDatabaseMissing('event_registrations', ['id' => $sourceRegistration->id]);
-        $record = AttendanceRecord::where('event_registration_id', $primaryRegistration->id)
+        $this->assertDatabaseHas('attendees', ['id' => $source->id, 'merged_into_id' => $primary->id]);
+        $this->assertDatabaseCount('attendance_records', 1);
+        $record = AttendanceRecord::where('attendee_id', $primary->id)
             ->where('event_session_id', $session->id)
             ->sole();
         $this->assertSame($earliestCheckIn->format('Y-m-d H:i:s'), $record->check_in_at->format('Y-m-d H:i:s'));

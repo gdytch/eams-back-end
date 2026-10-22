@@ -15,10 +15,10 @@ use App\Mail\EventRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\IdCardGridDownload;
 use App\Models\User;
 use App\Services\AttendeeInvitationService;
+use App\Services\AttendeeRegistrationService;
 use App\Services\PdfMergeService;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
@@ -26,11 +26,15 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
 class EventRegistrationController extends Controller
 {
-    public function __construct(private AttendeeInvitationService $invitationService) {}
+    public function __construct(
+        private AttendeeInvitationService $invitationService,
+        private AttendeeRegistrationService $registrationService,
+    ) {}
 
     /**
      * Display a listing of the resource.
@@ -39,10 +43,10 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('viewStaffData', $event);
 
-        $query = $event->registrations()->with(['attendee.union', 'attendee.mission']);
+        $query = $event->attendees()->with(['union', 'mission']);
 
         if ($search = trim((string) $request->string('search'))) {
-            $query->whereHas('attendee', function ($q) use ($search) {
+            $query->where(function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
             });
@@ -53,14 +57,10 @@ class EventRegistrationController extends Controller
         $sortOrder = strtolower($request->input('sort_order', 'desc')) === 'asc' ? 'asc' : 'desc';
 
         if ($sortBy === 'last_name') {
-            $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
-                ->orderBy('attendees.last_name', $sortOrder)
-                ->select('event_registrations.*');
+            $query->orderBy('last_name', $sortOrder);
         } elseif ($sortBy === 'organization_level') {
-            $query->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
-                ->orderBy('attendees.union_id', $sortOrder)
-                ->orderBy('attendees.mission_id', $sortOrder)
-                ->select('event_registrations.*');
+            $query->orderBy('union_id', $sortOrder)
+                ->orderBy('mission_id', $sortOrder);
         } elseif ($sortBy === 'registered_at') {
             $query->orderBy('registered_at', $sortOrder);
         } else {
@@ -71,8 +71,8 @@ class EventRegistrationController extends Controller
     }
 
     /**
-     * Store a newly created resource in storage: registers an existing attendee,
-     * or creates a new attendee and registers them, in a single call.
+     * Store a newly created resource in storage: registers a known person in this event
+     * (prefilled from their earlier Attendee), or creates a new Attendee, in a single call.
      */
     public function store(StoreEventRegistrationRequest $request, Event $event)
     {
@@ -83,10 +83,21 @@ class EventRegistrationController extends Controller
             $attendeeWasJustCreated = false;
 
             if (! empty($data['attendee_id'])) {
-                $attendee = Attendee::findOrFail($data['attendee_id']);
+                $source = Attendee::findOrFail($data['attendee_id']);
+
+                $alreadyRegistered = $source->event_id === $event->id
+                    || ($source->user_id !== null && $event->attendees()->where('user_id', $source->user_id)->exists());
+
+                if ($alreadyRegistered) {
+                    throw ValidationException::withMessages([
+                        'attendee_id' => 'This person is already registered for this event.',
+                    ]);
+                }
+
+                $attendee = $this->registrationService->registerFrom($source, $event, $request->user());
             } else {
                 if (! $override) {
-                    $duplicates = Attendee::matchingName($data['first_name'], $data['last_name']);
+                    $duplicates = Attendee::matchingName($data['first_name'], $data['last_name'], eventId: $event->id);
 
                     if ($duplicates->isNotEmpty()) {
                         return response()->json([
@@ -97,33 +108,29 @@ class EventRegistrationController extends Controller
                 }
 
                 $attendee = Attendee::create([
-                    'organization_id' => $event->organization_id,
+                    'event_id' => $event->id,
                     'union_id' => $data['union_id'] ?? null,
                     'mission_id' => $data['mission_id'] ?? null,
                     'first_name' => $data['first_name'],
                     'middle_name' => $data['middle_name'] ?? null,
                     'last_name' => $data['last_name'],
                     'email_address' => $data['email_address'] ?? null,
+                    'registered_by' => $request->user()->id,
                     'created_by' => $request->user()->id,
                 ]);
 
                 $attendeeWasJustCreated = true;
             }
 
-            $registration = $event->registrations()->create([
-                'attendee_id' => $attendee->id,
-                'registered_by' => $request->user()->id,
-            ]);
+            AuditLog::record('event_registration.created', $attendee, ['attendee_id' => $attendee->id]);
 
-            AuditLog::record('event_registration.created', $registration, ['attendee_id' => $attendee->id]);
-
-            GenerateAttendeeIdCardJob::dispatch($registration);
+            GenerateAttendeeIdCardJob::dispatch($attendee);
 
             // Send welcome email if attendee has an email
             // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
             // $email = $attendee->email_address ?? $attendee->user?->email;
             // if ($email) {
-            //     Mail::to($email)->send(new EventRegistrationWelcomeMail($registration));
+            //     Mail::to($email)->send(new EventRegistrationWelcomeMail($attendee));
             // }
 
             // Send account invitation if attendee was just created
@@ -131,30 +138,30 @@ class EventRegistrationController extends Controller
                 $this->invitationService->sendIfEligible($attendee, $request->user());
             }
 
-            return EventRegistrationResource::make($registration->load('attendee'))->response()->setStatusCode(201);
+            return EventRegistrationResource::make($attendee)->response()->setStatusCode(201);
         });
     }
 
     /**
      * Display the specified resource.
      */
-    public function show(Event $event, EventRegistration $registration)
+    public function show(Event $event, Attendee $registration)
     {
         abort_unless($registration->event_id === $event->id, 404);
         $this->authorize('view', $registration);
 
-        return EventRegistrationResource::make($registration->load('attendee'));
+        return EventRegistrationResource::make($registration);
     }
 
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(Event $event, EventRegistration $registration)
+    public function destroy(Event $event, Attendee $registration)
     {
         abort_unless($registration->event_id === $event->id, 404);
         $this->authorize('delete', $registration);
 
-        AuditLog::record('event_registration.deleted', $registration, ['attendee_id' => $registration->attendee_id]);
+        AuditLog::record('event_registration.deleted', $registration, ['attendee_id' => $registration->id]);
 
         $registration->delete();
 
@@ -168,7 +175,7 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('manageIdCards', $event);
 
-        $query = $event->registrations()->with('attendee');
+        $query = $event->attendees();
 
         if ($request->filled('registration_ids')) {
             $query->whereIn('id', $request->validated('registration_ids'));
@@ -177,7 +184,7 @@ class EventRegistrationController extends Controller
         $registrations = $query->get();
 
         // dompdf cannot render inline <svg> elements, so embed the QR as a base64 data URI <img> instead.
-        $qrImages = $registrations->mapWithKeys(fn (EventRegistration $registration) => [
+        $qrImages = $registrations->mapWithKeys(fn (Attendee $registration) => [
             $registration->id => 'data:image/svg+xml;base64,'.base64_encode(
                 QrCode::format('svg')->size(160)->margin(0)->generate($registration->qr_token)
             ),
@@ -201,9 +208,8 @@ class EventRegistrationController extends Controller
      */
     public function downloadIdCard(int $event, int $registration)
     {
-        $registration = EventRegistration::where('event_id', $event)->findOrFail($registration);
+        $registration = Attendee::withoutGlobalScopes()->where('event_id', $event)->findOrFail($registration);
         $registration->setRelation('event', Event::withoutGlobalScopes()->findOrFail($event));
-        $registration->setRelation('attendee', Attendee::withoutGlobalScopes()->findOrFail($registration->attendee_id));
         $this->authorize('downloadIdCard', $registration);
 
         if ($registration->id_card_path === null || ! Storage::disk('local')->exists($registration->id_card_path)) {
@@ -214,15 +220,16 @@ class EventRegistrationController extends Controller
 
         return Storage::disk('local')->download(
             $registration->id_card_path,
-            "{$registration->attendee->first_name}-{$registration->attendee->last_name}-id-card.pdf"
+            "{$registration->first_name}-{$registration->last_name}-id-card.pdf"
         );
     }
 
     /**
      * Re-queue identification card generation (e.g. after the organization's background image changes).
      */
-    public function regenerateIdCard(Event $event, EventRegistration $registration)
+    public function regenerateIdCard(Event $event, Attendee $registration)
     {
+        abort_unless($registration->event_id === $event->id, 404);
         $this->authorize('manageIdCards', $registration);
 
         GenerateAttendeeIdCardJob::dispatch($registration);
@@ -256,9 +263,8 @@ class EventRegistrationController extends Controller
             ], 422);
         }
 
-        $registrations = $event->registrations()
+        $registrations = $event->attendees()
             ->whereIn('id', $registrationIds)
-            ->with('attendee')
             ->get();
 
         if ($registrations->isEmpty()) {
@@ -270,7 +276,7 @@ class EventRegistrationController extends Controller
         // Collect valid ID card paths (filter out missing or not yet generated cards)
         $pdfPaths = $registrations
             ->filter(
-                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
+                fn (Attendee $reg) => $reg->id_card_path !== null &&
                     Storage::disk('local')->exists($reg->id_card_path)
             )
             ->pluck('id_card_path')
@@ -303,8 +309,7 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('manageIdCards', $event);
 
-        $registrations = $event->registrations()
-            ->with('attendee')
+        $registrations = $event->attendees()
             ->limit(101)
             ->get();
 
@@ -323,7 +328,7 @@ class EventRegistrationController extends Controller
         // Collect valid ID card paths (filter out missing or not yet generated cards)
         $pdfPaths = $registrations
             ->filter(
-                fn (EventRegistration $reg) => $reg->id_card_path !== null &&
+                fn (Attendee $reg) => $reg->id_card_path !== null &&
                     Storage::disk('local')->exists($reg->id_card_path)
             )
             ->pluck('id_card_path')
@@ -352,9 +357,8 @@ class EventRegistrationController extends Controller
      */
     public function getIdCardImage(int $event, int $registration)
     {
-        $registration = EventRegistration::where('event_id', $event)->findOrFail($registration);
+        $registration = Attendee::withoutGlobalScopes()->where('event_id', $event)->findOrFail($registration);
         $registration->setRelation('event', Event::withoutGlobalScopes()->findOrFail($event));
-        $registration->setRelation('attendee', Attendee::withoutGlobalScopes()->findOrFail($registration->attendee_id));
         $this->authorize('viewIdCardImage', $registration);
 
         // Validate that id_card_images_path is a non-empty array
@@ -400,7 +404,7 @@ class EventRegistrationController extends Controller
 
         // If specific registration IDs provided, verify they exist and belong to this event
         if ($registrationIds !== null) {
-            $registrations = $event->registrations()
+            $registrations = $event->attendees()
                 ->whereIn('id', $registrationIds)
                 ->get();
 
@@ -423,7 +427,7 @@ class EventRegistrationController extends Controller
     {
         $this->authorize('manageIdCards', $event);
 
-        if ($event->registrations()->count() === 0) {
+        if ($event->attendees()->count() === 0) {
             return response()->json([
                 'message' => 'No registrations found for this event.',
             ], 404);

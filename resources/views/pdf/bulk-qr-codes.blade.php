@@ -61,7 +61,7 @@
     @foreach ($registrations as $registration)
         <div class="cell">
             <div class="qr"><img src="{{ $qrImages[$registration->id] }}" alt="QR code"></div>
-            <div class="name">{{ trim("{$registration->attendee->first_name} {$registration->attendee->last_name}") }}
+            <div class="name">{{ trim("{$registration->first_name} {$registration->last_name}") }}
             </div>
         </div>
     @endforeach

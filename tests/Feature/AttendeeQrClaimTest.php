@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
@@ -146,7 +145,7 @@ class AttendeeQrClaimTest extends TestCase
         $this->assertNull($attendee->fresh()->user_id);
     }
 
-    /** @return array{Attendee, Union, Mission, EventRegistration} */
+    /** @return array{Attendee, Union, Mission, Attendee} */
     private function claimableRegistration(array $attendeeAttributes = []): array
     {
         $organization = Organization::factory()->create();
@@ -159,14 +158,14 @@ class AttendeeQrClaimTest extends TestCase
             'mission_id' => $mission->id,
             ...$attendeeAttributes,
         ]);
-        $registration = EventRegistration::factory()->for(Event::factory()->for($organization))->for($attendee)->create([
+        $registration = $this->registerInEvent(Event::factory()->for($organization), $attendee, [
             'qr_token' => 'https://events.example.test/attendee/unique-qr-value',
         ]);
 
         return [$attendee, $union, $mission, $registration];
     }
 
-    private function verify(EventRegistration $registration, Attendee $attendee, Union $union, ?Mission $mission)
+    private function verify(Attendee $registration, Attendee $attendee, Union $union, ?Mission $mission)
     {
         return $this->postJson('/api/v1/public/attendee-claims/verify', [
             'qr_token' => $registration->qr_token,

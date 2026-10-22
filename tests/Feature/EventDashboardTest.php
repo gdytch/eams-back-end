@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Mission;
 use App\Models\Organization;
@@ -45,7 +44,7 @@ class EventDashboardTest extends TestCase
 
         $firstUnionRegistration = null;
         foreach ($unionAttendees as $index => $attendee) {
-            $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+            $registration = $this->registerInEvent($event, $attendee);
             $firstUnionRegistration ??= $registration;
             AttendanceRecord::factory()->for($registration)->for($session)->create([
                 'check_in_at' => '2026-09-22 '.(9 + $index).':15:00',
@@ -54,9 +53,9 @@ class EventDashboardTest extends TestCase
         AttendanceRecord::factory()->for($firstUnionRegistration)->for($secondSession)->create([
             'check_in_at' => '2026-09-23 09:15:00',
         ]);
-        EventRegistration::factory()->for($event)->for($missionAttendee)->create();
+        $this->registerInEvent($event, $missionAttendee);
 
-        $otherRegistration = EventRegistration::factory()->for($otherEvent)->for($missionAttendee)->create();
+        $otherRegistration = $this->registerInEvent($otherEvent, $missionAttendee);
         AttendanceRecord::factory()->for($otherRegistration)->for($otherSession)->create([
             'check_in_at' => '2026-09-22 11:00:00',
         ]);

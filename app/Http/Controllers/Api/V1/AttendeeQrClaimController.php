@@ -12,7 +12,6 @@ use App\Http\Requests\VerifyQrClaimRequest;
 use App\Http\Resources\UserResource;
 use App\Models\Attendee;
 use App\Models\AuditLog;
-use App\Models\EventRegistration;
 use App\Models\User;
 use App\Notifications\AttendeeQrClaimEmailCodeNotification;
 use App\Services\AttendeeQrClaimService;
@@ -26,39 +25,39 @@ class AttendeeQrClaimController extends Controller
 {
     public function status(QrClaimStatusRequest $request): JsonResponse
     {
-        $registration = $this->registration($request->validated('qr_token'));
+        $attendee = $this->attendee($request->validated('qr_token'));
 
-        if ($registration === null) {
+        if ($attendee === null) {
             return response()->json(['message' => 'This ID card link is unavailable.'], 404);
         }
 
         return response()->json([
-            'status' => $registration->attendee->user_id === null ? 'unclaimed' : 'claimed',
+            'status' => $attendee->user_id === null ? 'unclaimed' : 'claimed',
         ]);
     }
 
     public function verify(VerifyQrClaimRequest $request, AttendeeQrClaimService $claims): JsonResponse
     {
         $data = $request->validated();
-        $registration = $this->registration($data['qr_token']);
+        $attendee = $this->attendee($data['qr_token']);
 
-        if ($registration === null || $registration->attendee->user_id !== null) {
+        if ($attendee === null || $attendee->user_id !== null) {
             throw ValidationException::withMessages(['qr_token' => 'We could not verify those details. Qrcode not valid or already claimed.']);
         }
 
-        if (! $claims->allowVerificationAttempt($registration->id)) {
+        if (! $claims->allowVerificationAttempt($attendee->id)) {
             throw ValidationException::withMessages(['details' => 'Too many attempts. Wait before trying again.']);
         }
 
-        if (! $claims->matches($registration->attendee, $data['first_name'], $data['last_name'], $data['union_id'], $data['mission_id'])) {
+        if (! $claims->matches($attendee, $data['first_name'], $data['last_name'], $data['union_id'], $data['mission_id'])) {
             throw ValidationException::withMessages(['details' => 'We could not verify those details. Information provided does not match our records. QR code may belong to someone else.']);
         }
 
-        $claimToken = $claims->createClaim($registration);
+        $claimToken = $claims->createClaim($attendee);
 
         return response()->json([
             'claim_token' => $claimToken,
-            'requires_email' => blank($registration->attendee->email_address),
+            'requires_email' => blank($attendee->email_address),
         ]);
     }
 
@@ -71,8 +70,8 @@ class AttendeeQrClaimController extends Controller
             throw ValidationException::withMessages(['claim_token' => 'Your verification session has expired. Scan your ID card again.']);
         }
 
-        $registration = EventRegistration::query()->with('attendee')->find($claim['registration_id']);
-        if ($registration === null || $registration->attendee->user_id !== null || filled($registration->attendee->email_address)) {
+        $attendee = Attendee::query()->find($claim['attendee_id']);
+        if ($attendee === null || $attendee->user_id !== null || filled($attendee->email_address)) {
             throw ValidationException::withMessages(['claim_token' => 'Your verification session is no longer available.']);
         }
 
@@ -112,12 +111,7 @@ class AttendeeQrClaimController extends Controller
         }
 
         $result = DB::transaction(function () use ($claim, $data) {
-            $registration = EventRegistration::query()->lockForUpdate()->find($claim['registration_id']);
-            if ($registration === null) {
-                throw ValidationException::withMessages(['claim_token' => 'Your verification session is no longer available.']);
-            }
-
-            $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($registration->attendee_id);
+            $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($claim['attendee_id']);
             if ($attendee === null || $attendee->user_id !== null) {
                 throw ValidationException::withMessages(['claim_token' => 'This attendee already has an account.']);
             }
@@ -172,10 +166,9 @@ class AttendeeQrClaimController extends Controller
         return response()->json($result, 201);
     }
 
-    private function registration(string $qrToken): ?EventRegistration
+    private function attendee(string $qrToken): ?Attendee
     {
-        return EventRegistration::query()
-            ->with('attendee')
+        return Attendee::query()
             ->where('qr_token', $qrToken)
             ->first();
     }

@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
@@ -16,12 +15,9 @@ class AttendanceSyncBatchTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    private function registeredAttendee(Organization $org, Event $event): EventRegistration
+    private function registeredAttendee(Organization $org, Event $event): Attendee
     {
-        return EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        return Attendee::factory()->for($event)->for($org)->create();
     }
 
     public function test_sync_batch_single_valid_scan(): void
@@ -56,7 +52,7 @@ class AttendanceSyncBatchTest extends TestCase
         $response->assertJsonPath('results.0.client_ref', 'ref-001');
 
         $this->assertDatabaseHas('attendance_records', [
-            'event_registration_id' => $registration->id,
+            'attendee_id' => $registration->id,
             'event_session_id' => $session->id,
         ]);
 
@@ -167,7 +163,7 @@ class AttendanceSyncBatchTest extends TestCase
         $this->assertDatabaseCount('attendance_records', 0);
     }
 
-    public function test_sync_batch_manual_method_with_event_registration_id(): void
+    public function test_sync_batch_manual_method_with_attendee_id(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
@@ -177,7 +173,7 @@ class AttendanceSyncBatchTest extends TestCase
             'start_time' => now()->format('H:i:s'),
             'end_time' => now()->addHours(4)->format('H:i:s'),
         ]);
-        $registration = $this->registeredAttendee($org, $event);
+        $attendee = $this->registeredAttendee($org, $event);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', [
             'scans' => [
@@ -185,28 +181,70 @@ class AttendanceSyncBatchTest extends TestCase
                     'client_ref' => 'ref-001',
                     'event_id' => $event->id,
                     'session_id' => $session->id,
-                    'event_registration_id' => $registration->id,
+                    'attendee_id' => $attendee->id,
                     'method' => 'manual',
                 ],
             ],
         ]);
 
-        $response->assertOk();
-
-        // Debug: print actual vs expected
-        $actual = $response->json('results.0.status');
-        if ($actual !== 'created') {
-            echo "\nDEBUG: Expected 'created', got '{$actual}'";
-            echo "\nDEBUG: Error message: ".$response->json('results.0.message');
-            echo "\nDEBUG: Registration ID: {$registration->id}";
-            echo "\nDEBUG: Full response: ".json_encode($response->json(), JSON_PRETTY_PRINT);
-        }
-
-        $this->assertSame('created', $actual);
+        $response->assertOk()->assertJsonPath('results.0.status', 'created');
         $this->assertDatabaseHas('attendance_records', [
-            'event_registration_id' => $registration->id,
+            'attendee_id' => $attendee->id,
             'method' => 'manual',
         ]);
+    }
+
+    public function test_sync_batch_still_accepts_a_deprecated_event_registration_id(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $session = EventSession::factory()->for($event)->create([
+            'session_date' => now()->toDateString(),
+            'start_time' => now()->format('H:i:s'),
+            'end_time' => now()->addHours(4)->format('H:i:s'),
+        ]);
+        $attendee = $this->registeredAttendee($org, $event);
+        $attendee->forceFill(['legacy_registration_id' => 4242])->save();
+        $otherEventAttendee = $this->registeredAttendee($org, Event::factory()->for($org)->create());
+        $otherEventAttendee->forceFill(['legacy_registration_id' => 4243])->save();
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', [
+            'scans' => [
+                ['client_ref' => 'old', 'event_id' => $event->id, 'session_id' => $session->id, 'event_registration_id' => 4242, 'method' => 'manual'],
+                ['client_ref' => 'wrong-event', 'event_id' => $event->id, 'session_id' => $session->id, 'event_registration_id' => 4243, 'method' => 'manual'],
+                ['client_ref' => 'unknown', 'event_id' => $event->id, 'session_id' => $session->id, 'event_registration_id' => 9999, 'method' => 'manual'],
+            ],
+        ]);
+
+        $response->assertOk()
+            ->assertJsonPath('results.0.status', 'created')
+            ->assertJsonPath('results.1.status', 'error')
+            ->assertJsonPath('results.2.status', 'error');
+        $this->assertDatabaseHas('attendance_records', ['attendee_id' => $attendee->id, 'event_session_id' => $session->id]);
+        $this->assertDatabaseCount('attendance_records', 1);
+    }
+
+    public function test_sync_batch_rejects_an_attendee_id_from_another_event(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $session = EventSession::factory()->for($event)->create([
+            'session_date' => now()->toDateString(),
+            'start_time' => now()->format('H:i:s'),
+            'end_time' => now()->addHours(4)->format('H:i:s'),
+        ]);
+        $foreign = $this->registeredAttendee($org, Event::factory()->for($org)->create());
+
+        $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', [
+            'scans' => [
+                ['client_ref' => 'x', 'event_id' => $event->id, 'session_id' => $session->id, 'attendee_id' => $foreign->id, 'method' => 'manual'],
+            ],
+        ]);
+
+        $response->assertOk()->assertJsonPath('results.0.status', 'error');
+        $this->assertDatabaseCount('attendance_records', 0);
     }
 
     public function test_sync_batch_mixed_results(): void

@@ -4,7 +4,7 @@ namespace Database\Seeders;
 
 use App\Enums\AttendanceMethod;
 use App\Models\AttendanceRecord;
-use App\Models\EventRegistration;
+use App\Models\Attendee;
 use App\Models\EventSession;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -31,9 +31,9 @@ class AttendanceRecordSeeder extends Seeder
             return;
         }
 
-        $registrations = EventRegistration::query()->get();
+        $registrations = Attendee::query()->whereNotNull('event_id')->get();
         if ($registrations->isEmpty()) {
-            $this->command->warn('No event registrations found. Skipping seeder.');
+            $this->command->warn('No event attendees found. Skipping seeder.');
 
             return;
         }
@@ -42,7 +42,7 @@ class AttendanceRecordSeeder extends Seeder
 
         foreach ($sessions as $session) {
             // Get registrations for this event
-            $eventRegistrations = $registrations->filter(fn($reg) => $reg->event_id === $session->event_id);
+            $eventRegistrations = $registrations->filter(fn ($reg) => $reg->event_id === $session->event_id);
 
             if ($eventRegistrations->isEmpty()) {
                 continue;
@@ -74,7 +74,7 @@ class AttendanceRecordSeeder extends Seeder
                 }
 
                 AttendanceRecord::create([
-                    'event_registration_id' => $registration->id,
+                    'attendee_id' => $registration->id,
                     'event_session_id' => $session->id,
                     'check_in_at' => $checkInTime,
                     'check_out_at' => $checkOutTime,

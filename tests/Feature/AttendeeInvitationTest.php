@@ -20,12 +20,15 @@ class AttendeeInvitationTest extends TestCase
 
     public function test_checker_creates_attendee_with_email_sends_invitation(): void
     {
+        Queue::fake();
+
         Mail::fake();
 
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'organization_level' => 'union',
             'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'John',
@@ -44,12 +47,15 @@ class AttendeeInvitationTest extends TestCase
 
     public function test_admin_creates_attendee_without_email_no_invitation_sent(): void
     {
+        Queue::fake();
+
         Mail::fake();
 
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
 
         $response = $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'organization_level' => 'union',
             'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Jane',
@@ -67,6 +73,8 @@ class AttendeeInvitationTest extends TestCase
 
     public function test_attendee_cannot_be_invited_if_email_already_has_user(): void
     {
+        Queue::fake();
+
         Mail::fake();
 
         $org = Organization::factory()->create();
@@ -74,6 +82,7 @@ class AttendeeInvitationTest extends TestCase
         User::factory()->for($org)->create(['email' => 'existing@example.com']);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'organization_level' => 'union',
             'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Bob',

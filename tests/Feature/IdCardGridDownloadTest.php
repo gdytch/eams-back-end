@@ -9,7 +9,6 @@ use App\Jobs\MergeIdCardGridDownloadJob;
 use App\Jobs\PrepareIdCardGridDownloadJob;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\IdCardGridDownload;
 use App\Models\Organization;
 use App\Models\User;
@@ -35,8 +34,8 @@ class IdCardGridDownloadTest extends TestCase
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $reg1 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
-        $reg2 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg1 = Attendee::factory()->for($event)->for($org)->create();
+        $reg2 = Attendee::factory()->for($event)->for($org)->create();
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->postJson(
             "/api/v1/events/{$event->id}/registrations/id-cards/grid-download",
@@ -64,7 +63,7 @@ class IdCardGridDownloadTest extends TestCase
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        Attendee::factory()->for($event)->for($org)->create();
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->postJson(
             "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all"
@@ -107,7 +106,7 @@ class IdCardGridDownloadTest extends TestCase
         $organization = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($organization)->create();
         $event = Event::factory()->for($organization)->create();
-        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($organization))->create();
+        Attendee::factory()->for($event)->for($organization)->create();
         $download = IdCardGridDownload::factory()->for($event)->create([
             'status' => IdCardGridDownloadStatus::Completed,
             'file_path' => "{$event->id}/grid.zip",
@@ -134,7 +133,7 @@ class IdCardGridDownloadTest extends TestCase
         $organization = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($organization)->create();
         $event = Event::factory()->for($organization)->create();
-        $registration = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($organization))->create();
+        $registration = Attendee::factory()->for($event)->for($organization)->create();
         $this->actingAs($admin, 'sanctum');
 
         for ($attempt = 0; $attempt < 60; $attempt++) {
@@ -157,7 +156,7 @@ class IdCardGridDownloadTest extends TestCase
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        Attendee::factory()->for($event)->for($org)->create();
         $url = "/api/v1/events/{$event->id}/registrations/id-cards/grid-download-all";
 
         $this->actingAs($admin, 'sanctum')->postJson($url)->assertStatus(202);
@@ -173,7 +172,7 @@ class IdCardGridDownloadTest extends TestCase
         $org = Organization::factory()->create();
         $admin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        Attendee::factory()->for($event)->for($org)->create();
         IdCardGridDownload::factory(10)->for($event)->create(['status' => IdCardGridDownloadStatus::Processing]);
 
         $this->actingAs($admin, 'sanctum')->postJson(
@@ -191,7 +190,7 @@ class IdCardGridDownloadTest extends TestCase
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg = Attendee::factory()->for($event)->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson(
             "/api/v1/events/{$event->id}/registrations/id-cards/grid-download",
@@ -396,8 +395,8 @@ class IdCardGridDownloadTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create();
-        $reg1 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
-        $reg2 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg1 = Attendee::factory()->for($event)->for($org)->create();
+        $reg2 = Attendee::factory()->for($event)->for($org)->create();
 
         // Simulate image files
         $imagePath1 = "{$event->id}/images/image1.jpg";
@@ -432,10 +431,7 @@ class IdCardGridDownloadTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        $registration = Attendee::factory()->for($event)->for($org)->create();
 
         $imagePath = "{$event->id}/images/image.jpg";
         Storage::disk('local')->put($imagePath, 'fake image');
@@ -502,14 +498,8 @@ class IdCardGridDownloadTest extends TestCase
 
         $organization = Organization::factory()->create();
         $event = Event::factory()->for($organization)->create();
-        $selectedRegistration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($organization))
-            ->create(['id_card_images_path' => ['selected.jpg']]);
-        $unselectedRegistration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($organization))
-            ->create(['id_card_images_path' => ['unselected.jpg']]);
+        $selectedRegistration = Attendee::factory()->for($event)->for($organization)->create(['id_card_images_path' => ['selected.jpg']]);
+        $unselectedRegistration = Attendee::factory()->for($event)->for($organization)->create(['id_card_images_path' => ['unselected.jpg']]);
         $download = IdCardGridDownload::factory()->for($event)->create([
             'registration_ids' => [$selectedRegistration->id],
             'status' => IdCardGridDownloadStatus::Pending,
@@ -598,7 +588,7 @@ class IdCardGridDownloadTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create();
-        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg = Attendee::factory()->for($event)->for($org)->create();
 
         $download = IdCardGridDownload::factory()->for($event)->create([
             'registration_ids' => [$reg->id],
@@ -621,7 +611,7 @@ class IdCardGridDownloadTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create();
-        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg = Attendee::factory()->for($event)->for($org)->create();
 
         $imagePath = "{$event->id}/images/image.jpg";
         Storage::disk('local')->put($imagePath, 'fake image');
@@ -646,8 +636,8 @@ class IdCardGridDownloadTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create();
-        $reg1 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
-        $reg2 = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg1 = Attendee::factory()->for($event)->for($org)->create();
+        $reg2 = Attendee::factory()->for($event)->for($org)->create();
 
         // Simulate image files
         $imagePath1 = "{$event->id}/images/image1.jpg";
@@ -678,7 +668,7 @@ class IdCardGridDownloadTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create();
-        $reg = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        $reg = Attendee::factory()->for($event)->for($org)->create();
 
         $download = IdCardGridDownload::factory()->for($event)->create([
             'registration_ids' => [$reg->id],

@@ -4,7 +4,6 @@ namespace App\Policies;
 
 use App\Models\AttendanceRecord;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\User;
 use App\Policies\Concerns\DeniesArchivedEvents;
 use Illuminate\Auth\Access\Response;
@@ -20,17 +19,15 @@ class AttendanceRecordPolicy
 
     public function view(User $user, AttendanceRecord $attendanceRecord): bool
     {
-        $event = $attendanceRecord->eventRegistration->event;
+        $event = $attendanceRecord->attendee->event;
 
         return $user->can('viewStaffData', $event);
     }
 
     public function checkOut(User $user, AttendanceRecord $attendanceRecord): Response|bool
     {
-        /** @var EventRegistration $registration */
-        $registration = $attendanceRecord->eventRegistration;
         /** @var Event $event */
-        $event = $registration->event;
+        $event = $attendanceRecord->attendee->event;
 
         return $this->allowWrite($this->view($user, $attendanceRecord), $event);
     }

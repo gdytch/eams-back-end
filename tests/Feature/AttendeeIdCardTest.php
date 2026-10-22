@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -33,7 +32,7 @@ class AttendeeIdCardTest extends TestCase
 
         $response->assertCreated();
 
-        $registration = EventRegistration::firstOrFail();
+        $registration = Attendee::whereNotNull('event_id')->firstOrFail();
         $expectedPath = "{$event->id}/{$registration->attendee_id}.pdf";
 
         Storage::disk('local')->assertExists($expectedPath);
@@ -48,10 +47,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        $registration = Attendee::factory()->for($event)->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
             ->get("/api/v1/events/{$event->id}/registrations/{$registration->id}/id-card");
@@ -66,10 +62,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        $registration = Attendee::factory()->for($event)->for($org)->create();
 
         (new GenerateAttendeeIdCardJob($registration))->handle();
 
@@ -87,10 +80,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        $registration = Attendee::factory()->for($event)->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
             ->post("/api/v1/events/{$event->id}/registrations/{$registration->id}/id-card/regenerate");
@@ -106,10 +96,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        $registration = Attendee::factory()->for($event)->for($org)->create();
 
         $this->actingAs($orgAdmin, 'sanctum');
 
@@ -183,10 +170,7 @@ class AttendeeIdCardTest extends TestCase
         $path = UploadedFile::fake()->image('background.png')->store("events/{$event->id}", 'public');
         $event->update(['id_card_background_path' => $path]);
 
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create();
+        $registration = Attendee::factory()->for($event)->for($org)->create();
 
         (new GenerateAttendeeIdCardJob($registration))->handle();
 
@@ -200,10 +184,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create(['id_card_generated_at' => now()]);
+        $registration = Attendee::factory()->for($event)->for($org)->create(['id_card_generated_at' => now()]);
 
         $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
             'id_card_font_color' => '#ff0000',
@@ -220,10 +201,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create(['id_card_font_color' => '#ff0000']);
-        EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create(['id_card_generated_at' => now()]);
+        Attendee::factory()->for($event)->for($org)->create(['id_card_generated_at' => now()]);
 
         $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
             'name' => 'Updated Event Name',
@@ -295,10 +273,7 @@ class AttendeeIdCardTest extends TestCase
 
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->create(['id_card_font_color' => '#ff0000']);
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org)->create(['first_name' => 'John', 'last_name' => 'Doe']))
-            ->create();
+        $registration = $this->registerInEvent($event, Attendee::factory()->for($org)->create(['first_name' => 'John', 'last_name' => 'Doe']));
 
         (new GenerateAttendeeIdCardJob($registration))->handle();
 
@@ -314,10 +289,7 @@ class AttendeeIdCardTest extends TestCase
         $org = Organization::factory()->create();
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create(['id_card_font_color' => '#ff0000']);
-        EventRegistration::factory()
-            ->for($event)
-            ->for(Attendee::factory()->for($org))
-            ->create(['id_card_generated_at' => now()]);
+        Attendee::factory()->for($event)->for($org)->create(['id_card_generated_at' => now()]);
 
         $this->actingAs($orgAdmin, 'sanctum')->patchJson("/api/v1/events/{$event->id}", [
             'id_card_font_color' => null,

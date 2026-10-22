@@ -1086,26 +1086,31 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
     post:
       tags: [Attendees]
-      summary: Create an attendee (master record)
+      summary: Create an attendee (one person's registration in one event)
       description: >
-        Runs duplicate detection first (normalized first/middle/last name match, scoped to the
-        organization). If matches are found and `override_duplicate` is not `true`, returns
-        `409` with the candidate list instead of creating the record.
+        An Attendee is per event: this creates the person's registration in `event_id`, with a
+        unique `qr_token`, and queues the ID card. The organization is taken from the event;
+        a client-sent `organization_id` is ignored. Runs duplicate detection first (normalized
+        first/middle/last name match among the event's attendees). If matches are found and
+        `override_duplicate` is not `true`, returns `409` with the candidate list instead of
+        creating the record. The response carries the registration view in `registration`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [first_name, last_name]
+              required: [event_id, first_name, last_name, organization_level, union_id]
               properties:
-                organization_id:
+                event_id: { type: integer, description: "The event the person registers in." }
+                auto_register:
                   {
-                    type: integer,
-                    nullable: true,
-                    description: "Required for Super Admins.",
+                    type: boolean,
+                    deprecated: true,
+                    description: "Ignored. The created Attendee is always the event registration.",
                   }
-                union_id: { type: integer, nullable: true }
+                organization_level: { type: string, enum: [union, mission] }
+                union_id: { type: integer }
                 mission_id: { type: integer, nullable: true }
                 church_id: { type: integer, nullable: true }
                 first_name: { type: string, maxLength: 100 }
@@ -1919,12 +1924,14 @@ paths:
       tags: [Event Registrations]
       summary: Register an attendee for the event
       description: >
-        One call does either: (a) register an existing attendee — pass `attendee_id`; or
-        (b) create a brand-new attendee (scoped to this event's organization) and register them
-        in the same request — pass `first_name`/`last_name` (+ optional `middle_name`,
-        `union_id`, `mission_id`). New-attendee creation runs the same duplicate-detection check
-        as `POST /attendees` and returns `409` unless `override_duplicate` is `true`. A unique,
-        non-guessable `qr_token` is generated for the new registration either way.
+        One call does either: (a) register a known person — pass `attendee_id` of any of their
+        earlier Attendees; a new Attendee for this event is created, prefilled from it (the earlier
+        row is untouched; `422` if the person is already in this event); or (b) create a brand-new
+        Attendee (scoped to this event's organization) — pass `first_name`/`last_name` (+ optional
+        `middle_name`, `union_id`, `mission_id`). New-attendee creation runs the same
+        duplicate-detection check among the event's attendees and returns `409` unless
+        `override_duplicate` is `true`. A unique, non-guessable `qr_token` is generated for the new
+        registration either way. A registration is an Attendee row: its `id` and `attendee_id` are equal.
       requestBody:
         required: true
         content:
@@ -2288,7 +2295,7 @@ paths:
       tags: [Attendance]
       summary: Record attendance from a QR scan
       description: >
-        Resolves the registration by `qr_token` scoped to `event_id`, then applies the same
+        Resolves the Attendee by `qr_token` scoped to `event_id`, then applies the same
         window/duplicate rules as manual attendance (see below).
       requestBody:
         required: true
@@ -2315,17 +2322,29 @@ paths:
     post:
       tags: [Attendance]
       summary: Record attendance manually (fallback when QR scanning is unavailable)
+      description: >
+        Pass `attendee_id` (an Attendee of `event_id`). A second check-in for the same session
+        returns `422` with `Already Checked In.` (sync-batch reports it as `duplicate`). The old `event_registration_id` is still
+        accepted, deprecated, and translated through the Attendee's `legacy_registration_id`;
+        it is removed in Release 2. One of the two is required.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [event_id, session_id, event_registration_id]
+              required: [event_id, session_id]
               properties:
                 event_id: { type: integer }
                 session_id: { type: integer }
-                event_registration_id: { type: integer }
+                attendee_id: { type: integer, nullable: true }
+                event_registration_id:
+                  {
+                    type: integer,
+                    nullable: true,
+                    deprecated: true,
+                    description: "Use attendee_id. Removed in Release 2.",
+                  }
                 override:
                   type: boolean
                   default: false
@@ -4129,7 +4148,8 @@ components:
       type: object
       properties:
         id: { type: integer }
-        organization_id: { type: integer }
+        organization_id: { type: integer, description: "Follows the event's organization; never client input." }
+        event_id: { type: integer, nullable: true, description: "The event this Attendee is registered in." }
         union_id: { type: integer, nullable: true }
         mission_id: { type: integer, nullable: true }
         church_id: { type: integer, nullable: true }
@@ -4239,6 +4259,7 @@ components:
 
     EventRegistration:
       type: object
+      description: The registration view of an Attendee row; `id` and `attendee_id` are the same value.
       properties:
         id: { type: integer }
         event_id: { type: integer }
@@ -4290,13 +4311,21 @@ components:
       type: object
       properties:
         id: { type: integer }
-        event_registration_id: { type: integer }
+        attendee_id: { type: integer }
+        event_registration_id:
+          { type: integer, deprecated: true, description: "Alias of attendee_id. Removed in Release 2." }
         event_session_id: { type: integer }
         check_in_at: { type: string, format: date-time, nullable: true }
         check_out_at: { type: string, format: date-time, nullable: true }
         method: { $ref: "#/components/schemas/AttendanceMethod" }
         recorded_by: { type: integer, nullable: true, description: "User id." }
-        event_registration: { $ref: "#/components/schemas/EventRegistration" }
+        attendee: { $ref: "#/components/schemas/EventRegistration" }
+        event_registration:
+          {
+            deprecated: true,
+            description: "Alias of `attendee`. Removed in Release 2.",
+            allOf: [{ $ref: "#/components/schemas/EventRegistration" }],
+          }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -4318,7 +4347,9 @@ components:
     EventSessionRosterEntry:
       type: object
       properties:
-        event_registration_id: { type: integer }
+        attendee_id: { type: integer }
+        event_registration_id:
+          { type: integer, deprecated: true, description: "Alias of attendee_id. Removed in Release 2." }
         attendee_name: { type: string }
         attendee_photo_url: { type: string, nullable: true }
         union: { type: string, nullable: true }
@@ -4498,7 +4529,14 @@ components:
         event_id: { type: integer }
         session_id: { type: integer }
         qr_token: { type: string, nullable: true }
-        event_registration_id: { type: integer, nullable: true }
+        attendee_id: { type: integer, nullable: true }
+        event_registration_id:
+          {
+            type: integer,
+            nullable: true,
+            deprecated: true,
+            description: "Use attendee_id. Translated through legacy_registration_id; removed in Release 2.",
+          }
         scanned_at: { type: string, example: "2026-10-22 09:15:00", nullable: true }
         method: { type: string, enum: [qr, manual] }
         override: { type: boolean }

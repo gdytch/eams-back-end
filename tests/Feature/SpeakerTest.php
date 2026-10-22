@@ -9,7 +9,6 @@ use App\Models\EventProgram;
 use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
-use App\Models\EventRegistration;
 use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\User;
@@ -143,7 +142,7 @@ class SpeakerTest extends TestCase
     {
         $user = User::factory()->attendee()->create();
         $attendee = Attendee::factory()->create(['user_id' => $user->id]);
-        EventRegistration::factory()->for($this->event)->for($attendee)->create();
+        $this->registerInEvent($this->event, $attendee);
         Speaker::factory()->for($this->event)->create(['name' => 'Registered Event Speaker']);
         $otherEvent = Event::factory()->create();
 

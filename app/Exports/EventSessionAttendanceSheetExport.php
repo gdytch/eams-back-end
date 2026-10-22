@@ -20,8 +20,8 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
 
     public function collection(): Collection
     {
-        return $this->event->registrations()
-            ->with('attendee', 'attendanceRecords')
+        return $this->event->attendees()
+            ->with('union', 'mission', 'attendanceRecords')
             ->get()
             ->map(function ($registration) {
                 $attendanceRecord = $registration->attendanceRecords->firstWhere('event_session_id', $this->session->id);
@@ -35,15 +35,15 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
                 };
 
                 return [
-                    'First Name' => $registration->attendee->first_name,
-                    'Middle Name' => $registration->attendee->middle_name ?? '',
-                    'Last Name' => $registration->attendee->last_name,
-                    'Organization Level Code' => $registration->attendee->organization_level_code ?? '',
+                    'First Name' => $registration->first_name,
+                    'Middle Name' => $registration->middle_name ?? '',
+                    'Last Name' => $registration->last_name,
+                    'Organization Level Code' => $registration->organization_level_code ?? '',
                     'Status' => $status,
                     'Method' => ucfirst($method),
                     'Check-in Time' => $checkInAt?->format('Y-m-d H:i:s') ?? '',
                     'Check-out Time' => $checkOutAt?->format('Y-m-d H:i:s') ?? '',
-                    'Remarks' => $registration->attendee->remarks ?? '',
+                    'Remarks' => $registration->remarks ?? '',
                 ];
             });
     }
@@ -53,7 +53,7 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
         // Sanitize session name: remove Excel-forbidden chars, truncate to fit within 31-char limit
         $sanitized = preg_replace('/[\\\\\/:*?\[\]]/', '', $this->session->name);
         $date = $this->session->session_date->format('m-d');
-        $title = substr($sanitized, 0, 25) . ' ' . $date;
+        $title = substr($sanitized, 0, 25).' '.$date;
 
         return substr($title, 0, 31);
     }

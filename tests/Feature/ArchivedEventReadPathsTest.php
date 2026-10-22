@@ -7,7 +7,6 @@ use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventProgram;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\IdCardGridDownload;
 use App\Models\Organization;
@@ -88,8 +87,7 @@ class ArchivedEventReadPathsTest extends TestCase
             ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertForbidden()->assertJsonPath('message', 'This event is archived.');
-        $this->assertDatabaseMissing('event_registrations', ['event_id' => $event->id]);
-        $this->assertDatabaseMissing('attendees', ['user_id' => $user->id]);
+        $this->assertDatabaseMissing('attendees', ['event_id' => $event->id, 'user_id' => $user->id]);
     }
 
     public function test_attendee_with_only_archived_events_can_log_in_and_load_the_dashboard(): void
@@ -124,11 +122,10 @@ class ArchivedEventReadPathsTest extends TestCase
     {
         $org = Organization::factory()->create();
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
-        $attendee = Attendee::factory()->for($org)->for($user)->create();
         $upcoming = Event::factory()->for($org)->create(['start_date' => now()->addDays(3), 'end_date' => now()->addDays(4)]);
         $past = Event::factory()->for($org)->create(['start_date' => now()->subDays(9), 'end_date' => now()->subDays(8)]);
-        EventRegistration::factory()->for($upcoming)->for($attendee)->create();
-        EventRegistration::factory()->for($past)->for($attendee)->create();
+        Attendee::factory()->for($upcoming)->for($user)->create();
+        Attendee::factory()->for($past)->for($user)->create();
 
         $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')
             ->assertOk()
@@ -251,7 +248,7 @@ class ArchivedEventReadPathsTest extends TestCase
         $event = Event::factory()->for($org)->create(['archived_at' => now()]);
         $session = EventSession::factory()->for($event)->create();
         EventProgram::factory()->for($event)->create();
-        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        Attendee::factory()->for($event)->create();
 
         foreach ([User::factory()->orgAdmin()->for($org)->create(), User::factory()->superAdmin()->create()] as $user) {
             foreach ($this->checkerReadPaths($event, $session) as $path) {
@@ -268,7 +265,7 @@ class ArchivedEventReadPathsTest extends TestCase
         [$checker, $event, $session] = $this->checkerAssignedToEvent();
         $active = Event::factory()->for($event->organization)->create();
         $activeSession = EventSession::factory()->for($active)->create();
-        $activeRegistration = EventRegistration::factory()->for($active)->for(Attendee::factory()->for($event->organization))->create();
+        $activeRegistration = Attendee::factory()->for($active)->create();
         $checker->accessibleEvents()->attach($active);
         AttendanceRecord::factory()->for($event->registrations()->first())->for($session, 'eventSession')->create(['recorded_by' => $checker->id]);
         $activeScan = AttendanceRecord::factory()->for($activeRegistration)->for($activeSession, 'eventSession')->create(['recorded_by' => $checker->id]);
@@ -288,7 +285,7 @@ class ArchivedEventReadPathsTest extends TestCase
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create(['archived_at' => now()]);
-        $own = EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org)->for($checker))->create();
+        $own = Attendee::factory()->for($event)->for($checker)->create();
 
         $this->actingAs($checker, 'sanctum')
             ->get("/api/v1/events/{$event->id}/registrations/{$own->id}/id-card")
@@ -299,20 +296,19 @@ class ArchivedEventReadPathsTest extends TestCase
     }
 
     /**
-     * @return array{0: User, 1: EventRegistration, 2: Event, 3: EventSession}
+     * @return array{0: User, 1: Attendee, 2: Event, 3: EventSession}
      */
     private function attendeeRegisteredToArchivedUpcomingEvent(): array
     {
         $org = Organization::factory()->create();
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
-        $attendee = Attendee::factory()->for($org)->for($user)->create();
         $event = Event::factory()->for($org)->create([
             'start_date' => now()->addDays(5),
             'end_date' => now()->addDays(6),
             'archived_at' => now(),
         ]);
         $session = EventSession::factory()->for($event)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = Attendee::factory()->for($event)->for($user)->create();
         AttendanceRecord::factory()->for($registration)->for($session, 'eventSession')->create();
 
         return [$user, $registration, $event, $session];
@@ -328,7 +324,7 @@ class ArchivedEventReadPathsTest extends TestCase
         $event = Event::factory()->for($org)->create();
         $session = EventSession::factory()->for($event)->create();
         EventProgram::factory()->for($event)->create();
-        EventRegistration::factory()->for($event)->for(Attendee::factory()->for($org))->create();
+        Attendee::factory()->for($event)->create();
         $checker->accessibleEvents()->attach($event);
 
         return [$checker, $event, $session];

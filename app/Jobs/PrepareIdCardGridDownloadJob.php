@@ -63,7 +63,7 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
              *
              * Keep this query consistent with the existing V2 job.
              */
-            $registrationsQuery = $event->registrations()->with('attendee');
+            $registrationsQuery = $event->attendees();
 
             if ($download->registration_ids !== null) {
                 $registrationsQuery->whereIn(
@@ -87,8 +87,7 @@ class PrepareIdCardGridDownloadJob implements ShouldQueue
              * has additional readiness conditions.
              */
             $readyRegistrations = $registrations->filter(
-                fn ($registration) => $registration->attendee &&
-                    $registration->id_card_images_path
+                fn ($registration) => $registration->id_card_images_path
             )->values();
 
             if ($readyRegistrations->isEmpty()) {

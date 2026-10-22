@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Exports\EventAttendanceExport;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
@@ -29,7 +28,7 @@ class EventAttendanceReportTest extends TestCase
             'first_name' => '=1+1',
             'remarks' => '=1+1',
         ]);
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
 
         $xlsx = Excel::raw(new EventAttendanceExport($event), \Maatwebsite\Excel\Excel::XLSX);
         $path = tempnam(sys_get_temp_dir(), 'ams-export-');
@@ -58,10 +57,7 @@ class EventAttendanceReportTest extends TestCase
 
         for ($i = 0; $i < $attendeeCount; $i++) {
             $attendee = Attendee::factory()->for($org)->create();
-            $registration = EventRegistration::factory()
-                ->for($event)
-                ->for($attendee)
-                ->create();
+            $registration = $this->registerInEvent($event, $attendee);
 
             // Mark some as checked in.
             if ($i < 3) {

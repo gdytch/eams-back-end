@@ -5,7 +5,6 @@ namespace Database\Seeders;
 use App\Models\Attendee;
 use App\Models\Church;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Mission;
 use App\Models\Organization;
@@ -52,8 +51,8 @@ class DatabaseSeeder extends Seeder
         $churches = [];
         foreach ($missions as $mission) {
             $churches[$mission->id] = [
-                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'Central ' . $mission->name . ' Church']),
-                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'District ' . $mission->name . ' Church']),
+                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'Central '.$mission->name.' Church']),
+                Church::factory()->for($organization)->for($union)->for($mission)->create(['name' => 'District '.$mission->name.' Church']),
             ];
         }
 
@@ -69,7 +68,6 @@ class DatabaseSeeder extends Seeder
             'end_date' => Carbon::now()->subMonths(1)->addDays(3)->format('Y-m-d'),
         ]);
 
-
         $event = Event::factory()->for($organization)->create([
             'name' => 'Annual Convention 2027',
             'created_by' => $orgAdmin->id,
@@ -80,53 +78,46 @@ class DatabaseSeeder extends Seeder
         $this->call(SpeakerSeeder::class);
         $this->call(EventProgramSeeder::class);
 
-        $attendees = Attendee::factory()
-            ->recycle($organization)
-            ->count(350)
-            ->create(['created_by' => $checker->id])
-            ->each(function (Attendee $attendee, int $index) use ($missions, $churches, $union, $event, $checker) {
-                $mission = $missions[$index % count($missions)];
-                $missionChurches = $churches[$mission->id];
-                $church = $missionChurches[$index % count($missionChurches)];
+        // Attendee rows are per event, so build profiles once and register each in every event below.
+        $profiles = collect(range(0, 349))->map(function (int $index) use ($missions, $churches, $union, $checker) {
+            $mission = $missions[$index % count($missions)];
+            $missionChurches = $churches[$mission->id];
 
-                if ($index < 50) {
-                    $organizationLevel = 'union';
-                } else {
-                    $organizationLevel = 'mission';
-                }
-                $attendee->update([
-                    'union_id' => $union->id,
-                    'mission_id' => $mission->id,
-                    'organization_level' => $organizationLevel,
-                    'church_id' => $church->id,
-                    'mobile_no' => fake()->phoneNumber(),
-                    'email_address' => fake()->unique()->safeEmail(),
-                    'remarks' => fake()->optional(0.7)->sentence(),
-                ]);
-            });
+            return [
+                'first_name' => fake()->firstName(),
+                'middle_name' => fake()->optional()->firstName(),
+                'last_name' => fake()->lastName(),
+                'organization_level' => $index < 50 ? 'union' : 'mission',
+                'union_id' => $union->id,
+                'mission_id' => $mission->id,
+                'church_id' => $missionChurches[$index % count($missionChurches)]->id,
+                'mobile_no' => fake()->phoneNumber(),
+                'email_address' => fake()->unique()->safeEmail(),
+                'remarks' => fake()->optional(0.7)->sentence(),
+                'created_by' => $checker->id,
+            ];
+        });
 
         // Seed reviewable duplicate groups for the admin duplicate-resolution screen.
         $duplicateMission = $missions[0];
         $duplicateChurch = $churches[$duplicateMission->id][0];
-        $duplicateAttendees = collect([
+        $duplicateProfiles = collect([
             ['first_name' => 'Demo', 'last_name' => 'Duplicate'],
             ['first_name' => 'demo', 'last_name' => '  duplicate '],
             ['first_name' => 'Sample', 'last_name' => 'Duplicate'],
             ['first_name' => 'sample', 'last_name' => 'duplicate'],
-        ])->map(function (array $name) use ($organization, $checker, $union, $duplicateMission, $duplicateChurch) {
-            return Attendee::factory()->for($organization)->create([
-                ...$name,
-                'middle_name' => null,
-                'organization_level' => 'mission',
-                'union_id' => $union->id,
-                'mission_id' => $duplicateMission->id,
-                'church_id' => $duplicateChurch->id,
-                'mobile_no' => null,
-                'email_address' => null,
-                'created_by' => $checker->id,
-            ]);
-        });
-        $attendees = $attendees->concat($duplicateAttendees);
+        ])->map(fn (array $name) => [
+            ...$name,
+            'middle_name' => null,
+            'organization_level' => 'mission',
+            'union_id' => $union->id,
+            'mission_id' => $duplicateMission->id,
+            'church_id' => $duplicateChurch->id,
+            'mobile_no' => null,
+            'email_address' => null,
+            'created_by' => $checker->id,
+        ]);
+        $profiles = $profiles->concat($duplicateProfiles);
 
         $events = Event::all();
         foreach ($events as $event) {
@@ -151,8 +142,9 @@ class DatabaseSeeder extends Seeder
                 $day++;
             }
 
-            foreach ($attendees as $attendee) {
-                EventRegistration::factory()->for($event)->for($attendee)->create([
+            foreach ($profiles as $profile) {
+                Attendee::factory()->for($event)->create([
+                    ...$profile,
                     'registered_by' => $checker->id,
                 ]);
             }

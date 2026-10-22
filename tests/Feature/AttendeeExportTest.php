@@ -6,7 +6,6 @@ use App\Exports\AttendeeExport;
 use App\Models\Attendee;
 use App\Models\Church;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
@@ -100,8 +99,8 @@ class AttendeeExportTest extends TestCase
         $attendee2 = Attendee::factory()->for($org)->create();
         $attendee3 = Attendee::factory()->for($org)->create();
 
-        EventRegistration::factory()->for($event)->for($attendee1)->create();
-        EventRegistration::factory()->for($event)->for($attendee2)->create();
+        $this->registerInEvent($event, $attendee1);
+        $this->registerInEvent($event, $attendee2);
 
         $response = $this->actingAs($checker, 'sanctum')
             ->getJson("/api/v1/attendees/export?format=xlsx&event_id={$event->id}");
@@ -165,7 +164,7 @@ class AttendeeExportTest extends TestCase
 
         $event = Event::factory()->for($org)->create(['name' => 'Leadership Summit 2024']);
         $attendee = Attendee::factory()->for($org)->create();
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
 
         $response = $this->actingAs($checker, 'sanctum')
             ->getJson("/api/v1/attendees/export?format=pdf&event_id={$event->id}");

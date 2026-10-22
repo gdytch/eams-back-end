@@ -21,7 +21,13 @@ class PublicEventController extends Controller
      */
     public function show(string $eventInviteToken): JsonResponse|PublicEventResource
     {
-        $event = $this->resolvePublishedEvent($eventInviteToken);
+        $event = $this->resolveEventByInviteToken($eventInviteToken);
+
+        // Archived events show the closed state whatever their status; drafts stay hidden.
+        abort_unless(
+            $event->status === EventStatus::Published || ($event->isArchived() && $event->status !== EventStatus::Draft),
+            404
+        );
 
         return PublicEventResource::make($event);
     }
@@ -31,8 +37,7 @@ class PublicEventController extends Controller
      */
     public function register(Request $request, string $eventInviteToken, AttendeeRegistrationService $registrationService): JsonResponse
     {
-        $event = $this->resolvePublishedEvent($eventInviteToken);
-        $this->authorize('register', $event);
+        $event = $this->resolveEventOpenForRegistration($eventInviteToken);
         $user = $request->user();
 
         return DB::transaction(function () use ($event, $user, $registrationService) {
@@ -61,17 +66,36 @@ class PublicEventController extends Controller
     }
 
     /**
+     * Resolve a published event that still accepts registrations (403 once archived).
+     */
+    private function resolveEventOpenForRegistration(string $inviteToken): Event
+    {
+        $event = $this->resolvePublishedEvent($inviteToken);
+        abort_if($event->isArchived(), 403, 'This event is archived.');
+
+        return $event;
+    }
+
+    /**
      * Resolve event by invite token, ensuring it's published (404 otherwise).
      */
     private function resolvePublishedEvent(string $inviteToken): Event
     {
-        $event = Event::withoutGlobalScopes()
-            ->where('invite_token', $inviteToken)
-            ->with(['organization', 'sessions', 'program.items', 'speakers.programItems'])
-            ->firstOrFail();
+        $event = $this->resolveEventByInviteToken($inviteToken);
 
         abort_unless($event->status === EventStatus::Published, 404);
 
         return $event;
+    }
+
+    /**
+     * Resolve event by invite token in any status (404 when the token is unknown).
+     */
+    private function resolveEventByInviteToken(string $inviteToken): Event
+    {
+        return Event::withoutGlobalScopes()
+            ->where('invite_token', $inviteToken)
+            ->with(['organization', 'sessions', 'program.items', 'speakers.programItems'])
+            ->firstOrFail();
     }
 }

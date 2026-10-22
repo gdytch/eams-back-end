@@ -481,6 +481,10 @@ paths:
         with attendance summaries, spotlight cards for next upcoming event and latest past event, and comprehensive
         statistics including attendance rate percentage. Returns an empty profile if the user has no linked Attendee
         master record yet.
+
+        Archived events are always listed as read-only past events, whatever their dates, and never as
+        upcoming or `next_event`. `has_upcoming_events` is false when there is nothing upcoming, for the
+        "no upcoming events" empty state.
       responses:
         "200": { $ref: "#/components/responses/AttendeeDashboardItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -511,7 +515,7 @@ paths:
           operational, scanning-focused view — whether the checker is restricted to specific
           events (`event_checker_access`) or has full org access, today's sessions to scan,
           upcoming events, and the checker's own scan activity (today/all-time counts plus the
-          last 10 scans they personally recorded).
+          last 10 scans they personally recorded). Archived events are left out of every figure.
 
         All three variants share a common `role`, `user`, and `generated_at` envelope.
       responses:
@@ -1309,7 +1313,8 @@ paths:
         Checkers only see events they have access to: every event in their organization by
         default, or a restricted subset if `event_checker_access` rows exist for them (see
         `PUT /users/{user}/event-access`). Archived events are left out unless `archived=1`,
-        which returns only archived events.
+        which returns only archived events. Checkers never see archived events, even with
+        `archived=1`; their `event_checker_access` rows are kept and the event returns on unarchive.
       parameters:
         - $ref: "#/components/parameters/Page"
         - name: archived
@@ -1365,6 +1370,9 @@ paths:
     get:
       tags: [Events]
       summary: Get an event
+      description: >
+        404 for checkers while the event is archived. The same applies to the event's session,
+        roster, attendance, quick-stats, registration, ID card and program read endpoints.
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -3148,7 +3156,8 @@ paths:
       summary: Search across the caller's accessible records
       description: >
         Results are grouped by category. Pass `category` to page through one group. Scoped to
-        `event_id` unless `all_events` is true. Throttled to 60 requests per minute.
+        `event_id` unless `all_events` is true. Checkers get no results from archived events.
+        Throttled to 60 requests per minute.
       parameters:
         - { name: q, in: query, required: true, schema: { type: string, minLength: 2, maxLength: 150 } }
         - { name: event_id, in: query, schema: { type: integer, minimum: 1 } }
@@ -3290,7 +3299,10 @@ paths:
     get:
       tags: [Public]
       summary: Get event landing page data by invite token
-      description: 404 unless the event is published.
+      description: >
+        404 unless the event is published. An archived event returns 200 with `closed: true`
+        whatever its status (except draft, which stays 404); the landing page then shows a
+        closed state and hides registration.
       security: []
       responses:
         "200":
@@ -3300,7 +3312,13 @@ paths:
               schema:
                 type: object
                 properties:
-                  data: { type: object, additionalProperties: true }
+                  data:
+                    type: object
+                    additionalProperties: true
+                    properties:
+                      closed:
+                        type: boolean
+                        description: True while the event is archived; registration is refused.
         "404": { $ref: "#/components/responses/NotFound" }
 
   /public/event/{eventInviteToken}/register:
@@ -3312,6 +3330,7 @@ paths:
       description: >
         Creates the user's attendee record if needed, then the registration, and queues the ID
         card. 201 for a new registration, 200 if already registered. 404 unless the event is published.
+        403 with "This event is archived." when the event is archived; nothing is created.
       responses:
         "200": { $ref: "#/components/responses/EventRegistrationItem" }
         "201": { $ref: "#/components/responses/EventRegistrationItem" }
@@ -3596,6 +3615,7 @@ components:
       properties:
         registration_id: { type: integer, description: "EventRegistration id" }
         event: { $ref: "#/components/schemas/Event" }
+        archived: { type: boolean, description: "Always false: archived events are listed as past events" }
         qr_token: { type: string, description: "Opaque token for QR code check-in" }
         id_card_ready: { type: boolean, description: "Whether the ID card has been generated" }
         id_card_url:
@@ -3623,10 +3643,14 @@ components:
 
     PastEventData:
       type: object
-      description: Event registration data for a past event.
+      description: Event registration data for a past or archived event (read-only).
       properties:
         registration_id: { type: integer, description: "EventRegistration id" }
         event: { $ref: "#/components/schemas/Event" }
+        archived: { type: boolean, description: "True when the event is archived" }
+        qr_token: { type: string, description: "Opaque token for QR code check-in" }
+        id_card_ready: { type: boolean, description: "Whether the ID card has been generated" }
+        id_card_url: { type: string, description: "URL to download the ID card PDF" }
         attendance_summary: { $ref: "#/components/schemas/AttendanceSummary" }
 
     EventRegistrationStats:
@@ -3645,8 +3669,8 @@ components:
       description: Aggregate statistics for the attendee.
       properties:
         total_events_registered: { type: integer, description: "Total events the attendee is registered for" }
-        total_upcoming_events: { type: integer, description: "Events with end_date >= today" }
-        total_past_events: { type: integer, description: "Events with end_date < today" }
+        total_upcoming_events: { type: integer, description: "Non-archived events with end_date >= today" }
+        total_past_events: { type: integer, description: "Events with end_date < today, plus archived events" }
         total_sessions_attended: { type: integer, description: "Total sessions checked in to" }
         total_sessions_available: { type: integer, description: "Total sessions across past events" }
         attendance_rate: { type: number, format: float, description: "Percentage (0-100) of available sessions attended, rounded to 1 decimal" }
@@ -3656,6 +3680,9 @@ components:
       properties:
         profile: { $ref: "#/components/schemas/AttendeeProfileData" }
         account: { $ref: "#/components/schemas/AttendeeAccountData" }
+        has_upcoming_events:
+          type: boolean
+          description: "False when upcoming_events is empty, e.g. when every registered event is archived"
         upcoming_events:
           type: array
           items: { $ref: "#/components/schemas/UpcomingEventData" }
@@ -4003,7 +4030,7 @@ components:
           description: >
             Whether this checker has explicit event_checker_access rows (true = restricted to
             accessible_events_count events only; false = full organization access, the default).
-        accessible_events_count: { type: integer }
+        accessible_events_count: { type: integer, description: "Accessible events that are not archived" }
         upcoming_events:
           type: array
           description: "Next 5 upcoming accessible events, ordered by start_date ascending."

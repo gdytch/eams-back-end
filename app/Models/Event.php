@@ -64,6 +64,15 @@ class Event extends Model
         return $this->archived_at !== null;
     }
 
+    /**
+     * Archived events are hidden from checkers until unarchived; their checker assignments are kept.
+     */
+    public function isHiddenFrom(User $user): bool
+    {
+        return $user->isChecker() && $this->isArchived();
+    }
+
+    /** @return HasMany<EventSession, $this> */
     public function sessions(): HasMany
     {
         return $this->hasMany(EventSession::class);

@@ -16,11 +16,15 @@ class EventPolicy
         return true;
     }
 
-    public function view(User $user, Event $event): bool
+    public function view(User $user, Event $event): Response|bool
     {
         if ($user->isAttendee()) {
             return $event->status->value === 'published'
                 && $user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->exists();
+        }
+
+        if ($event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
@@ -67,14 +71,22 @@ class EventPolicy
         return $user->isSuperAdmin();
     }
 
-    public function manageIdCards(User $user, Event $event): bool
+    public function manageIdCards(User $user, Event $event): Response|bool
     {
+        if ($event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         return ($user->isSuperAdmin() || (($user->isOrgAdmin() || $user->isChecker()) && $user->organization_id === $event->organization_id))
             && $user->hasAccessToEvent($event);
     }
 
-    public function viewStaffData(User $user, Event $event): bool
+    public function viewStaffData(User $user, Event $event): Response|bool
     {
+        if ($event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         return ($user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker())
             && ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
             && $user->hasAccessToEvent($event);

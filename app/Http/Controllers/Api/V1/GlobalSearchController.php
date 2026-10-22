@@ -101,8 +101,9 @@ class GlobalSearchController extends Controller
         if (! $user->isSuperAdmin()) {
             $events->where('events.organization_id', $user->organization_id);
         }
-        if ($user->isChecker() && $user->accessibleEvents()->exists()) {
-            $events->whereIn('events.id', $user->accessibleEvents()->select('events.id'));
+        if ($user->isChecker()) {
+            $events->whereNull('events.archived_at')
+                ->when($user->accessibleEvents()->exists(), fn (Builder $query) => $query->whereIn('events.id', $user->accessibleEvents()->select('events.id')));
         }
 
         return $events;

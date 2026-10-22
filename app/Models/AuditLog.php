@@ -65,7 +65,7 @@ class AuditLog extends Model
             'auditable_id' => $auditable?->getKey(),
             'changes' => $changes,
             'ip_address' => RequestFacade::ip(),
-            'user_agent' => RequestFacade::userAgent(),
+            'user_agent' => RequestFacade::userAgent() !== null ? mb_substr(RequestFacade::userAgent(), 0, 255) : null,
         ]);
     }
 }

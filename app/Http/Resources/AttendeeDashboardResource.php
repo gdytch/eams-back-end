@@ -61,6 +61,7 @@ class AttendeeDashboardResource extends JsonResource
         return [
             'profile' => $profile,
             'account' => $account,
+            'has_upcoming_events' => $this->resource['has_upcoming_events'],
             'upcoming_events' => $this->transformEvents($this->resource['upcoming_events'], false),
             'past_events' => $this->transformEvents($this->resource['past_events'], true),
             'next_event' => $this->resource['next_event'] ? $this->formatNextEvent($this->resource['next_event']) : null,
@@ -92,44 +93,46 @@ class AttendeeDashboardResource extends JsonResource
                     : null,
                 'id_card_font_color' => $event->id_card_font_color ?? '#000000',
                 'banner_urls' => $event->banner_paths
-                    ? collect($event->banner_paths)->mapWithKeys(fn($path, $key) => [
+                    ? collect($event->banner_paths)->mapWithKeys(fn ($path, $key) => [
                         $key => Storage::disk('public')->url($path),
                     ])->toArray()
                     : null,
                 'created_at' => $event->created_at,
                 'updated_at' => $event->updated_at,
                 'invite_token' => $event->invite_token,
+                'archived_at' => $event->archived_at,
             ];
 
             $formatted = [
                 'registration_id' => $eventData['registration_id'],
                 'event' => $eventArray,
+                'archived' => $eventData['archived'],
+                'qr_token' => $eventData['qr_token'],
+                'id_card_ready' => $eventData['id_card_ready'],
+                'id_card_url' => $eventData['id_card_url'],
             ];
+
+            if (! $includeAttendance) {
+                $formatted['banner'] = $eventData['banner'];
+                $formatted['breakouts'] = $eventData['breakouts'];
+            }
 
             if ($includeAttendance) {
                 $formatted['attendance_summary'] = $eventData['attendance_summary'];
+            } elseif ($eventData['next_session']) {
+                $session = $eventData['next_session'];
+                $formatted['next_session'] = [
+                    'id' => $session['id'],
+                    'event_id' => $session['event_id'],
+                    'name' => $session['name'],
+                    'description' => $session['description'],
+                    'session_date' => $session['session_date'],
+                    'start_time' => $session['start_time'],
+                    'end_time' => $session['end_time'],
+                    'check_in_opens_at' => $session['check_in_opens_at'],
+                ];
             } else {
-                $formatted['qr_token'] = $eventData['qr_token'];
-                $formatted['id_card_ready'] = $eventData['id_card_ready'];
-                $formatted['id_card_url'] = $eventData['id_card_url'];
-                $formatted['banner'] = $eventData['banner'];
-                $formatted['breakouts'] = $eventData['breakouts'];
-
-                if ($eventData['next_session']) {
-                    $session = $eventData['next_session'];
-                    $formatted['next_session'] = [
-                        'id' => $session['id'],
-                        'event_id' => $session['event_id'],
-                        'name' => $session['name'],
-                        'description' => $session['description'],
-                        'session_date' => $session['session_date'],
-                        'start_time' => $session['start_time'],
-                        'end_time' => $session['end_time'],
-                        'check_in_opens_at' => $session['check_in_opens_at'],
-                    ];
-                } else {
-                    $formatted['next_session'] = null;
-                }
+                $formatted['next_session'] = null;
             }
 
             return $formatted;

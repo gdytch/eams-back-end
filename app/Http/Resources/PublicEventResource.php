@@ -30,6 +30,7 @@ class PublicEventResource extends JsonResource
             ),
             'breakouts' => BreakoutResource::collection($this->relationLoaded('breakouts') ? $this->breakouts : []),
             'banner_urls' => $this->banner_urls,
+            'closed' => $this->resource->isArchived(),
         ];
     }
 }

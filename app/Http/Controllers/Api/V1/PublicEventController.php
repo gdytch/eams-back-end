@@ -15,7 +15,13 @@ class PublicEventController extends Controller
      */
     public function show(string $eventInviteToken): JsonResponse|PublicEventResource
     {
-        $event = $this->resolvePublishedEvent($eventInviteToken);
+        $event = $this->resolveEventByInviteToken($eventInviteToken);
+
+        // Archived events show the closed state whatever their status; drafts stay hidden.
+        abort_unless(
+            $event->status === EventStatus::Published || ($event->isArchived() && $event->status !== EventStatus::Draft),
+            404
+        );
 
         return PublicEventResource::make($event);
     }
@@ -25,10 +31,7 @@ class PublicEventController extends Controller
      */
     private function resolvePublishedEvent(string $inviteToken): Event
     {
-        $event = Event::withoutGlobalScopes()
-            ->where('invite_token', $inviteToken)
-            ->with(['organization', 'sessions', 'program.items', 'speakers.programItems'])
-            ->firstOrFail();
+        $event = $this->resolveEventByInviteToken($inviteToken);
 
         abort_unless($event->status === EventStatus::Published, 404);
 
@@ -40,5 +43,16 @@ class PublicEventController extends Controller
         }
 
         return $event;
+    }
+
+    /**
+     * Resolve event by invite token in any status (404 when the token is unknown).
+     */
+    private function resolveEventByInviteToken(string $inviteToken): Event
+    {
+        return Event::withoutGlobalScopes()
+            ->where('invite_token', $inviteToken)
+            ->with(['organization', 'sessions', 'program.items', 'speakers.programItems'])
+            ->firstOrFail();
     }
 }

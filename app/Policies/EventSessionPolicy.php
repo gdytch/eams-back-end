@@ -17,18 +17,26 @@ class EventSessionPolicy
         return true;
     }
 
-    public function view(User $user, EventSession $eventSession): bool
+    public function view(User $user, EventSession $eventSession): Response|bool
     {
         if ($user->isAttendee()) {
             return $user->attendees()->withoutGlobalScopes()->where('event_id', $eventSession->event_id)->exists();
+        }
+
+        if ($eventSession->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $eventSession->event->organization_id)
             && $user->hasAccessToEvent($eventSession->event);
     }
 
-    public function viewRoster(User $user, EventSession $eventSession): bool
+    public function viewRoster(User $user, EventSession $eventSession): Response|bool
     {
+        if ($eventSession->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         return $user->can('viewStaffData', $eventSession->event);
     }
 

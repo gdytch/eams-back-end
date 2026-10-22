@@ -17,8 +17,12 @@ class EventProgramPolicy
         return true;
     }
 
-    public function view(User $user, EventProgram $program): bool
+    public function view(User $user, EventProgram $program): Response|bool
     {
+        if ($program->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         return ($user->isSuperAdmin() || $user->organization_id === $program->event->organization_id)
             && $user->hasAccessToEvent($program->event);
     }

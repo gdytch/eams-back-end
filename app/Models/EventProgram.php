@@ -51,6 +51,7 @@ class EventProgram extends Model
         return $slug;
     }
 
+    /** @return BelongsTo<Event, $this> */
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);

@@ -8,7 +8,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
-class StoreEventRegistrationRequest extends FormRequest
+class StoreEventAttendeeRequest extends FormRequest
 {
     public function authorize(): Response|bool
     {

@@ -4,7 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class ExportEventRegistrationsQrRequest extends FormRequest
+class ExportEventAttendeesQrRequest extends FormRequest
 {
     public function authorize(): bool
     {

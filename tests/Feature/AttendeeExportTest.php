@@ -24,11 +24,12 @@ class AttendeeExportTest extends TestCase
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
-        Attendee::factory(3)->for($org)->create();
+        Attendee::factory(3)->for($event)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson('/api/v1/attendees/export?format=xlsx');
+            ->getJson("/api/v1/attendees/export?format=xlsx&event_id={$event->id}");
 
         $response->assertOk();
         $this->assertStringContainsString('spreadsheet', $response->headers->get('Content-Type'));
@@ -65,11 +66,12 @@ class AttendeeExportTest extends TestCase
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
-        Attendee::factory(3)->for($org)->create();
+        Attendee::factory(3)->for($event)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson('/api/v1/attendees/export?format=pdf');
+            ->getJson("/api/v1/attendees/export?format=pdf&event_id={$event->id}");
 
         $response->assertOk();
         $this->assertStringContainsString('pdf', $response->headers->get('Content-Type'));
@@ -79,46 +81,71 @@ class AttendeeExportTest extends TestCase
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
-        Attendee::factory(3)->for($org)->create();
+        Attendee::factory(3)->for($event)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson('/api/v1/attendees/export');
+            ->getJson("/api/v1/attendees/export?event_id={$event->id}");
 
         $response->assertOk();
         $this->assertStringContainsString('spreadsheet', $response->headers->get('Content-Type'));
     }
 
-    public function test_export_attendees_filtered_by_event(): void
+    public function test_export_without_event_id_is_rejected(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        Attendee::factory(2)->for(Event::factory()->for($org)->create())->create();
 
+        $this->actingAs($checker, 'sanctum')
+            ->getJson('/api/v1/attendees/export?format=xlsx')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('event_id');
+
+        $this->actingAs($checker, 'sanctum')
+            ->getJson('/api/v1/attendees/export?format=pdf&search=John')
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('event_id');
+    }
+
+    public function test_export_contains_only_the_requested_events_attendees(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
-        $attendee1 = Attendee::factory()->for($org)->create();
-        $attendee2 = Attendee::factory()->for($org)->create();
-        $attendee3 = Attendee::factory()->for($org)->create();
+        $otherEvent = Event::factory()->for($org)->create();
 
-        $this->registerInEvent($event, $attendee1);
-        $this->registerInEvent($event, $attendee2);
+        Attendee::factory()->for($event)->create(['first_name' => 'Inside', 'last_name' => 'Event']);
+        Attendee::factory()->for($otherEvent)->create(['first_name' => 'Outside', 'last_name' => 'Event']);
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson("/api/v1/attendees/export?format=xlsx&event_id={$event->id}");
+            ->get("/api/v1/attendees/export?format=xlsx&event_id={$event->id}");
 
         $response->assertOk();
-        $this->assertStringContainsString('spreadsheet', $response->headers->get('Content-Type'));
+        $path = tempnam(sys_get_temp_dir(), 'ams-export-');
+        file_put_contents($path, $response->streamedContent());
+
+        try {
+            $sheet = IOFactory::load($path)->getActiveSheet();
+            $this->assertSame('Inside', $sheet->getCell('A2')->getValue());
+            $this->assertNull($sheet->getCell('A3')->getValue());
+        } finally {
+            unlink($path);
+        }
     }
 
     public function test_export_attendees_with_search_filter(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
-        Attendee::factory()->for($org)->create(['first_name' => 'John', 'last_name' => 'Doe']);
-        Attendee::factory()->for($org)->create(['first_name' => 'Jane', 'last_name' => 'Smith']);
+        Attendee::factory()->for($event)->create(['first_name' => 'John', 'last_name' => 'Doe']);
+        Attendee::factory()->for($event)->create(['first_name' => 'Jane', 'last_name' => 'Smith']);
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson('/api/v1/attendees/export?format=xlsx&search=John');
+            ->getJson("/api/v1/attendees/export?format=xlsx&search=John&event_id={$event->id}");
 
         $response->assertOk();
         $this->assertStringContainsString('spreadsheet', $response->headers->get('Content-Type'));
@@ -135,9 +162,10 @@ class AttendeeExportTest extends TestCase
     {
         $org = Organization::factory()->create();
         $attendee = User::factory()->attendee()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
 
         $response = $this->actingAs($attendee, 'sanctum')
-            ->getJson('/api/v1/attendees/export');
+            ->getJson("/api/v1/attendees/export?event_id={$event->id}");
 
         $response->assertForbidden();
     }
@@ -147,12 +175,12 @@ class AttendeeExportTest extends TestCase
         $org1 = Organization::factory()->create();
         $org2 = Organization::factory()->create();
         $superAdmin = User::factory()->superAdmin()->for($org1)->create();
+        $event = Event::factory()->for($org2)->create();
 
-        Attendee::factory(2)->for($org1)->create();
-        Attendee::factory(2)->for($org2)->create();
+        Attendee::factory(2)->for($event)->create();
 
         $response = $this->actingAs($superAdmin, 'sanctum')
-            ->getJson('/api/v1/attendees/export?format=xlsx');
+            ->getJson("/api/v1/attendees/export?format=xlsx&event_id={$event->id}");
 
         $response->assertOk();
     }
@@ -163,8 +191,7 @@ class AttendeeExportTest extends TestCase
         $checker = User::factory()->checker()->for($org)->create();
 
         $event = Event::factory()->for($org)->create(['name' => 'Leadership Summit 2024']);
-        $attendee = Attendee::factory()->for($org)->create();
-        $this->registerInEvent($event, $attendee);
+        Attendee::factory()->for($event)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
             ->getJson("/api/v1/attendees/export?format=pdf&event_id={$event->id}");
@@ -177,12 +204,13 @@ class AttendeeExportTest extends TestCase
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
         $union = Union::factory()->for($org)->create();
         $mission = Mission::factory()->for($org)->for($union)->create();
         $church = Church::factory()->for($org)->create();
 
         Attendee::factory()
-            ->for($org)
+            ->for($event)
             ->for($union)
             ->for($mission)
             ->for($church)
@@ -194,7 +222,7 @@ class AttendeeExportTest extends TestCase
             ]);
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson('/api/v1/attendees/export?format=xlsx');
+            ->getJson("/api/v1/attendees/export?format=xlsx&event_id={$event->id}");
 
         $response->assertOk();
         $this->assertStringContainsString('spreadsheet', $response->headers->get('Content-Type'));

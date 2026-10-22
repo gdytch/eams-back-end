@@ -253,6 +253,69 @@ class AttendeeDuplicateTest extends TestCase
         $this->assertSame($latestCheckOut->format('Y-m-d H:i:s'), $record->check_out_at->format('Y-m-d H:i:s'));
     }
 
+    public function test_duplicate_candidates_never_span_events(): void
+    {
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $eventA = Event::factory()->for($org)->create();
+        $eventB = Event::factory()->for($org)->create();
+        Attendee::factory()->for($eventA)->create(['first_name' => 'Ana', 'middle_name' => null, 'last_name' => 'Cruz']);
+        Attendee::factory()->for($eventB)->create(['first_name' => 'Ana', 'middle_name' => null, 'last_name' => 'Cruz']);
+
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 0);
+
+        Attendee::factory()->for($eventA)->create(['first_name' => 'ana', 'middle_name' => null, 'last_name' => 'cruz']);
+
+        $response = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonCount(2, 'data.0.attendees');
+        $this->assertSame([$eventA->id], collect($response->json('data.0.attendees'))->pluck('event_id')->unique()->all());
+    }
+
+    public function test_dismiss_and_merge_reject_duplicates_from_different_events(): void
+    {
+        Queue::fake();
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $first = Attendee::factory()->for(Event::factory()->for($org)->create())->create(['first_name' => 'Ben', 'middle_name' => null, 'last_name' => 'Reyes']);
+        $second = Attendee::factory()->for(Event::factory()->for($org)->create())->create(['first_name' => 'Ben', 'middle_name' => null, 'last_name' => 'Reyes']);
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees/duplicates/dismiss', [
+            'attendee_ids' => [$first->id, $second->id],
+        ])->assertUnprocessable();
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees/duplicates/merge', [
+            'primary_attendee_id' => $first->id,
+            'duplicate_attendee_ids' => [$second->id],
+        ])->assertUnprocessable();
+
+        $this->assertDatabaseHas('attendees', ['id' => $second->id, 'merged_into_id' => null]);
+    }
+
+    public function test_merge_clears_the_sources_user_and_email(): void
+    {
+        Queue::fake();
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $account = User::factory()->attendee()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $primary = Attendee::factory()->for($event)->create(['first_name' => 'Eva', 'middle_name' => null, 'last_name' => 'Lim', 'email_address' => null]);
+        $source = Attendee::factory()->for($event)->create([
+            'first_name' => 'Eva', 'middle_name' => null, 'last_name' => 'Lim', 'email_address' => 'eva@example.test', 'user_id' => $account->id,
+        ]);
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees/duplicates/merge', [
+            'primary_attendee_id' => $primary->id,
+            'duplicate_attendee_ids' => [$source->id],
+        ])->assertOk();
+
+        $this->assertDatabaseHas('attendees', ['id' => $source->id, 'user_id' => null, 'email_address' => null, 'merged_into_id' => $primary->id]);
+        $this->assertDatabaseHas('attendees', ['id' => $primary->id, 'user_id' => $account->id, 'email_address' => 'eva@example.test']);
+    }
+
     public function test_checker_cannot_review_duplicate_groups(): void
     {
         $org = Organization::factory()->create();

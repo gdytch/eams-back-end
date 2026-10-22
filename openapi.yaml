@@ -1301,9 +1301,14 @@ paths:
       description: >
         Checkers only see events they have access to: every event in their organization by
         default, or a restricted subset if `event_checker_access` rows exist for them (see
-        `PUT /users/{user}/event-access`).
+        `PUT /users/{user}/event-access`). Archived events are left out unless `archived=1`,
+        which returns only archived events.
       parameters:
         - $ref: "#/components/parameters/Page"
+        - name: archived
+          in: query
+          schema: { type: boolean, default: false }
+          description: When true, list only archived events.
       responses:
         "200": { $ref: "#/components/responses/EventList" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -1382,11 +1387,33 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
-    delete:
+
+  /events/{event}/archive:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
       tags: [Events]
-      summary: Delete an event
+      summary: Archive an event
+      description: >
+        Super Admin only. Allowed in any status; the status is kept. Sets `archived_at` and
+        `archived_by` and is audited as `event.archived`. Events are never deleted.
       responses:
-        "204": { description: Deleted }
+        "200": { $ref: "#/components/responses/EventItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /events/{event}/unarchive:
+    parameters:
+      - $ref: "#/components/parameters/EventId"
+    post:
+      tags: [Events]
+      summary: Unarchive an event
+      description: >
+        Super Admin only. Clears `archived_at` and `archived_by`; the event keeps its status.
+        Audited as `event.unarchived`.
+      responses:
+        "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -4103,6 +4130,11 @@ components:
         end_date: { type: string, format: date }
         venue: { type: string, nullable: true }
         status: { $ref: "#/components/schemas/EventStatus" }
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set while the event is archived; null otherwise.
         requires_check_out: { type: boolean }
         check_in_window_minutes: { type: integer }
         banner_urls: { $ref: "#/components/schemas/ImageUrls" }

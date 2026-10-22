@@ -34,9 +34,9 @@ class EventPolicy
             || ($user->isOrgAdmin() && $user->organization_id === $event->organization_id);
     }
 
-    public function delete(User $user, Event $event): bool
+    public function archive(User $user, Event $event): bool
     {
-        return $this->update($user, $event);
+        return $user->isSuperAdmin();
     }
 
     public function manageIdCards(User $user, Event $event): bool

@@ -55,7 +55,13 @@ class Event extends Model
             'check_in_window_minutes' => 'integer',
             'banner_paths' => 'array',
             'speakers_public' => 'boolean',
+            'archived_at' => 'datetime',
         ];
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->archived_at !== null;
     }
 
     public function sessions(): HasMany

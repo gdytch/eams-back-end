@@ -1,6 +1,5 @@
 <?php
 
-use Illuminate\Http\Request;
 use App\Http\Controllers\Api\V1\AttendanceController;
 use App\Http\Controllers\Api\V1\AttendeeController;
 use App\Http\Controllers\Api\V1\AttendeeDashboardController;
@@ -29,7 +28,6 @@ use App\Http\Controllers\Api\V1\SystemLogController;
 use App\Http\Controllers\Api\V1\UnionController;
 use App\Http\Controllers\Api\V1\UserController;
 use Illuminate\Support\Facades\Route;
-
 
 Route::get('profile-photos/{kind}/{id}/{size}', ProfilePhotoController::class)
     ->middleware('signed')->whereNumber('id')->whereIn('kind', ['users', 'attendees'])
@@ -117,7 +115,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);
     Route::delete('attendees/{attendee}/photo', [AttendeeController::class, 'removePhoto']);
 
-    Route::apiResource('events', EventController::class);
+    Route::apiResource('events', EventController::class)->except('destroy');
+    Route::post('events/{event}/archive', [EventController::class, 'archive']);
+    Route::post('events/{event}/unarchive', [EventController::class, 'unarchive']);
 
     Route::scopeBindings()->group(function () {
         Route::post('events/{event}/id-card-background', [EventController::class, 'uploadIdCardBackground']);

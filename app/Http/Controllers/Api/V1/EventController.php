@@ -12,8 +12,10 @@ use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\EventRegistration;
+use App\Models\User;
 use App\Services\ImageUploadService;
 use App\Support\ImageInput;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
@@ -26,18 +28,21 @@ class EventController extends Controller
     {
         $this->authorize('viewAny', Event::class);
 
-        $query = Event::query();
-
-        if ($request->user()->isOrgAdmin()) {
-            $query->where('organization_id', $request->user()->organization_id);
-        } elseif ($request->user()->isChecker()) {
-            $query->where('organization_id', $request->user()->organization_id)
-                ->when($request->user()->accessibleEvents()->exists(), fn ($query) => $query->whereIn('id', $request->user()->accessibleEvents()->select('events.id')));
-        } elseif ($request->user()->isAttendee()) {
-            $query->where('status', 'published');
-        }
+        $query = $this->eventsVisibleTo($request->user());
+        $request->boolean('archived') ? $query->whereNotNull('archived_at') : $query->whereNull('archived_at');
 
         return EventResource::collection($query->paginate($request->input('per_page', 10)));
+    }
+
+    private function eventsVisibleTo(User $user): Builder
+    {
+        return match (true) {
+            $user->isOrgAdmin() => Event::query()->where('organization_id', $user->organization_id),
+            $user->isChecker() => Event::query()->where('organization_id', $user->organization_id)
+                ->when($user->accessibleEvents()->exists(), fn ($query) => $query->whereIn('id', $user->accessibleEvents()->select('events.id'))),
+            $user->isAttendee() => Event::query()->where('status', 'published'),
+            default => Event::query(),
+        };
     }
 
     /**
@@ -81,16 +86,24 @@ class EventController extends Controller
         return EventResource::make($event);
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Event $event)
+    public function archive(Event $event)
     {
-        $this->authorize('delete', $event);
+        $this->authorize('archive', $event);
 
-        $event->delete();
+        $event->forceFill(['archived_at' => now(), 'archived_by' => auth()->id()])->save();
+        AuditLog::record('event.archived', $event);
 
-        return response()->noContent();
+        return EventResource::make($event);
+    }
+
+    public function unarchive(Event $event)
+    {
+        $this->authorize('archive', $event);
+
+        $event->forceFill(['archived_at' => null, 'archived_by' => null])->save();
+        AuditLog::record('event.unarchived', $event);
+
+        return EventResource::make($event);
     }
 
     /**

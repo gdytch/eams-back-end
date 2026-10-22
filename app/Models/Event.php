@@ -107,6 +107,12 @@ class Event extends Model
         return $this->pick_mode === null ? null : [$this->pick_min, $this->pick_max];
     }
 
+    /** @return HasMany<Form, $this> */
+    public function forms(): HasMany
+    {
+        return $this->hasMany(Form::class)->orderBy('sort_order')->orderBy('id');
+    }
+
     /** @return HasMany<Breakout, $this> */
     public function breakouts(): HasMany
     {

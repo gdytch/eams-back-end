@@ -26,6 +26,7 @@ class RegistrationCompleteness
             'basic_info' => $this->missingBasicInfo($attendee),
             'territory' => $this->missingTerritory($attendee),
             'breakouts' => $this->missingPicks($attendee),
+            'forms' => $this->missingForms($attendee),
             'review' => $attendee->registration_confirmed_at === null ? ['confirmation'] : [],
         ];
     }
@@ -126,6 +127,33 @@ class RegistrationCompleteness
         $range = $attendee->event?->pickRange();
 
         return $range === null || ! BreakoutPickRules::picksBreak($attendee->breakouts, ...$range) ? [] : ['breakout_picks'];
+    }
+
+    /**
+     * A published required form needs its required fields answered; an optional form only once started.
+     * Archived fields never count. The item text is the banner wording itself.
+     *
+     * @return array<int, string>
+     */
+    private function missingForms(Attendee $attendee): array
+    {
+        $forms = $attendee->event?->forms()->published()
+            ->with(['fields' => fn ($query) => $query->active()->where('is_required', true)])->get();
+        if ($forms === null || $forms->isEmpty()) {
+            return [];
+        }
+
+        $submissions = $attendee->formSubmissions()->with('answers.options')->get()->keyBy('form_id');
+
+        return $forms->filter(function ($form) use ($submissions) {
+            $submission = $submissions->get($form->id);
+            if ($submission === null && ! $form->is_required) {
+                return false;
+            }
+            $answered = $submission?->answers->filter->isAnswered()->pluck('form_field_id') ?? collect();
+
+            return $form->fields->contains(fn ($field) => ! $answered->contains($field->id));
+        })->map(fn ($form) => "Answer the {$form->title} form")->values()->all();
     }
 
     /** @return array<int, string> */

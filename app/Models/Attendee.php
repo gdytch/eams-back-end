@@ -251,6 +251,12 @@ class Attendee extends Model
         return $this->belongsToMany(Breakout::class, 'breakout_picks')->withPivot('overbooked')->withTimestamps();
     }
 
+    /** @return HasMany<FormSubmission, $this> */
+    public function formSubmissions(): HasMany
+    {
+        return $this->hasMany(FormSubmission::class);
+    }
+
     /** @return BelongsTo<User, $this> */
     public function registeredBy(): BelongsTo
     {

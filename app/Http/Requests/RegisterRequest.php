@@ -2,7 +2,6 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\OrganizationLevel;
 use App\Models\Attendee;
 use App\Models\Event;
 use Illuminate\Foundation\Http\FormRequest;
@@ -29,72 +28,24 @@ class RegisterRequest extends FormRequest
             'first_name' => ['required', 'string', 'max:100'],
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
-            'email' => [
-                'required',
-                'email',
-                Rule::unique('users', 'email'),
+            'email' => ['required', 'email', Rule::unique('users', 'email')],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+            'invite_token' => [
+                'nullable',
+                'string',
                 function ($attribute, $value, $fail) {
-                    if (! $this->filled('invite_token')) {
-                        // No invite token, so email must be unique in attendees table
-                        $attendee = Attendee::withoutGlobalScopes()
-                            ->where('email_address', $value)
-                            ->first();
+                    $isEventToken = Event::withoutGlobalScopes()->where('invite_token', $value)->exists();
+                    $isAttendeeToken = Attendee::withoutGlobalScopes()
+                        ->where('invite_token', $value)
+                        ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
+                        ->whereNull('user_id')
+                        ->exists();
 
-                        if ($attendee !== null) {
-                            $fail('This email address is already in use.');
-                        }
-                    } else {
-                        $inviteToken = $this->input('invite_token');
-
-                        // Check if it's an event invite token or attendee invite token
-                        $event = Event::withoutGlobalScopes()
-                            ->where('invite_token', $inviteToken)
-                            ->first();
-
-                        if ($event !== null) {
-                            // Event invite token: allow merge if email matches an unclaimed attendee in same org
-                            $attendeeByEmail = Attendee::withoutGlobalScopes()
-                                ->where('email_address', $value)
-                                ->first();
-
-                            if ($attendeeByEmail !== null) {
-                                // Fail if already claimed by another user or belongs to different org
-                                if ($attendeeByEmail->user_id !== null || ($attendeeByEmail->organization_id !== null && $attendeeByEmail->organization_id !== $event->organization_id)) {
-                                    $fail('This email address is already in use.');
-                                }
-                            }
-                        } else {
-                            // Not an event token, check if it's a valid attendee invite token
-                            $attendeeByToken = Attendee::withoutGlobalScopes()
-                                ->where('invite_token', $inviteToken)
-                                ->where('invited_at', '>=', now()->subDays(config('auth.invite_expire')))
-                                ->whereNull('user_id')
-                                ->first();
-
-                            if ($attendeeByToken === null) {
-                                // Invalid token (neither event nor attendee)
-                                $fail('Invalid invite token.');
-                            } else {
-                                // Attendee personal invite token: email must match or be unique in attendees
-                                $attendeeByEmail = Attendee::withoutGlobalScopes()
-                                    ->where('email_address', $value)
-                                    ->first();
-
-                                if ($attendeeByEmail !== null && $attendeeByEmail->id !== $attendeeByToken->id) {
-                                    // Email exists on a different attendee
-                                    $fail('This email address is already in use.');
-                                }
-                            }
-                        }
+                    if (! $isEventToken && ! $isAttendeeToken) {
+                        $fail('Invalid or expired invite.');
                     }
                 },
             ],
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
-            'invite_token' => ['nullable', 'string'],
-            'organization_id' => ['required', 'integer', 'exists:organizations,id'],
-            'union_id' => ['required', 'integer', Rule::exists('unions', 'id')->where('organization_id', $this->integer('organization_id'))],
-            'mission_id' => [Rule::requiredIf($this->input('organization_level') === OrganizationLevel::Mission->value), 'nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
-            'organization_level' => ['required', Rule::enum(OrganizationLevel::class)],
         ];
     }
 

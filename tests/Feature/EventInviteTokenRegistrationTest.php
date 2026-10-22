@@ -43,7 +43,7 @@ class EventInviteTokenRegistrationTest extends TestCase
         ]);
 
         $response->assertUnprocessable();
-        $response->assertJsonPath('errors.email.0', 'Invalid invite token.');
+        $response->assertJsonValidationErrors(['invite_token']);
     }
 
     public function test_event_invite_token_does_not_verify_email(): void
@@ -67,8 +67,8 @@ class EventInviteTokenRegistrationTest extends TestCase
 
     public function test_attendee_invite_token_still_works(): void
     {
-        $org = Organization::factory()->create();
-        $attendee = Attendee::factory()->for($org)->create([
+        $event = Event::factory()->create();
+        $attendee = Attendee::factory()->for($event)->create([
             'email_address' => 'attendee@example.com',
             'invite_token' => Attendee::generateUniqueInviteToken(),
             'invited_at' => now(),
@@ -86,16 +86,14 @@ class EventInviteTokenRegistrationTest extends TestCase
         $response->assertCreated();
         $user = User::where('email', 'attendee@example.com')->first();
         $this->assertNotNull($user->email_verified_at);
+        $this->assertSame($user->id, $attendee->fresh()->user_id);
     }
 
-    public function test_can_merge_admin_created_attendee_via_event_invite_token(): void
+    public function test_event_invite_token_does_not_link_an_attendee_with_the_same_email(): void
     {
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->create();
-        $attendee = Attendee::factory()->for($org)->create([
+        $event = Event::factory()->create();
+        $attendee = Attendee::factory()->for($event)->create([
             'email_address' => 'admin@example.com',
-            'invite_token' => Attendee::generateUniqueInviteToken(),
-            'invited_at' => now(),
             'user_id' => null,
         ]);
 
@@ -109,58 +107,27 @@ class EventInviteTokenRegistrationTest extends TestCase
         ]);
 
         $response->assertCreated();
-        $user = User::where('email', 'admin@example.com')->first();
-        $this->assertNotNull($user);
-        $this->assertNull($user->email_verified_at);
-
-        $attendee->refresh();
-        $this->assertEquals($user->id, $attendee->user_id);
-        $this->assertNull($attendee->invite_token);
+        $this->assertNull(User::where('email', 'admin@example.com')->first()->email_verified_at);
+        $this->assertNull($attendee->fresh()->user_id);
     }
 
-    public function test_cannot_merge_attendee_from_different_org_via_event_invite_token(): void
+    public function test_expired_attendee_invite_token_is_rejected(): void
     {
-        $org1 = Organization::factory()->create();
-        $org2 = Organization::factory()->create();
-        $event = Event::factory()->for($org1)->create();
-        Attendee::factory()->for($org2)->create([
-            'email_address' => 'cross@example.com',
-            'user_id' => null,
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create([
+            'email_address' => 'late@example.com',
+            'invite_token' => Attendee::generateUniqueInviteToken(),
+            'invited_at' => now()->subDays(31),
         ]);
 
-        $response = $this->postJson('/api/v1/auth/register', [
-            'first_name' => 'Cross',
-            'last_name' => 'Org',
-            'email' => 'cross@example.com',
-            'password' => 'Password123!',
-            'password_confirmation' => 'Password123!',
-            'invite_token' => $event->invite_token,
-        ]);
-
-        $response->assertUnprocessable();
-        $response->assertJsonPath('errors.email.0', 'This email address is already in use.');
-    }
-
-    public function test_cannot_merge_already_claimed_attendee_via_event_invite_token(): void
-    {
-        $org = Organization::factory()->create();
-        $event = Event::factory()->for($org)->create();
-        $existingUser = User::factory()->for($org)->create();
-        Attendee::factory()->for($org)->for($existingUser)->create([
-            'email_address' => 'claimed@example.com',
-            'user_id' => $existingUser->id,
-        ]);
-
-        $response = $this->postJson('/api/v1/auth/register', [
-            'first_name' => 'New',
+        $this->postJson('/api/v1/auth/register', [
+            'first_name' => 'Late',
             'last_name' => 'User',
-            'email' => 'claimed@example.com',
+            'email' => 'late@example.com',
             'password' => 'Password123!',
             'password_confirmation' => 'Password123!',
-            'invite_token' => $event->invite_token,
-        ]);
+            'invite_token' => $attendee->invite_token,
+        ])->assertUnprocessable()->assertJsonValidationErrors(['invite_token']);
 
-        $response->assertUnprocessable();
-        $response->assertJsonPath('errors.email.0', 'This email address is already in use.');
+        $this->assertNull($attendee->fresh()->user_id);
     }
 }

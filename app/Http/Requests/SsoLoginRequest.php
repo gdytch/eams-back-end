@@ -2,9 +2,7 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\OrganizationLevel;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class SsoLoginRequest extends FormRequest
 {
@@ -22,10 +20,6 @@ class SsoLoginRequest extends FormRequest
             'token' => ['required', 'string'],
             'invite_token' => ['nullable', 'string'],
             'claim_token' => ['nullable', 'string', 'size:64'],
-            'organization_level' => ['sometimes', 'nullable', Rule::enum(OrganizationLevel::class)],
-            'organization_id' => ['sometimes', 'nullable', 'integer', 'exists:organizations,id'],
-            'union_id' => ['sometimes', 'nullable', 'integer', Rule::exists('unions', 'id')->where('organization_id', $this->integer('organization_id'))],
-            'mission_id' => [Rule::requiredIf($this->input('organization_level') === OrganizationLevel::Mission->value), 'nullable', 'integer', Rule::exists('missions', 'id')->where('organization_id', $this->integer('organization_id'))],
         ];
     }
 }

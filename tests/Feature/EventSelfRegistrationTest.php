@@ -203,4 +203,37 @@ class EventSelfRegistrationTest extends TestCase
         $response->assertCreated();
         $this->assertNotEmpty($response->json('data.qr_token'));
     }
+
+    public function test_unverified_user_cannot_register_over_an_attendee_with_their_email(): void
+    {
+        Bus::fake();
+
+        $event = Event::factory()->state(['status' => EventStatus::Published])->create();
+        $existing = Attendee::factory()->for($event)->create(['email_address' => 'taken@example.com']);
+        $user = User::factory()->attendee()->unverified()->create(['email' => 'taken@example.com']);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['email']);
+
+        $this->assertNull($existing->fresh()->user_id);
+        $this->assertDatabaseCount('attendees', 1);
+    }
+
+    public function test_verified_user_registering_is_linked_to_the_existing_attendee_in_that_event(): void
+    {
+        Bus::fake();
+
+        $event = Event::factory()->state(['status' => EventStatus::Published])->create();
+        $existing = Attendee::factory()->for($event)->create(['email_address' => 'taken@example.com']);
+        $user = User::factory()->attendee()->create(['email' => 'taken@example.com']);
+
+        $this->actingAs($user, 'sanctum')
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register")
+            ->assertOk();
+
+        $this->assertSame($user->id, $existing->fresh()->user_id);
+        $this->assertDatabaseCount('attendees', 1);
+    }
 }

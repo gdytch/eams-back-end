@@ -15,10 +15,9 @@ class DuplicateEmailPreventionTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_cannot_register_user_with_email_that_exists_in_attendees_table(): void
+    public function test_can_register_user_with_email_that_exists_in_attendees_table_without_linking(): void
     {
-        $org = Organization::factory()->create();
-        Attendee::factory()->for($org)->create([
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create([
             'email_address' => 'test@example.com',
         ]);
 
@@ -30,8 +29,8 @@ class DuplicateEmailPreventionTest extends TestCase
             'password_confirmation' => 'Password123!',
         ]);
 
-        $response->assertUnprocessable();
-        $response->assertJsonPath('errors.email.0', 'This email address is already in use.');
+        $response->assertCreated();
+        $this->assertNull($attendee->fresh()->user_id);
     }
 
     public function test_cannot_register_user_with_email_that_exists_in_users_table(): void
@@ -52,8 +51,7 @@ class DuplicateEmailPreventionTest extends TestCase
 
     public function test_can_register_with_invite_token_email(): void
     {
-        $org = Organization::factory()->create();
-        $attendee = Attendee::factory()->for($org)->create([
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create([
             'email_address' => 'invite@example.com',
             'invite_token' => Attendee::generateUniqueInviteToken(),
             'invited_at' => now(),

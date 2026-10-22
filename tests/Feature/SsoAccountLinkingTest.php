@@ -3,8 +3,10 @@
 namespace Tests\Feature;
 
 use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Hash;
 use Laravel\Socialite\Facades\Socialite;
 use Tests\TestCase;
 
@@ -39,14 +41,61 @@ class SsoAccountLinkingTest extends TestCase
         ]);
     }
 
-    public function test_unverified_email_cannot_claim_an_unlinked_attendee_without_an_invite(): void
+    public function test_unverified_email_creates_the_user_but_does_not_link_an_attendee(): void
     {
-        Attendee::factory()->create(['email_address' => 'person@gmail.com', 'user_id' => null]);
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create(['email_address' => 'person@gmail.com', 'user_id' => null]);
         $this->mockGoogleUser('person@gmail.com', false);
 
         $this->postJson('/api/v1/auth/sso/google', ['token' => 'provider-token'])
-            ->assertStatus(422)
-            ->assertJsonValidationErrors(['email']);
+            ->assertCreated()
+            ->assertJsonPath('user.email_verified', false);
+
+        $this->assertNull($attendee->fresh()->user_id);
+    }
+
+    public function test_verified_sso_links_attendees_across_events_at_once(): void
+    {
+        $first = Attendee::factory()->for(Event::factory()->create())->create(['email_address' => 'person@gmail.com', 'user_id' => null]);
+        $second = Attendee::factory()->for(Event::factory()->create())->create(['email_address' => 'person@gmail.com', 'user_id' => null]);
+        $this->mockGoogleUser('person@gmail.com', true);
+
+        $response = $this->postJson('/api/v1/auth/sso/google', ['token' => 'provider-token'])->assertCreated();
+
+        $userId = $response->json('user.id');
+        $this->assertNull(User::find($userId)->organization_id);
+        $this->assertSame($userId, $first->fresh()->user_id);
+        $this->assertSame($userId, $second->fresh()->user_id);
+        $this->assertDatabaseHas('audit_logs', ['action' => 'attendee.linked', 'auditable_id' => $first->id]);
+        $this->assertDatabaseCount('attendees', 2);
+    }
+
+    public function test_sso_verifying_a_squatted_sign_up_revokes_its_password_and_tokens(): void
+    {
+        $squatter = $this->postJson('/api/v1/auth/register', [
+            'first_name' => 'Sam',
+            'last_name' => 'Squat',
+            'email' => 'victim@gmail.com',
+            'password' => 'squatter-pass',
+            'password_confirmation' => 'squatter-pass',
+        ])->assertCreated();
+        $this->mockGoogleUser('victim@gmail.com', true);
+
+        $this->postJson('/api/v1/auth/sso/google', ['token' => 'provider-token'])->assertOk();
+
+        $user = User::where('email', 'victim@gmail.com')->firstOrFail();
+        $this->assertNotNull($user->email_verified_at);
+        $this->assertSame(1, $user->tokens()->count());
+        $this->assertFalse(Hash::check('squatter-pass', $user->password));
+        $this->assertNotNull($squatter->json('token'));
+    }
+
+    public function test_sso_sign_in_creates_the_user_only(): void
+    {
+        $this->mockGoogleUser('fresh@gmail.com', true);
+
+        $this->postJson('/api/v1/auth/sso/google', ['token' => 'provider-token'])->assertCreated();
+
+        $this->assertDatabaseCount('attendees', 0);
     }
 
     public function test_sso_does_not_reassign_an_attendee_already_linked_to_another_user(): void

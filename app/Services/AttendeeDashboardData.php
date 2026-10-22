@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Http\Resources\BreakoutResource;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventSession;
@@ -114,7 +115,20 @@ class AttendeeDashboardData
                 : "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",
             'banner' => $this->banner($registration),
             'next_session' => $this->nextSession($registration->event),
+            'breakouts' => $this->breakouts($registration->event),
         ]);
+    }
+
+    /** Breakouts follow the event program's public setting. */
+    private function breakouts(Event $event): ?array
+    {
+        if (! $event->program?->is_public) {
+            return null;
+        }
+
+        return BreakoutResource::collection(
+            $event->breakouts()->withoutGlobalScopes()->with('speakers')->orderBy('date')->orderBy('start_time')->get()
+        )->resolve();
     }
 
     /** @return array{status: string, missing: array<int, string>, qr_and_id_card_work: bool}|null */

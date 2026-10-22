@@ -9,6 +9,7 @@ use App\Http\Resources\EventProgramItemResource;
 use App\Http\Resources\EventProgramResource;
 use App\Http\Resources\EventProgramSectionResource;
 use App\Models\AuditLog;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventProgram;
 use App\Services\EventProgramService;
@@ -37,36 +38,43 @@ class EventProgramBuilderController extends Controller
         return EventProgramResource::make($program);
     }
 
-    public function store(SaveEventProgramNodeRequest $request, Event $event, string $kind): JsonResponse
+    public function store(SaveEventProgramNodeRequest $request, Event $event, ?Breakout $breakout, string $kind): JsonResponse
     {
-        $node = $this->service->save($event->program()->firstOrFail(), $kind, $request->validated());
+        $node = $this->service->save($this->program($event, $breakout), $kind, $request->validated());
 
         return $this->resource($kind, $node)->response()->setStatusCode(201);
     }
 
-    public function update(SaveEventProgramNodeRequest $request, Event $event, string $kind, int $node): JsonResource
+    public function update(SaveEventProgramNodeRequest $request, Event $event, ?Breakout $breakout, string $kind, int $node): JsonResource
     {
-        return $this->resource($kind, $this->service->save($event->program()->firstOrFail(), $kind, $request->validated(), $node));
+        return $this->resource($kind, $this->service->save($this->program($event, $breakout), $kind, $request->validated(), $node));
     }
 
-    public function destroy(SaveEventProgramNodeRequest $request, Event $event, string $kind, int $node): Response
+    public function destroy(SaveEventProgramNodeRequest $request, Event $event, ?Breakout $breakout, string $kind, int $node): Response
     {
-        $this->service->destroy($event->program()->firstOrFail(), $kind, $node);
+        $this->service->destroy($this->program($event, $breakout), $kind, $node);
 
         return response()->noContent();
     }
 
-    public function duplicate(SaveEventProgramNodeRequest $request, Event $event, string $kind, int $node): JsonResponse
+    public function duplicate(SaveEventProgramNodeRequest $request, Event $event, ?Breakout $breakout, string $kind, int $node): JsonResponse
     {
-        return $this->resource($kind, $this->service->duplicate($event->program()->firstOrFail(), $kind, $node))->response()->setStatusCode(201);
+        return $this->resource($kind, $this->service->duplicate($this->program($event, $breakout), $kind, $node))->response()->setStatusCode(201);
     }
 
-    public function reorder(SaveEventProgramNodeRequest $request, Event $event, string $kind): Response
+    public function reorder(SaveEventProgramNodeRequest $request, Event $event, ?Breakout $breakout, string $kind): Response
     {
         $data = $request->validated();
-        $this->service->reorder($event->program()->firstOrFail(), $kind, $data['ids'], $data['parent_id'] ?? null);
+        $this->service->reorder($this->program($event, $breakout), $kind, $data['ids'], $data['parent_id'] ?? null);
 
         return response()->noContent();
+    }
+
+    /** The breakout's program on breakout routes, else the event program. */
+    private function program(Event $event, ?Breakout $breakout): EventProgram
+    {
+        // On event routes the container injects an empty Breakout.
+        return ($breakout?->exists ? $breakout->program() : $event->program())->firstOrFail();
     }
 
     private function resource(string $kind, Model $node): JsonResource

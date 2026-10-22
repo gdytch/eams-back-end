@@ -28,6 +28,7 @@ class PublicEventResource extends JsonResource
             'speakers' => PublicSpeakerResource::collection(
                 $this->speakers_public && $this->relationLoaded('speakers') ? $this->speakers : [],
             ),
+            'breakouts' => BreakoutResource::collection($this->relationLoaded('breakouts') ? $this->breakouts : []),
             'banner_urls' => $this->banner_urls,
         ];
     }

@@ -32,6 +32,13 @@ class PublicEventController extends Controller
 
         abort_unless($event->status === EventStatus::Published, 404);
 
+        if ($event->program?->is_public) {
+            $event->load(['breakouts' => fn ($query) => $query->withoutGlobalScopes()->orderBy('date')->orderBy('start_time')]);
+            if ($event->speakers_public) {
+                $event->breakouts->load('speakers');
+            }
+        }
+
         return $event;
     }
 }

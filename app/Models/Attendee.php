@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -194,6 +195,12 @@ class Attendee extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    /** @return BelongsToMany<Breakout, $this> */
+    public function breakouts(): BelongsToMany
+    {
+        return $this->belongsToMany(Breakout::class, 'breakout_picks')->withTimestamps();
     }
 
     /** @return BelongsTo<User, $this> */

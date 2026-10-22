@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Str;
 
-#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'speakers_public', 'created_by', 'invite_token'])]
+#[Fillable(['organization_id', 'name', 'description', 'start_date', 'end_date', 'venue', 'status', 'requires_check_out', 'check_in_window_minutes', 'id_card_background_path', 'id_card_font_color', 'banner_paths', 'speakers_public', 'created_by', 'invite_token', 'pick_mode', 'pick_min', 'pick_max'])]
 class Event extends Model
 {
     /** @use HasFactory<EventFactory> */
@@ -57,6 +57,8 @@ class Event extends Model
             'banner_paths' => 'array',
             'speakers_public' => 'boolean',
             'archived_at' => 'datetime',
+            'pick_min' => 'integer',
+            'pick_max' => 'integer',
         ];
     }
 
@@ -97,6 +99,12 @@ class Event extends Model
     public function sessions(): HasMany
     {
         return $this->hasMany(EventSession::class);
+    }
+
+    /** Required pick count as [min, max|null], or null while breakouts are disabled. */
+    public function pickRange(): ?array
+    {
+        return $this->pick_mode === null ? null : [$this->pick_min, $this->pick_max];
     }
 
     public function breakouts(): HasMany

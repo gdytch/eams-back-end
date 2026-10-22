@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Church;
+use App\Models\Mission;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -40,9 +41,19 @@ class StoreChurchRequest extends FormRequest
                 'required',
                 'string',
                 'max:255',
-                Rule::unique('churches', 'name')->where('mission_id', $this->integer('mission_id')),
             ],
-            'address' => ['nullable', 'string', 'max:255'],
+            'address' => ['required', 'string', 'max:255'],
+            'confirm_same_name' => ['sometimes', 'boolean'],
         ];
+    }
+
+    public function after(): array
+    {
+        return [function ($validator) {
+            if (! $validator->errors()->hasAny(['union_id', 'mission_id'])
+                && ! Mission::withoutGlobalScopes()->whereKey($this->integer('mission_id'))->where('union_id', $this->integer('union_id'))->exists()) {
+                $validator->errors()->add('mission_id', 'The mission does not belong to the union.');
+            }
+        }];
     }
 }

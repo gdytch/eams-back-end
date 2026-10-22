@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\OrganizationLevel;
+use App\Http\Requests\Concerns\ValidatesTerritory;
 use App\Models\Attendee;
 use App\Models\Event;
 use Illuminate\Auth\Access\Response;
@@ -12,6 +13,8 @@ use Illuminate\Validation\Rule;
 
 class StoreAttendeeRequest extends FormRequest
 {
+    use ValidatesTerritory;
+
     private ?Event $event = null;
 
     public function authorize(): Response|bool
@@ -32,6 +35,11 @@ class StoreAttendeeRequest extends FormRequest
     public function event(): ?Event
     {
         return $this->event ??= Event::withoutGlobalScopes()->find($this->integer('event_id'));
+    }
+
+    protected function currentTerritory(): ?array
+    {
+        return $this->only(['organization_level', 'union_id', 'mission_id', 'church_id']);
     }
 
     /**

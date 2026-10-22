@@ -59,6 +59,16 @@ class Event extends Model
         ];
     }
 
+    /**
+     * The organization a public dropdown is limited to, from the event invite token. Null when no token is given.
+     */
+    public static function organizationIdForInvite(?string $inviteToken): ?int
+    {
+        return $inviteToken === null || $inviteToken === ''
+            ? null
+            : static::withoutGlobalScopes()->where('invite_token', $inviteToken)->firstOrFail()->organization_id;
+    }
+
     public function isArchived(): bool
     {
         return $this->archived_at !== null;

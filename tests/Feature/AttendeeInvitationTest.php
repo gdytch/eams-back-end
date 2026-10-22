@@ -105,29 +105,7 @@ class AttendeeInvitationTest extends TestCase
         $this->assertNull($attendee);
     }
 
-    public function test_already_invited_attendee_does_not_receive_second_invitation(): void
-    {
-        Mail::fake();
-
-        $org = Organization::factory()->create();
-        $creator = User::factory()->checker()->for($org)->create();
-        $attendee = Attendee::factory()->for($org)->create([
-            'email_address' => 'invited@example.com',
-            'invite_token' => Attendee::generateUniqueInviteToken(),
-            'invited_at' => now()->subDay(),
-            'created_by' => $creator->id,
-        ]);
-
-        $service = app('App\Services\AttendeeInvitationService');
-
-        // Attempt to send invitation to already-invited attendee
-        $checker = User::factory()->checker()->for($org)->create();
-        $service->sendIfEligible($attendee, $checker);
-
-        Mail::assertNothingQueued();
-    }
-
-    public function test_event_registration_inline_attendee_with_email_sends_invitation(): void
+    public function test_event_registration_inline_attendee_with_email_stays_a_draft_and_sends_no_mail(): void
     {
         Mail::fake();
         Queue::fake([GenerateAttendeeIdCardJob::class]);
@@ -145,11 +123,9 @@ class AttendeeInvitationTest extends TestCase
         $response->assertCreated();
         Queue::assertPushed(GenerateAttendeeIdCardJob::class);
 
-        Mail::assertQueued(AttendeeAccountInviteMail::class);
-
-        $attendee = Attendee::where('email_address', 'alice@example.com')->first();
-        $this->assertNotNull($attendee->invite_token);
-        $this->assertNotNull($attendee->invited_at);
+        // No mobile number or territory yet: mail waits for the first full registration.
+        Mail::assertNothingQueued();
+        $this->assertNull(Attendee::where('email_address', 'alice@example.com')->first()->invite_token);
     }
 
     public function test_register_with_valid_invite_token_links_to_attendee(): void

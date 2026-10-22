@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Mail\AttendeeAccountInviteMail;
+use App\Mail\AttendeeRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\User;
@@ -11,45 +11,30 @@ use Illuminate\Support\Facades\Mail;
 class AttendeeInvitationService
 {
     /**
-     * Send an account invitation email if the attendee is eligible.
-     * Eligibility: email present, no linked user, not already invited, inviter is staff, email not claimed.
+     * Queue the welcome mail for an Attendee's first full registration (the model calls this once,
+     * when first_registered_at is set). An Attendee with an email and no login (admin-registered) gets
+     * one merged mail: the welcome content plus the account invite link. Without an email, no mail.
      */
-    public function sendIfEligible(Attendee $attendee, User $invitedBy): void
+    public function sendWelcome(Attendee $attendee): void
     {
-        // Must have an email address
-        if (blank($attendee->email_address)) {
+        $email = $attendee->email_address ?? $attendee->user?->email;
+
+        if (blank($email)) {
             return;
         }
 
-        // Must not already be linked to a user
-        if ($attendee->user_id !== null) {
-            return;
+        $invite = $attendee->user_id === null
+            && ! User::withoutGlobalScopes()->where('email', $email)->exists();
+
+        if ($invite) {
+            $attendee->update([
+                'invite_token' => Attendee::generateUniqueInviteToken(),
+                'invited_at' => now(),
+            ]);
+
+            AuditLog::record('attendee.account_invited', $attendee, ['email' => $email]);
         }
 
-        // Must not have been already invited
-        if ($attendee->invited_at !== null) {
-            return;
-        }
-
-        // Inviter must be staff (admin/checker), not an attendee
-        if ($invitedBy->isAttendee()) {
-            return;
-        }
-
-        // Email must not already belong to an existing user
-        if (User::withoutGlobalScopes()->where('email', $attendee->email_address)->exists()) {
-            return;
-        }
-
-        // Generate and persist the invite token
-        $attendee->update([
-            'invite_token' => Attendee::generateUniqueInviteToken(),
-            'invited_at' => now(),
-        ]);
-
-        // Queue the invitation email
-        Mail::to($attendee->email_address)->send(new AttendeeAccountInviteMail($attendee));
-
-        AuditLog::record('attendee.account_invited', $attendee, ['email' => $attendee->email_address]);
+        Mail::to($email)->send(new AttendeeRegistrationWelcomeMail($attendee));
     }
 }

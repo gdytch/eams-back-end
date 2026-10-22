@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Attendee;
+use App\Concerns\SendsRateLimitedMail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -12,12 +13,15 @@ use Illuminate\Queue\SerializesModels;
 
 class AttendeeAccountInviteMail extends Mailable implements ShouldQueue
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsRateLimitedMail, SerializesModels;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(public Attendee $attendee) {}
+    public function __construct(public Attendee $attendee)
+    {
+        $this->onQueue('mail');
+    }
 
     /**
      * Get the message envelope.
@@ -38,7 +42,7 @@ class AttendeeAccountInviteMail extends Mailable implements ShouldQueue
     {
         $this->attendee->loadMissing('organization');
 
-        $inviteUrl = config('app.frontend_url').'/register?invite='.$this->attendee->invite_token.'&email='.urlencode($this->attendee->email_address);
+        $inviteUrl = $this->attendee->inviteUrl();
 
         return new Content(
             view: 'emails.attendee-account-invite',

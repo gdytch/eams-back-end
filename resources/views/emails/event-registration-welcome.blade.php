@@ -90,10 +90,10 @@
         <p style="margin: 24px 0; text-align: center;">
             @component('emails.components.button')
                 @slot('url')
-                    {{ config('app.frontend_url') }}
+                    {{ $inviteUrl ?? config('app.frontend_url') }}
                 @endslot
                 @slot('text')
-                    View My Registration
+                    {{ $inviteUrl ? 'Create My Account' : 'View My Registration' }}
                 @endslot
             @endcomponent
         </p>

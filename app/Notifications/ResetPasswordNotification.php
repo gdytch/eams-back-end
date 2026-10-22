@@ -3,13 +3,20 @@
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\ResetPassword;
+use App\Concerns\SendsRateLimitedMail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 
 class ResetPasswordNotification extends ResetPassword implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, SendsRateLimitedMail;
+
+    /** Auth mail goes first: workers drain `high` before `mail`. */
+    public function viaQueues(): array
+    {
+        return ['mail' => 'high'];
+    }
 
     /**
      * Get the mail representation of the notification.

@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\Attendee;
+use App\Concerns\SendsRateLimitedMail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -12,12 +13,15 @@ use Illuminate\Queue\SerializesModels;
 
 class AttendeeRegistrationWelcomeMail extends Mailable implements ShouldQueue
 {
-    use Queueable, SerializesModels;
+    use Queueable, SendsRateLimitedMail, SerializesModels;
 
     /**
      * Create a new message instance.
      */
-    public function __construct(public Attendee $registration) {}
+    public function __construct(public Attendee $registration)
+    {
+        $this->onQueue('mail');
+    }
 
     /**
      * Get the message envelope.
@@ -56,6 +60,8 @@ class AttendeeRegistrationWelcomeMail extends Mailable implements ShouldQueue
                 'eventVenue' => $event?->venue,
                 'attendeeName' => $attendee?->full_name ?? 'Attendee',
                 'sessions' => $sessions,
+                // Set when the Attendee has no login yet: the merged welcome + invite mail.
+                'inviteUrl' => $attendee->user_id === null ? $attendee->inviteUrl() : null,
             ],
         );
     }

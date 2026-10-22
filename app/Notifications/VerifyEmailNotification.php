@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use Illuminate\Auth\Notifications\VerifyEmail;
+use App\Concerns\SendsRateLimitedMail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -10,7 +11,13 @@ use Illuminate\Support\Facades\URL;
 
 class VerifyEmailNotification extends VerifyEmail implements ShouldQueue
 {
-    use Queueable;
+    use Queueable, SendsRateLimitedMail;
+
+    /** Auth mail goes first: workers drain `high` before `mail`. */
+    public function viaQueues(): array
+    {
+        return ['mail' => 'high'];
+    }
 
     /**
      * Get the mail representation of the notification.

@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\EventRegistration;
+use App\Models\Attendee;
 use App\Models\Organization;
 
 class OrganizationAttendanceOverview
@@ -13,11 +13,11 @@ class OrganizationAttendanceOverview
     public function build(Organization $organization): array
     {
         $events = $organization->events()->get(['events.id']);
-        $registrations = EventRegistration::query()
+        $registrations = Attendee::query()
             ->whereIn('event_id', $events->modelKeys())
             ->orderBy('event_id')
             ->orderBy('id')
-            ->with(['attendanceRecords', 'attendee.union', 'attendee.mission'])
+            ->with(['attendanceRecords', 'union', 'mission'])
             ->get();
 
         $overview = [
@@ -42,8 +42,8 @@ class OrganizationAttendanceOverview
             $overview['total_checked_out'] += (int) $checkedOut;
             $overview['total_no_show'] += (int) ! $checkedIn;
 
-            $this->incrementTerritory($overview['by_union'], $registration->attendee->union?->name ?? 'No Union', $checkedIn, $checkedOut);
-            $this->incrementTerritory($overview['by_mission'], $registration->attendee->mission?->name ?? 'No Mission', $checkedIn, $checkedOut);
+            $this->incrementTerritory($overview['by_union'], $registration->union?->name ?? 'No Union', $checkedIn, $checkedOut);
+            $this->incrementTerritory($overview['by_mission'], $registration->mission?->name ?? 'No Mission', $checkedIn, $checkedOut);
         }
 
         return $overview;

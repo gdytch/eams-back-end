@@ -8,7 +8,6 @@ use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventProgram;
 use App\Models\EventProgramItem;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\IdCardGridDownload;
 use App\Models\Organization;
@@ -40,8 +39,6 @@ class ArchivedEventWriteBlockTest extends TestCase
     private Attendee $attendee;
 
     private Attendee $duplicate;
-
-    private EventRegistration $registration;
 
     private AttendanceRecord $record;
 
@@ -94,10 +91,10 @@ class ArchivedEventWriteBlockTest extends TestCase
             'program item photo upload' => ['POST', 'events/:event/program/items/:item/photos', [], $admins],
             'program item photo remove' => ['DELETE', 'events/:event/program/items/:item/photos', ['index' => 0], $admins],
             'registration store' => ['POST', 'events/:event/registrations', ['attendee_id' => ':attendee'], $staff],
-            'registration destroy' => ['DELETE', 'events/:event/registrations/:registration', [], $admins],
-            'id card regenerate' => ['POST', 'events/:event/registrations/:registration/id-card/regenerate', [], $admins],
+            'registration destroy' => ['DELETE', 'events/:event/registrations/:attendee', [], $admins],
+            'id card regenerate' => ['POST', 'events/:event/registrations/:attendee/id-card/regenerate', [], $admins],
             'attendance scan' => ['POST', 'attendance/scan', ['event_id' => ':event', 'session_id' => ':session', 'qr_token' => ':qr'], $staff],
-            'attendance manual' => ['POST', 'attendance/manual', ['event_id' => ':event', 'session_id' => ':session', 'event_registration_id' => ':registration'], $staff],
+            'attendance manual' => ['POST', 'attendance/manual', ['event_id' => ':event', 'session_id' => ':session', 'attendee_id' => ':attendee'], $staff],
             'attendance check-out' => ['POST', 'attendance/:record/check-out', [], $staff],
             'public register' => ['POST', 'public/event/:invite/register', [], ['super_admin', 'org_admin', 'checker', 'attendee']],
             'attendee update' => ['PUT', 'attendees/:attendee', ['first_name' => 'Changed'], $admins],
@@ -159,14 +156,8 @@ class ArchivedEventWriteBlockTest extends TestCase
 
         $activeEvent = Event::factory()->for($this->organization)->create();
         $activeSession = $this->openSession($activeEvent);
-        $activeRegistration = EventRegistration::factory()
-            ->for($activeEvent)
-            ->for(Attendee::factory()->for($this->organization))
-            ->create();
-        $archivedSecond = EventRegistration::factory()
-            ->for($this->event)
-            ->for(Attendee::factory()->for($this->organization))
-            ->create();
+        $activeRegistration = Attendee::factory()->for($activeEvent)->for($this->organization)->create();
+        $archivedSecond = Attendee::factory()->for($this->event)->for($this->organization)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', [
             'scans' => [
@@ -189,7 +180,7 @@ class ArchivedEventWriteBlockTest extends TestCase
                     'client_ref' => 'archived-manual',
                     'event_id' => $this->event->id,
                     'session_id' => $this->session->id,
-                    'event_registration_id' => $archivedSecond->id,
+                    'attendee_id' => $archivedSecond->id,
                     'method' => 'manual',
                 ],
             ],
@@ -204,8 +195,8 @@ class ArchivedEventWriteBlockTest extends TestCase
             ->assertJsonPath('results.1.attendance_record_id', null)
             ->assertJsonPath('results.2.status', 'event_archived');
 
-        $this->assertDatabaseHas('attendance_records', ['event_registration_id' => $activeRegistration->id]);
-        $this->assertDatabaseMissing('attendance_records', ['event_registration_id' => $archivedSecond->id]);
+        $this->assertDatabaseHas('attendance_records', ['attendee_id' => $activeRegistration->id]);
+        $this->assertDatabaseMissing('attendance_records', ['attendee_id' => $archivedSecond->id]);
     }
 
     public function test_sync_batch_keeps_unauthorized_result_for_other_denials_on_archived_event(): void
@@ -219,7 +210,7 @@ class ArchivedEventWriteBlockTest extends TestCase
                 'client_ref' => 'outsider',
                 'event_id' => $this->event->id,
                 'session_id' => $this->session->id,
-                'qr_token' => $this->registration->qr_token,
+                'qr_token' => $this->attendee->qr_token,
                 'method' => 'qr',
             ]],
         ])->assertOk()
@@ -251,7 +242,7 @@ class ArchivedEventWriteBlockTest extends TestCase
         $this->actingAs($admin, 'sanctum');
 
         $this->postJson("/api/v1/events/{$eventId}/registrations/id-cards/grid-download", [
-            'registration_ids' => [$this->registration->id],
+            'registration_ids' => [$this->attendee->id],
         ])->assertStatus(202);
 
         $download = IdCardGridDownload::factory()->for($this->event)->create([
@@ -261,9 +252,9 @@ class ArchivedEventWriteBlockTest extends TestCase
         Storage::disk('local')->put($download->file_path, 'zip contents');
         $this->get("/api/v1/events/{$eventId}/registrations/id-cards/grid-download/{$download->id}/file")->assertOk();
 
-        $this->registration->forceFill(['id_card_path' => 'id-cards/archived.pdf'])->save();
+        $this->attendee->forceFill(['id_card_path' => 'id-cards/archived.pdf'])->save();
         Storage::disk('local')->put('id-cards/archived.pdf', 'pdf contents');
-        $this->get("/api/v1/events/{$eventId}/registrations/{$this->registration->id}/id-card")->assertOk();
+        $this->get("/api/v1/events/{$eventId}/registrations/{$this->attendee->id}/id-card")->assertOk();
     }
 
     public function test_speakers_sessions_and_program_of_an_archived_event_are_readable(): void
@@ -336,19 +327,24 @@ class ArchivedEventWriteBlockTest extends TestCase
         );
     }
 
-    public function test_attendee_with_an_active_registration_can_still_be_edited(): void
+    public function test_attendee_in_an_active_event_can_be_edited_while_the_same_person_is_archived_elsewhere(): void
     {
         $this->buildArchivedFixture();
-        $this->registerInActiveEvent($this->attendee);
+        $activeCopy = $this->registerInActiveEvent($this->attendee);
 
         $this->actingAs($this->actor('org_admin'), 'sanctum')
-            ->putJson("/api/v1/attendees/{$this->attendee->id}", ['remarks' => 'Updated'])
+            ->putJson("/api/v1/attendees/{$activeCopy->id}", ['remarks' => 'Updated'])
             ->assertOk();
+        $this->actingAs($this->actor('org_admin'), 'sanctum')
+            ->putJson("/api/v1/attendees/{$this->attendee->id}", ['remarks' => 'Updated'])
+            ->assertForbidden()
+            ->assertExactJson(['message' => self::ARCHIVED_MESSAGE]);
 
-        $this->assertSame('Updated', $this->attendee->refresh()->remarks);
+        $this->assertSame('Updated', $activeCopy->refresh()->remarks);
+        $this->assertNotSame('Updated', $this->attendee->refresh()->remarks);
     }
 
-    public function test_attendee_without_registrations_can_be_edited(): void
+    public function test_attendee_without_an_event_can_be_edited(): void
     {
         $this->buildArchivedFixture();
         $unregistered = Attendee::factory()->for($this->organization)->create();
@@ -358,31 +354,30 @@ class ArchivedEventWriteBlockTest extends TestCase
             ->assertOk();
     }
 
-    public function test_attendee_with_any_archived_registration_cannot_be_deleted(): void
+    public function test_attendee_in_an_archived_event_cannot_be_deleted_but_the_active_copy_can(): void
     {
         $this->buildArchivedFixture();
-        $this->registerInActiveEvent($this->attendee);
+        $activeCopy = $this->registerInActiveEvent($this->attendee);
 
         $this->actingAs($this->actor('org_admin'), 'sanctum')
             ->deleteJson("/api/v1/attendees/{$this->attendee->id}")
             ->assertForbidden()
             ->assertExactJson(['message' => self::ARCHIVED_MESSAGE]);
+        $this->actingAs($this->actor('org_admin'), 'sanctum')
+            ->deleteJson("/api/v1/attendees/{$activeCopy->id}")
+            ->assertNoContent();
 
         $this->assertDatabaseHas('attendees', ['id' => $this->attendee->id]);
+        $this->assertDatabaseMissing('attendees', ['id' => $activeCopy->id]);
     }
 
-    public function test_merge_is_blocked_when_a_duplicate_has_an_archived_registration(): void
+    public function test_merge_is_blocked_when_a_duplicate_is_in_an_archived_event(): void
     {
         $this->buildArchivedFixture();
-        $primary = Attendee::factory()->for($this->organization)->create([
-            'first_name' => $this->attendee->first_name,
-            'last_name' => $this->attendee->last_name,
-        ]);
-        $this->registerInActiveEvent($primary);
 
         $this->actingAs($this->actor('org_admin'), 'sanctum')
             ->postJson('/api/v1/attendees/duplicates/merge', [
-                'primary_attendee_id' => $primary->id,
+                'primary_attendee_id' => $this->duplicate->id,
                 'duplicate_attendee_ids' => [$this->attendee->id],
             ])
             ->assertForbidden()
@@ -391,12 +386,12 @@ class ArchivedEventWriteBlockTest extends TestCase
         $this->assertNull($this->attendee->refresh()->merged_into_id);
     }
 
-    public function test_merge_still_works_for_attendees_with_only_active_registrations(): void
+    public function test_merge_still_works_for_attendees_of_an_active_event(): void
     {
         $this->buildArchivedFixture();
-        $primary = Attendee::factory()->for($this->organization)->create(['first_name' => 'Same', 'last_name' => 'Name']);
-        $source = Attendee::factory()->for($this->organization)->create(['first_name' => 'Same', 'last_name' => 'Name']);
-        $this->registerInActiveEvent($primary);
+        $activeEvent = Event::factory()->for($this->organization)->create();
+        $primary = Attendee::factory()->for($activeEvent)->create(['first_name' => 'Same', 'last_name' => 'Name']);
+        $source = Attendee::factory()->for($activeEvent)->create(['first_name' => 'Same', 'last_name' => 'Name']);
 
         $this->actingAs($this->actor('org_admin'), 'sanctum')
             ->postJson('/api/v1/attendees/duplicates/merge', [
@@ -417,11 +412,10 @@ class ArchivedEventWriteBlockTest extends TestCase
             'event_program_id' => $program->id,
             'photo_paths' => [['original' => 'event_programs/photo.webp']],
         ]);
-        $this->attendee = Attendee::factory()->for($this->organization)->create(['first_name' => 'Dupe', 'last_name' => 'Person']);
-        $this->duplicate = Attendee::factory()->for($this->organization)->create(['first_name' => 'Dupe', 'last_name' => 'Person']);
-        $this->registration = EventRegistration::factory()->for($this->event)->for($this->attendee)->create();
+        $this->attendee = Attendee::factory()->for($this->event)->create(['first_name' => 'Dupe', 'last_name' => 'Person']);
+        $this->duplicate = Attendee::factory()->for($this->event)->create(['first_name' => 'Dupe', 'last_name' => 'Person']);
         $this->record = AttendanceRecord::factory()->create([
-            'event_registration_id' => $this->registration->id,
+            'attendee_id' => $this->attendee->id,
             'event_session_id' => $this->session->id,
         ]);
         $this->checkerTarget = User::factory()->checker()->for($this->organization)->create();
@@ -437,12 +431,9 @@ class ArchivedEventWriteBlockTest extends TestCase
         ]);
     }
 
-    private function registerInActiveEvent(Attendee $attendee): void
+    private function registerInActiveEvent(Attendee $attendee): Attendee
     {
-        EventRegistration::factory()
-            ->for(Event::factory()->for($this->organization))
-            ->for($attendee)
-            ->create();
+        return $this->registerInEvent(Event::factory()->for($this->organization)->create(), $attendee);
     }
 
     private function actor(string $role): User
@@ -471,8 +462,7 @@ class ArchivedEventWriteBlockTest extends TestCase
             ':item' => $this->item->id,
             ':attendee' => $this->attendee->id,
             ':duplicate' => $this->duplicate->id,
-            ':registration' => $this->registration->id,
-            ':qr' => $this->registration->qr_token,
+            ':qr' => $this->attendee->qr_token,
             ':record' => $this->record->id,
             ':checker' => $this->checkerTarget->id,
         ];
@@ -494,7 +484,7 @@ class ArchivedEventWriteBlockTest extends TestCase
     private function snapshot(): array
     {
         $tables = [
-            'audit_logs', 'attendance_records', 'event_registrations', 'attendees', 'speakers',
+            'audit_logs', 'attendance_records', 'attendees', 'speakers',
             'event_sessions', 'event_programs', 'event_program_items', 'event_program_days', 'event_checker_access',
         ];
         $counts = [];

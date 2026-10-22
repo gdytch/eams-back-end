@@ -20,7 +20,7 @@ class EventSelfRegistrationTest extends TestCase
         $org = Organization::factory()->create();
         $event = Event::factory()->for($org)->state(['status' => EventStatus::Published])->create();
 
-        $response = $this->postJson("/api/v1/public/events/{$event->invite_token}/register");
+        $response = $this->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertUnauthorized();
     }
@@ -34,11 +34,12 @@ class EventSelfRegistrationTest extends TestCase
         $user = User::factory()->attendee()->create();
 
         $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
-        $this->assertDatabaseHas('event_registrations', [
+        $this->assertDatabaseHas('attendees', [
             'event_id' => $event->id,
+            'user_id' => $user->id,
         ]);
     }
 
@@ -56,7 +57,7 @@ class EventSelfRegistrationTest extends TestCase
         $this->assertNull($user->attendee);
 
         $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
         $this->assertNotNull($user->fresh()->attendee);
@@ -68,7 +69,7 @@ class EventSelfRegistrationTest extends TestCase
         ]);
     }
 
-    public function test_self_registration_uses_existing_attendee(): void
+    public function test_self_registration_prefills_from_the_latest_attendee(): void
     {
         Bus::fake();
 
@@ -78,13 +79,17 @@ class EventSelfRegistrationTest extends TestCase
         $attendee = Attendee::factory()->for($org)->for($user)->create();
 
         $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
-        $this->assertDatabaseHas('event_registrations', [
+        // The earlier profile prefills a new per-event row; the old row is untouched.
+        $this->assertDatabaseHas('attendees', [
             'event_id' => $event->id,
-            'attendee_id' => $attendee->id,
+            'user_id' => $user->id,
+            'first_name' => $attendee->first_name,
+            'last_name' => $attendee->last_name,
         ]);
+        $this->assertNull($attendee->fresh()->event_id);
     }
 
     public function test_self_registration_is_idempotent(): void
@@ -96,10 +101,10 @@ class EventSelfRegistrationTest extends TestCase
         $user = User::factory()->attendee()->for($org)->create();
 
         $response1 = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response2 = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response1->assertCreated();
         $response2->assertOk(); // Second call returns 200 (already registered)
@@ -116,7 +121,7 @@ class EventSelfRegistrationTest extends TestCase
         $user = User::factory()->attendee()->for($org)->create();
 
         $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertNotFound();
     }
@@ -130,7 +135,7 @@ class EventSelfRegistrationTest extends TestCase
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
         // Checker should have an attendee created
@@ -146,7 +151,7 @@ class EventSelfRegistrationTest extends TestCase
         $admin = User::factory()->orgAdmin()->for($org)->create();
 
         $response = $this->actingAs($admin, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
         $this->assertNotNull($admin->fresh()->attendee);
@@ -163,7 +168,7 @@ class EventSelfRegistrationTest extends TestCase
         $this->assertNull($user->organization_id);
 
         $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $this->assertSame($org->id, $user->fresh()->organization_id);
     }
@@ -175,10 +180,10 @@ class EventSelfRegistrationTest extends TestCase
         $orgA = Organization::factory()->create();
         $orgB = Organization::factory()->create();
         $event = Event::factory()->for($orgB)->state(['status' => EventStatus::Published])->create();
-        $user = User::factory()->attendee()->for($orgA)->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $orgA->id]);
 
         $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         // User's org should stay as orgA
         $this->assertSame($orgA->id, $user->fresh()->organization_id);
@@ -193,7 +198,7 @@ class EventSelfRegistrationTest extends TestCase
         $user = User::factory()->attendee()->for($org)->create();
 
         $response = $this->actingAs($user, 'sanctum')
-            ->postJson("/api/v1/public/events/{$event->invite_token}/register");
+            ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
         $this->assertNotEmpty($response->json('data.qr_token'));

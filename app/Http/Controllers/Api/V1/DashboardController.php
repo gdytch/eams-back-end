@@ -8,7 +8,6 @@ use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
@@ -83,7 +82,7 @@ class DashboardController extends Controller
                 'org_admins' => (int) $usersByRole->get('org_admin', 0),
                 'checkers' => (int) $usersByRole->get('checker', 0),
             ],
-            'registrations' => ['total' => EventRegistration::query()->whereHas('event')->count()],
+            'registrations' => ['total' => Attendee::query()->whereHas('event')->count()],
             'top_organizations' => $this->topOrganizations($organizations),
             'next_upcoming_event' => $upcomingEvents[0] ?? null,
             'upcoming_events' => $upcomingEvents,
@@ -120,7 +119,7 @@ class DashboardController extends Controller
             ],
             'unions' => ['total' => $organization->unions()->count()],
             'missions' => ['total' => $organization->missions()->count()],
-            'registrations' => ['total' => EventRegistration::query()->whereHas('event')->count()],
+            'registrations' => ['total' => Attendee::query()->whereHas('event')->count()],
             'next_upcoming_event' => $upcomingEvents[0] ?? null,
             'upcoming_events' => $upcomingEvents,
             'today_sessions' => $this->todaySessions($eventsQuery),
@@ -173,15 +172,15 @@ class DashboardController extends Controller
     {
         return AttendanceRecord::query()
             ->where('recorded_by', $user->id)
-            ->with(['eventRegistration.attendee', 'eventRegistration.event', 'eventSession'])
+            ->with(['attendee', 'attendee.event', 'eventSession'])
             ->latest('created_at')
             ->limit(10)
             ->get()
             ->map(fn (AttendanceRecord $record) => [
                 'id' => $record->id,
-                'attendee_name' => trim("{$record->eventRegistration->attendee->first_name} {$record->eventRegistration->attendee->last_name}"),
-                'event_id' => $record->eventRegistration->event->id,
-                'event_name' => $record->eventRegistration->event->name,
+                'attendee_name' => trim("{$record->attendee->first_name} {$record->attendee->last_name}"),
+                'event_id' => $record->attendee->event->id,
+                'event_name' => $record->attendee->event->name,
                 'session_name' => $record->eventSession?->name,
                 'method' => $record->method,
                 'check_in_at' => $record->check_in_at,
@@ -215,7 +214,7 @@ class DashboardController extends Controller
     private function upcomingEvents(Closure $eventsQuery, int $limit = 5): array
     {
         return $eventsQuery()
-            ->withCount('registrations')
+            ->withCount('attendees')
             ->whereIn('status', [EventStatus::Draft->value, EventStatus::Published->value])
             ->where('start_date', '>=', today())
             ->orderBy('start_date')
@@ -228,7 +227,7 @@ class DashboardController extends Controller
                 'end_date' => $event->end_date->toDateString(),
                 'venue' => $event->venue,
                 'status' => $event->status,
-                'registrations_count' => $event->registrations_count,
+                'registrations_count' => $event->attendees_count,
                 'days_until_start' => (int) today()->diffInDays($event->start_date),
             ])
             ->all();
@@ -250,7 +249,7 @@ class DashboardController extends Controller
                 'attendanceRecords as checked_in_count' => fn ($q) => $q->whereNotNull('check_in_at'),
                 'attendanceRecords as checked_out_count' => fn ($q) => $q->whereNotNull('check_out_at'),
             ])
-            ->with(['event' => fn ($q) => $q->withCount('registrations')])
+            ->with(['event' => fn ($q) => $q->withCount('attendees')])
             ->orderBy('start_time')
             ->get()
             ->map(fn (EventSession $session) => [
@@ -261,7 +260,7 @@ class DashboardController extends Controller
                 'start_time' => $session->start_time,
                 'end_time' => $session->end_time,
                 'check_in_opens_at' => $session->checkInOpensAt(),
-                'registered' => $session->event->registrations_count,
+                'registered' => $session->event->attendees_count,
                 'checked_in' => $session->checked_in_count,
                 'checked_out' => $session->checked_out_count,
             ])
@@ -278,9 +277,9 @@ class DashboardController extends Controller
         $events = $eventsQuery()
             ->where('status', EventStatus::Completed->value)
             ->withCount([
-                'registrations',
+                'attendees',
                 'sessions',
-                'registrations as checked_in_registrations_count' => fn (Builder $query) => $query
+                'attendees as checked_in_registrations_count' => fn (Builder $query) => $query
                     ->whereHas('attendanceRecords', fn (Builder $records) => $records->whereNotNull('check_in_at')),
             ])
             ->orderByDesc('end_date')
@@ -289,15 +288,15 @@ class DashboardController extends Controller
         $eventIds = $events->modelKeys();
         $sessionCheckIns = AttendanceRecord::query()
             ->whereNotNull('check_in_at')
-            ->whereHas('eventRegistration', fn (Builder $query) => $query->whereIn('event_id', $eventIds))
-            ->join('event_registrations', 'event_registrations.id', '=', 'attendance_records.event_registration_id')
-            ->selectRaw('event_registrations.event_id, COUNT(attendance_records.id) as session_check_ins')
-            ->groupBy('event_registrations.event_id')
-            ->pluck('session_check_ins', 'event_registrations.event_id');
+            ->join('attendees', 'attendees.id', '=', 'attendance_records.attendee_id')
+            ->whereIn('attendees.event_id', $eventIds)
+            ->selectRaw('attendees.event_id, COUNT(attendance_records.id) as session_check_ins')
+            ->groupBy('attendees.event_id')
+            ->pluck('session_check_ins', 'attendees.event_id');
 
         return $events
             ->map(function (Event $event) use ($sessionCheckIns) {
-                $registered = (int) $event->registrations_count;
+                $registered = (int) $event->attendees_count;
                 $uniqueCheckedIn = (int) $event->checked_in_registrations_count;
                 $sessions = (int) $event->sessions_count;
                 $eventSessionCheckIns = (int) $sessionCheckIns->get($event->id, 0);
@@ -328,9 +327,9 @@ class DashboardController extends Controller
         $organizations->loadCount(['events', 'attendees']);
         $organizationIds = $organizations->pluck('id');
         $registrationCounts = Event::query()
-            ->leftJoin('event_registrations', 'event_registrations.event_id', '=', 'events.id')
+            ->leftJoin('attendees', 'attendees.event_id', '=', 'events.id')
             ->whereIn('events.organization_id', $organizationIds)
-            ->selectRaw('events.organization_id, COUNT(event_registrations.id) as total_registrations')
+            ->selectRaw('events.organization_id, COUNT(attendees.id) as total_registrations')
             ->groupBy('events.organization_id')
             ->pluck('total_registrations', 'events.organization_id');
 

@@ -3,8 +3,8 @@
 namespace App\Jobs;
 
 use App\Enums\OrganizationLevel;
+use App\Models\Attendee;
 use App\Models\AuditLog;
-use App\Models\EventRegistration;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -19,20 +19,20 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
     /**
      * Create a new job instance.
      */
-    public function __construct(public EventRegistration $registration) {}
+    public function __construct(public Attendee $attendee) {}
 
     /**
      * Execute the job.
      */
     public function handle(): void
     {
-        $this->registration->loadMissing(['attendee', 'event', 'attendee.union', 'attendee.mission', 'attendee.church']);
+        $attendee = $this->attendee;
+        $attendee->loadMissing(['event', 'union', 'mission', 'church']);
 
-        $attendee = $this->registration->attendee;
-        $event = $this->registration->event;
+        $event = $attendee->event;
 
-        $qrImage = 'data:image/svg+xml;base64,' . base64_encode(
-            QrCode::format('svg')->size(300)->margin(0)->generate($this->registration->qr_token)
+        $qrImage = 'data:image/svg+xml;base64,'.base64_encode(
+            QrCode::format('svg')->size(300)->margin(0)->generate($attendee->qr_token)
         );
 
         $backgroundImage = $this->encodedBackgroundImage($event->id_card_background_path);
@@ -74,10 +74,9 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         // delete pdf file after generating images to save storage space
         Storage::disk('local')->delete($path);
 
+        $attendee->update($updateData);
 
-        $this->registration->update($updateData);
-
-        AuditLog::record('event_registration.id_card_generated', $this->registration, [
+        AuditLog::record('event_registration.id_card_generated', $attendee, [
             'path' => $path,
             'image_paths' => $imagePaths,
         ]);
@@ -94,7 +93,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
 
         $mimeType = Storage::disk('public')->mimeType($path);
 
-        return "data:{$mimeType};base64," . base64_encode(Storage::disk('public')->get($path));
+        return "data:{$mimeType};base64,".base64_encode(Storage::disk('public')->get($path));
     }
 
     /**
@@ -147,7 +146,7 @@ class GenerateAttendeeIdCardJob implements ShouldQueue
         $page = 0;
 
         while (file_exists(sprintf($outputPattern, $page))) {
-            $imagePath = "{$pdfPath}/" . basename(sprintf($outputPattern, $page));
+            $imagePath = "{$pdfPath}/".basename(sprintf($outputPattern, $page));
             // Normalize to storage path (relative to storage/app)
             $imagePath = str_replace(Storage::disk('local')->path(''), '', sprintf($outputPattern, $page));
             $imagePaths[] = $imagePath;

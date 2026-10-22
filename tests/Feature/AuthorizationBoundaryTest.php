@@ -4,10 +4,11 @@ namespace Tests\Feature;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AuthorizationBoundaryTest extends TestCase
@@ -56,7 +57,7 @@ class AuthorizationBoundaryTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
         $attendee = Attendee::factory()->for($org)->for($user)->create();
         $event = Event::factory()->for($org)->create();
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
 
         $this->actingAs($user, 'sanctum')->getJson("/api/v1/events/{$event->id}/registrations")
             ->assertForbidden();
@@ -68,7 +69,7 @@ class AuthorizationBoundaryTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
         $attendee = Attendee::factory()->for($org)->for($user)->create();
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = $this->registerInEvent($event, $attendee);
         $session = $event->sessions()->create([
             'name' => 'Session',
             'session_date' => now()->toDateString(),
@@ -92,7 +93,7 @@ class AuthorizationBoundaryTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $attendeeOrg->id]);
         $attendee = Attendee::factory()->for($attendeeOrg)->for($user)->create();
         $event = Event::factory()->for($eventOrg)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = $this->registerInEvent($event, $attendee);
 
         $this->assertTrue($user->can('downloadIdCard', $registration));
         $this->assertTrue($user->can('viewIdCardImage', $registration));
@@ -124,7 +125,7 @@ class AuthorizationBoundaryTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
         $attendee = Attendee::factory()->for($org)->for($user)->create();
         $event = Event::factory()->for($org)->create();
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
         $this->actingAs($user, 'sanctum');
 
         $this->getJson("/api/v1/events/{$event->id}/reports/dashboard")->assertForbidden();
@@ -138,9 +139,51 @@ class AuthorizationBoundaryTest extends TestCase
         $admin = User::factory()->orgAdmin()->for($org)->create();
         $this->actingAs($admin, 'sanctum');
 
-        foreach (['users', 'users/invite', 'events', 'attendees', 'unions', 'missions', 'churches'] as $endpoint) {
+        foreach (['users', 'users/invite', 'events', 'unions', 'missions', 'churches'] as $endpoint) {
             $this->postJson('/api/v1/'.$endpoint, ['organization_id' => $other->id])
                 ->assertUnprocessable()->assertJsonValidationErrors('organization_id');
         }
+    }
+
+    public function test_attendee_create_ignores_a_client_sent_organization_id(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $other = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $union = Union::factory()->for($org)->create();
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_id' => $other->id,
+            'event_id' => $event->id,
+            'organization_level' => 'union',
+            'union_id' => $union->id,
+            'first_name' => 'Ana',
+            'last_name' => 'Cruz',
+        ])->assertCreated()->assertJsonPath('data.organization_id', $org->id);
+
+        $this->assertDatabaseHas('attendees', ['first_name' => 'Ana', 'event_id' => $event->id, 'organization_id' => $org->id]);
+    }
+
+    public function test_staff_cannot_create_an_attendee_in_another_organizations_event(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $foreignEvent = Event::factory()->create();
+        $union = Union::factory()->for($foreignEvent->organization)->create();
+
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
+            'event_id' => $foreignEvent->id,
+            'organization_level' => 'union',
+            'union_id' => $union->id,
+            'first_name' => 'Ana',
+            'last_name' => 'Cruz',
+        ])->assertForbidden();
+
+        $this->assertDatabaseCount('attendees', 0);
     }
 }

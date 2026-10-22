@@ -2,40 +2,68 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class EventRegistrationTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_registering_an_existing_attendee_generates_a_unique_qr_token(): void
+    public function test_registering_a_known_person_creates_a_prefilled_attendee_for_the_event(): void
     {
+        Queue::fake();
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
+        $earlier = Attendee::factory()->for(Event::factory()->for($org)->create())->create(['first_name' => 'Ana', 'last_name' => 'Cruz']);
         $event = Event::factory()->for($org)->create();
-        $attendee = Attendee::factory()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson("/api/v1/events/{$event->id}/registrations", [
-            'attendee_id' => $attendee->id,
+            'attendee_id' => $earlier->id,
         ]);
 
         $response->assertCreated();
         $token = $response->json('data.qr_token');
         $this->assertNotEmpty($token);
-        $this->assertDatabaseHas('event_registrations', [
+        $this->assertNotSame($earlier->qr_token, $token);
+        $this->assertNotSame($earlier->id, $response->json('data.attendee_id'));
+        $this->assertDatabaseHas('attendees', [
+            'id' => $response->json('data.attendee_id'),
             'event_id' => $event->id,
-            'attendee_id' => $attendee->id,
+            'organization_id' => $org->id,
+            'first_name' => 'Ana',
+            'last_name' => 'Cruz',
+            'registered_by' => $checker->id,
             'qr_token' => $token,
         ]);
+        Queue::assertPushed(GenerateAttendeeIdCardJob::class, fn ($job) => $job->attendee->id === $response->json('data.attendee_id'));
+    }
+
+    public function test_a_person_cannot_be_registered_twice_in_the_same_event(): void
+    {
+        Queue::fake();
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $user = User::factory()->attendee()->for($org)->create();
+        $registered = Attendee::factory()->for($event)->for($user)->create();
+        $other = Attendee::factory()->for(Event::factory()->for($org)->create())->for($user)->create();
+
+        $this->actingAs($checker, 'sanctum')->postJson("/api/v1/events/{$event->id}/registrations", ['attendee_id' => $registered->id])
+            ->assertUnprocessable()->assertJsonValidationErrors('attendee_id');
+        $this->actingAs($checker, 'sanctum')->postJson("/api/v1/events/{$event->id}/registrations", ['attendee_id' => $other->id])
+            ->assertUnprocessable()->assertJsonValidationErrors('attendee_id');
+        $this->assertSame(1, Attendee::where('event_id', $event->id)->count());
     }
 
     public function test_registering_a_new_attendee_creates_the_attendee_and_registration_together(): void
     {
+        Queue::fake();
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
@@ -47,11 +75,12 @@ class EventRegistrationTest extends TestCase
 
         $response->assertCreated();
         $this->assertSame(1, Attendee::where('organization_id', $org->id)->count());
-        $this->assertDatabaseHas('event_registrations', ['event_id' => $event->id]);
+        $this->assertDatabaseHas('attendees', ['event_id' => $event->id, 'first_name' => 'Maria', 'organization_id' => $org->id]);
     }
 
     public function test_two_registrations_never_share_a_qr_token(): void
     {
+        Queue::fake();
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         $event = Event::factory()->for($org)->create();
@@ -66,6 +95,7 @@ class EventRegistrationTest extends TestCase
             ->postJson("/api/v1/events/{$event->id}/registrations", ['attendee_id' => $attendeeB->id])
             ->json('data.qr_token');
 
+        $this->assertNotNull($tokenA);
         $this->assertNotSame($tokenA, $tokenB);
     }
 

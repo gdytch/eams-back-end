@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -116,15 +115,16 @@ class ReportDashboardTest extends TestCase
 
         $attendees = Attendee::where('organization_id', $org->id)->take(3)->get();
         foreach ($attendees as $attendee) {
-            EventRegistration::factory()->for($event1)->for($attendee)->create();
-            EventRegistration::factory()->for($event2)->for($attendee)->create();
+            $this->registerInEvent($event1, $attendee);
+            $this->registerInEvent($event2, $attendee);
         }
 
         $response = $this->actingAs($orgAdmin, 'sanctum')
             ->getJson("/api/v1/organizations/{$org->id}/reports/dashboard");
 
         $response->assertOk();
-        $response->assertJsonPath('attendees.total', 5);
+        // Attendee rows are per event: 2 never registered + 3 first rows + 3 copies for the second event.
+        $response->assertJsonPath('attendees.total', 8);
         $response->assertJsonPath('registrations.total', 6);
     }
 
@@ -135,7 +135,7 @@ class ReportDashboardTest extends TestCase
 
         $pastEvent = Event::factory()->for($org)->state(['status' => 'completed'])->create();
         $attendee = Attendee::factory()->for($org)->create();
-        $reg = EventRegistration::factory()->for($pastEvent)->for($attendee)->create();
+        $reg = $this->registerInEvent($pastEvent, $attendee);
 
         AttendanceRecord::factory()->for($reg)->create(['check_in_at' => now(), 'check_out_at' => now()]);
 
@@ -158,7 +158,7 @@ class ReportDashboardTest extends TestCase
         $upcomingEvent = Event::factory()->for($org)->state(['status' => 'published', 'start_date' => now()->addDays(5)])->create();
 
         $attendee = Attendee::factory()->for($org)->create();
-        EventRegistration::factory()->for($upcomingEvent)->for($attendee)->create();
+        $this->registerInEvent($upcomingEvent, $attendee);
 
         $response = $this->actingAs($orgAdmin, 'sanctum')
             ->getJson("/api/v1/organizations/{$org->id}/reports/dashboard");
@@ -180,12 +180,12 @@ class ReportDashboardTest extends TestCase
         $attendee1 = Attendee::factory()->for($org)->create();
         $attendee2 = Attendee::factory()->for($org)->create();
 
-        $reg1 = EventRegistration::factory()->for($event1)->for($attendee1)->create();
-        $reg2 = EventRegistration::factory()->for($event1)->for($attendee2)->create();
+        $reg1 = $this->registerInEvent($event1, $attendee1);
+        $reg2 = $this->registerInEvent($event1, $attendee2);
         AttendanceRecord::factory()->for($reg1)->create(['check_in_at' => now()]);
 
-        $reg3 = EventRegistration::factory()->for($event2)->for($attendee1)->create();
-        $reg4 = EventRegistration::factory()->for($event2)->for($attendee2)->create();
+        $reg3 = $this->registerInEvent($event2, $attendee1);
+        $reg4 = $this->registerInEvent($event2, $attendee2);
         AttendanceRecord::factory()->for($reg3)->create(['check_in_at' => now()]);
         AttendanceRecord::factory()->for($reg4)->create(['check_in_at' => now()]);
 
@@ -284,8 +284,8 @@ class ReportDashboardTest extends TestCase
         $events1 = $org1->events;
         $events2 = $org2->events;
 
-        EventRegistration::factory()->for($events1[0])->for($attendee1)->create();
-        EventRegistration::factory()->for($events1[1])->for($attendee1)->create();
+        $this->registerInEvent($events1[0], $attendee1);
+        $this->registerInEvent($events1[1], $attendee1);
 
         $response = $this->actingAs($superAdmin, 'sanctum')
             ->getJson('/api/v1/reports/dashboard');

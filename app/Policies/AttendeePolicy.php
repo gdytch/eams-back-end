@@ -3,13 +3,14 @@
 namespace App\Policies;
 
 use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\User;
 use App\Policies\Concerns\DeniesArchivedEvents;
 use Illuminate\Auth\Access\Response;
 
 /**
- * Attendees are organization-scoped until Release 1, so archived-event write blocks
- * are approximated through the attendee's registrations.
+ * An Attendee is one person's registration in one event, so event-scoped rules
+ * (access, archived writes) apply to every ability.
  */
 class AttendeePolicy
 {
@@ -22,18 +23,35 @@ class AttendeePolicy
 
     public function view(User $user, Attendee $attendee): bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isAttendee() && $attendee->user_id === $user->id)
-            || ((! $user->isAttendee()) && $user->organization_id === $attendee->organization_id);
-    }
+        if ($user->isAttendee()) {
+            return $attendee->user_id === $user->id;
+        }
 
-    public function create(User $user): bool
-    {
-        return $user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker();
+        return ($user->isSuperAdmin() || $user->organization_id === $attendee->organization_id)
+            && $this->hasEventAccess($user, $attendee);
     }
 
     /**
-     * Denied once every registration of the attendee is in an archived event.
+     * Without an event: may this role create attendees at all. With an event: may the user register people in it.
+     */
+    public function create(User $user, ?Event $event = null): Response|bool
+    {
+        $isStaff = $user->isSuperAdmin() || $user->isOrgAdmin() || $user->isChecker();
+
+        if ($event === null) {
+            return $isStaff;
+        }
+
+        return $this->allowWrite(
+            $isStaff
+                && ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)
+                && $user->hasAccessToEvent($event),
+            $event,
+        );
+    }
+
+    /**
+     * Denied when the attendee's own event is archived.
      */
     public function update(User $user, Attendee $attendee): Response|bool
     {
@@ -41,34 +59,81 @@ class AttendeePolicy
             ? $attendee->user_id === $user->id
             : $user->isSuperAdmin() || $user->organization_id === $attendee->organization_id;
 
-        if (! $allowed) {
-            return false;
-        }
-
-        $archivedCount = $attendee->registrationsInArchivedEvents()->count();
-
-        return $archivedCount > 0 && $archivedCount === $attendee->registrations()->count()
-            ? $this->archivedDenial()
-            : true;
+        return $this->allowWriteForAttendee($allowed, $attendee);
     }
 
     /**
-     * Denied when any registration is in an archived event, since deleting would destroy its history.
+     * Denied when the attendee's event is archived, since deleting would destroy its history.
      */
     public function delete(User $user, Attendee $attendee): Response|bool
     {
-        if (! $user->isSuperAdmin() && ! ($user->isOrgAdmin() && $user->organization_id === $attendee->organization_id)) {
-            return false;
-        }
-
-        return $attendee->registrationsInArchivedEvents()->exists() ? $this->archivedDenial() : true;
+        return $this->allowWriteForAttendee(
+            $user->isSuperAdmin() || ($user->isOrgAdmin() && $user->organization_id === $attendee->organization_id),
+            $attendee,
+        );
     }
 
     /**
-     * Merging as primary or as duplicate source, denied when any registration is in an archived event.
+     * Merging as primary or as duplicate source, denied when the attendee's event is archived.
      */
     public function merge(User $user, Attendee $attendee): Response|bool
     {
         return $this->delete($user, $attendee);
+    }
+
+    public function downloadIdCard(User $user, Attendee $attendee): bool
+    {
+        return $this->view($user, $attendee);
+    }
+
+    public function viewIdCardImage(User $user, Attendee $attendee): bool
+    {
+        return $this->view($user, $attendee);
+    }
+
+    /**
+     * Only used by ID card regenerate, so it is a write.
+     */
+    public function manageIdCards(User $user, Attendee $attendee): Response|bool
+    {
+        $event = $this->eventOf($attendee);
+
+        return $this->allowWriteForAttendee(
+            $user->isSuperAdmin()
+                || ($user->isOrgAdmin() && $user->organization_id === $attendee->organization_id && ($event === null || $user->hasAccessToEvent($event))),
+            $attendee,
+        );
+    }
+
+    public function viewStaffData(User $user, Attendee $attendee): bool
+    {
+        $event = $this->eventOf($attendee);
+
+        return $event !== null && $user->can('viewStaffData', $event);
+    }
+
+    private function hasEventAccess(User $user, Attendee $attendee): bool
+    {
+        $event = $this->eventOf($attendee);
+
+        return $event === null || $user->hasAccessToEvent($event);
+    }
+
+    private function allowWriteForAttendee(bool $allowed, Attendee $attendee): Response|bool
+    {
+        $event = $this->eventOf($attendee);
+
+        return $event === null ? $allowed : $this->allowWrite($allowed, $event);
+    }
+
+    private function eventOf(Attendee $attendee): ?Event
+    {
+        if ($attendee->event_id === null) {
+            return null;
+        }
+
+        return $attendee->relationLoaded('event')
+            ? $attendee->event
+            : Event::withoutGlobalScopes()->find($attendee->event_id);
     }
 }

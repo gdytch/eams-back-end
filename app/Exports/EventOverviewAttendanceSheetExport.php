@@ -16,8 +16,8 @@ class EventOverviewAttendanceSheetExport extends AttendanceSheetExport
 
     public function collection(): Collection
     {
-        return $this->event->registrations()
-            ->with('attendee', 'attendanceRecords')
+        return $this->event->attendees()
+            ->with('union', 'mission', 'attendanceRecords')
             ->get()
             ->map(function ($registration) {
                 $checkInRecord = $registration->attendanceRecords->first();
@@ -31,15 +31,15 @@ class EventOverviewAttendanceSheetExport extends AttendanceSheetExport
                 };
 
                 return [
-                    'First Name' => $registration->attendee->first_name,
-                    'Middle Name' => $registration->attendee->middle_name ?? '',
-                    'Last Name' => $registration->attendee->last_name,
-                    'Organization Level Code' => $registration->attendee->organization_level_code ?? '',
+                    'First Name' => $registration->first_name,
+                    'Middle Name' => $registration->middle_name ?? '',
+                    'Last Name' => $registration->last_name,
+                    'Organization Level Code' => $registration->organization_level_code ?? '',
                     'Status' => $status,
                     'Method' => ucfirst($method),
                     'Check-in Time' => $checkInAt?->format('Y-m-d H:i:s') ?? '',
                     'Check-out Time' => $checkOutAt?->format('Y-m-d H:i:s') ?? '',
-                    'Remarks' => $registration->attendee->remarks ?? '',
+                    'Remarks' => $registration->remarks ?? '',
                 ];
             });
     }

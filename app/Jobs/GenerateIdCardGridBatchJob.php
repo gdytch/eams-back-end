@@ -73,8 +73,7 @@ class GenerateIdCardGridBatchJob implements ShouldQueue
             /*
              * Load ONLY the registrations for this batch.
              */
-            $registrations = $event->registrations()
-                ->with('attendee')
+            $registrations = $event->attendees()
                 ->whereIn('id', $this->registrationIds)
                 ->get()
                 ->keyBy('id');
@@ -96,7 +95,6 @@ class GenerateIdCardGridBatchJob implements ShouldQueue
 
             foreach ($registrations as $registration) {
                 if (
-                    ! $registration->attendee ||
                     ! $registration->id_card_images_path
                 ) {
                     continue;

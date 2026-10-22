@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\Organization;
 use App\Services\ImageUploadService;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -21,7 +22,11 @@ class AttendeeFactory extends Factory
     public function definition(): array
     {
         return [
-            'organization_id' => Organization::factory(),
+            // Pass `for($event)` to register the attendee in an event; the organization then follows the event (see Attendee::booted).
+            'event_id' => null,
+            'organization_id' => fn (array $attributes) => $attributes['event_id'] !== null
+                ? Event::withoutGlobalScopes()->whereKey($attributes['event_id'])->value('organization_id')
+                : Organization::factory(),
             'first_name' => fake()->firstName(),
             'middle_name' => fake()->optional()->firstName(),
             'last_name' => fake()->lastName(),

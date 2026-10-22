@@ -9,7 +9,6 @@ use App\Models\EventProgram;
 use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
@@ -98,11 +97,7 @@ class AttendeeDashboardTest extends TestCase
             ->state(['session_date' => now()->addDays(11)])
             ->create();
 
-        $registration = EventRegistration::factory()
-            ->for($futureEvent)
-            ->for($attendee)
-            ->state(['id_card_generated_at' => now()])
-            ->create();
+        $registration = $this->registerInEvent($futureEvent, $attendee, ['id_card_generated_at' => now()]);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -142,10 +137,7 @@ class AttendeeDashboardTest extends TestCase
         $session1 = EventSession::factory()->for($pastEvent)->create();
         $session2 = EventSession::factory()->for($pastEvent)->create();
 
-        $registration = EventRegistration::factory()
-            ->for($pastEvent)
-            ->for($attendee)
-            ->create();
+        $registration = $this->registerInEvent($pastEvent, $attendee);
 
         // Create attendance records for 1 of the 2 sessions
         AttendanceRecord::factory()
@@ -196,10 +188,10 @@ class AttendeeDashboardTest extends TestCase
             ->state(['start_date' => now()->subDays(5), 'end_date' => now()->subDays(1)])
             ->create();
 
-        EventRegistration::factory()->for($upcoming1)->for($attendee)->create();
-        EventRegistration::factory()->for($upcoming2)->for($attendee)->create();
-        EventRegistration::factory()->for($past1)->for($attendee)->create();
-        EventRegistration::factory()->for($past2)->for($attendee)->create();
+        $this->registerInEvent($upcoming1, $attendee);
+        $this->registerInEvent($upcoming2, $attendee);
+        $this->registerInEvent($past1, $attendee);
+        $this->registerInEvent($past2, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -227,8 +219,8 @@ class AttendeeDashboardTest extends TestCase
             ->state(['start_date' => now()->addDays(5), 'end_date' => now()->addDays(10)])
             ->create();
 
-        EventRegistration::factory()->for($event)->for($attendee1)->create();
-        EventRegistration::factory()->for($event)->for($attendee2)->create();
+        $this->registerInEvent($event, $attendee1);
+        $this->registerInEvent($event, $attendee2);
 
         $response = $this->actingAs($attendee1User, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -256,8 +248,8 @@ class AttendeeDashboardTest extends TestCase
             ->state(['start_date' => now()->subDays(4), 'end_date' => now()->subDays(1)])
             ->create();
 
-        $reg1 = EventRegistration::factory()->for($event1)->for($attendee)->create();
-        $reg2 = EventRegistration::factory()->for($event2)->for($attendee)->create();
+        $reg1 = $this->registerInEvent($event1, $attendee);
+        $reg2 = $this->registerInEvent($event2, $attendee);
 
         // Create sessions and attendance records
         $session1 = EventSession::factory()->for($event1)->create();
@@ -289,11 +281,7 @@ class AttendeeDashboardTest extends TestCase
             ->state(['start_date' => now()->addDays(5), 'end_date' => now()->addDays(10)])
             ->create();
 
-        EventRegistration::factory()
-            ->for($event)
-            ->for($attendee)
-            ->state(['id_card_generated_at' => null])
-            ->create();
+        $this->registerInEvent($event, $attendee, ['id_card_generated_at' => null]);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -315,7 +303,7 @@ class AttendeeDashboardTest extends TestCase
             ->state(['start_date' => now(), 'end_date' => now()])
             ->create();
 
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -337,9 +325,9 @@ class AttendeeDashboardTest extends TestCase
         $event2 = Event::factory()->for($org)->state(['start_date' => now()->addDays(5), 'end_date' => now()->addDays(8)])->create();
         $event3 = Event::factory()->for($org)->state(['start_date' => now()->addDays(20), 'end_date' => now()->addDays(25)])->create();
 
-        EventRegistration::factory()->for($event1)->for($attendee)->create();
-        EventRegistration::factory()->for($event2)->for($attendee)->create();
-        EventRegistration::factory()->for($event3)->for($attendee)->create();
+        $this->registerInEvent($event1, $attendee);
+        $this->registerInEvent($event2, $attendee);
+        $this->registerInEvent($event3, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -363,9 +351,9 @@ class AttendeeDashboardTest extends TestCase
         $event2 = Event::factory()->for($org)->state(['start_date' => now()->subDays(8), 'end_date' => now()->subDays(1)])->create();
         $event3 = Event::factory()->for($org)->state(['start_date' => now()->subDays(25), 'end_date' => now()->subDays(20)])->create();
 
-        EventRegistration::factory()->for($event1)->for($attendee)->create();
-        EventRegistration::factory()->for($event2)->for($attendee)->create();
-        EventRegistration::factory()->for($event3)->for($attendee)->create();
+        $this->registerInEvent($event1, $attendee);
+        $this->registerInEvent($event2, $attendee);
+        $this->registerInEvent($event3, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -388,8 +376,8 @@ class AttendeeDashboardTest extends TestCase
         $event1 = Event::factory()->for($org)->state(['start_date' => now()->addDays(5), 'end_date' => now()->addDays(10)])->create();
         $event2 = Event::factory()->for($org)->state(['start_date' => now()->addDays(20), 'end_date' => now()->addDays(25)])->create();
 
-        EventRegistration::factory()->for($event1)->for($attendee)->create();
-        EventRegistration::factory()->for($event2)->for($attendee)->create();
+        $this->registerInEvent($event1, $attendee);
+        $this->registerInEvent($event2, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -412,8 +400,8 @@ class AttendeeDashboardTest extends TestCase
         $event1 = Event::factory()->for($org)->state(['start_date' => now()->subDays(15), 'end_date' => now()->subDays(10)])->create();
         $event2 = Event::factory()->for($org)->state(['start_date' => now()->subDays(8), 'end_date' => now()->subDays(1)])->create();
 
-        $reg1 = EventRegistration::factory()->for($event1)->for($attendee)->create();
-        $reg2 = EventRegistration::factory()->for($event2)->for($attendee)->create();
+        $reg1 = $this->registerInEvent($event1, $attendee);
+        $reg2 = $this->registerInEvent($event2, $attendee);
 
         EventSession::factory()->for($event1)->create();
         EventSession::factory()->for($event1)->create();
@@ -442,8 +430,8 @@ class AttendeeDashboardTest extends TestCase
         $upcomingEvent = Event::factory()->for($org)->state(['start_date' => now()->addDays(10), 'end_date' => now()->addDays(15)])->create();
         $pastEvent = Event::factory()->for($org)->state(['start_date' => now()->subDays(10), 'end_date' => now()->subDays(5)])->create();
 
-        $upcomingReg = EventRegistration::factory()->for($upcomingEvent)->for($attendee)->create();
-        $pastReg = EventRegistration::factory()->for($pastEvent)->for($attendee)->create();
+        $upcomingReg = $this->registerInEvent($upcomingEvent, $attendee);
+        $pastReg = $this->registerInEvent($pastEvent, $attendee);
 
         $session1 = EventSession::factory()->for($pastEvent)->create();
         $session2 = EventSession::factory()->for($pastEvent)->create();
@@ -477,7 +465,7 @@ class AttendeeDashboardTest extends TestCase
         $attendee = Attendee::factory()->for($org)->for($attendeeUser)->create();
 
         $upcomingEvent = Event::factory()->for($org)->state(['start_date' => now()->addDays(10), 'end_date' => now()->addDays(15)])->create();
-        EventRegistration::factory()->for($upcomingEvent)->for($attendee)->create();
+        $this->registerInEvent($upcomingEvent, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/dashboard');
@@ -524,8 +512,8 @@ class AttendeeDashboardTest extends TestCase
         $event1 = Event::factory()->for($org)->create();
         $event2 = Event::factory()->for($org)->create();
 
-        EventRegistration::factory()->for($event1)->for($attendee)->create();
-        EventRegistration::factory()->for($event2)->for($attendee)->create();
+        $this->registerInEvent($event1, $attendee);
+        $this->registerInEvent($event2, $attendee);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/registrations');
@@ -543,11 +531,7 @@ class AttendeeDashboardTest extends TestCase
         $attendee = Attendee::factory()->for($org)->for($attendeeUser)->create();
 
         $event = Event::factory()->for($org)->create();
-        $registration = EventRegistration::factory()
-            ->for($event)
-            ->for($attendee)
-            ->state(['id_card_generated_at' => now()])
-            ->create();
+        $registration = $this->registerInEvent($event, $attendee, ['id_card_generated_at' => now()]);
 
         $response = $this->actingAs($attendeeUser, 'sanctum')
             ->getJson('/api/v1/attendee/registrations');
@@ -580,8 +564,8 @@ class AttendeeDashboardTest extends TestCase
 
         $event = Event::factory()->for($org)->create();
 
-        $registration1 = EventRegistration::factory()->for($event)->for($attendee1)->create();
-        EventRegistration::factory()->for($event)->for($attendee2)->create();
+        $registration1 = $this->registerInEvent($event, $attendee1);
+        $this->registerInEvent($event, $attendee2);
 
         $response = $this->actingAs($attendee1User, 'sanctum')
             ->getJson('/api/v1/attendee/registrations');
@@ -602,8 +586,8 @@ class AttendeeDashboardTest extends TestCase
         $attendee = Attendee::factory()->for($organization)->for($user)->create();
         $past = Event::factory()->for($organization)->create(['start_date' => today()->subDays(3), 'end_date' => today()->subDay()]);
         $upcoming = Event::factory()->for($organization)->create(['start_date' => today(), 'end_date' => today()->addDay()]);
-        $pastRegistration = EventRegistration::factory()->for($past)->for($attendee)->create();
-        $upcomingRegistration = EventRegistration::factory()->for($upcoming)->for($attendee)->create();
+        $pastRegistration = $this->registerInEvent($past, $attendee);
+        $upcomingRegistration = $this->registerInEvent($upcoming, $attendee);
         $sessions = EventSession::factory()->for($past)->count(2)->create();
         AttendanceRecord::factory()->for($pastRegistration)->for($sessions[0], 'eventSession')->create(['check_in_at' => now()]);
         AttendanceRecord::factory()->for($pastRegistration)->for($sessions[1], 'eventSession')->create(['check_in_at' => null]);
@@ -623,7 +607,7 @@ class AttendeeDashboardTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
         $attendee = Attendee::factory()->for($organization)->for($user)->create();
         $event = Event::factory()->for($organization)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = $this->registerInEvent($event, $attendee);
         $sessions = EventSession::factory()->for($event)->count(3)->create();
         AttendanceRecord::factory()
             ->for($registration)
@@ -711,7 +695,7 @@ class AttendeeDashboardTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
         $attendee = Attendee::factory()->for($organization)->for($user)->create();
         $event = Event::factory()->for($organization)->create();
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
 
         $this->actingAs($user, 'sanctum')
             ->getJson("/api/v1/attendee/events/{$event->id}/program")
@@ -724,7 +708,7 @@ class AttendeeDashboardTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
         $attendee = Attendee::factory()->for($organization)->for($user)->create();
         $event = Event::factory()->for($organization)->create();
-        EventRegistration::factory()->for($event)->for($attendee)->create();
+        $this->registerInEvent($event, $attendee);
         $program = EventProgram::factory()->for($event)->create([
             'title' => 'Annual Gathering',
             'description' => 'A full day together.',

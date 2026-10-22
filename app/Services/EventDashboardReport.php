@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use Illuminate\Support\Collection;
 
@@ -40,14 +40,14 @@ class EventDashboardReport
     }
 
     /**
-     * @return Collection<int, EventRegistration>
+     * @return Collection<int, Attendee>
      */
     private function registrations(Event $event): Collection
     {
-        return $event->registrations()
+        return $event->attendees()
             ->with([
-                'attendee.union',
-                'attendee.mission',
+                'union',
+                'mission',
                 'attendanceRecords' => fn ($query) => $query
                     ->whereNotNull('check_in_at')
                     ->orderBy('check_in_at'),
@@ -71,15 +71,15 @@ class EventDashboardReport
     }
 
     /**
-     * @param  Collection<int, EventRegistration>  $registrations
+     * @param  Collection<int, Attendee>  $registrations
      * @param  Collection<int, EventSession>  $sessions
      * @return array<string, int|float>
      */
     private function attendanceSummary(Event $event, Collection $registrations, Collection $sessions): array
     {
         $registrationCount = $registrations->count();
-        $checkedIn = $registrations->filter(fn (EventRegistration $registration) => $registration->attendanceRecords->isNotEmpty())->count();
-        $checkedOut = $event->registrations()
+        $checkedIn = $registrations->filter(fn (Attendee $registration) => $registration->attendanceRecords->isNotEmpty())->count();
+        $checkedOut = $event->attendees()
             ->whereHas('attendanceRecords', fn ($query) => $query->whereNotNull('check_out_at'))
             ->count();
         $sessionCheckIns = $sessions->sum('checked_in_count');
@@ -142,7 +142,7 @@ class EventDashboardReport
 
     /**
      * @param  Collection<int, EventSession>  $sessions
-     * @param  Collection<int, EventRegistration>  $registrations
+     * @param  Collection<int, Attendee>  $registrations
      * @param  Collection<int, array<string, mixed>>  $organizations
      * @return array<string, mixed>
      */
@@ -189,12 +189,12 @@ class EventDashboardReport
      * @param  Collection<string, array<string, mixed>>  $series
      * @param  Collection<int, int>  $sessionIndexes
      */
-    private function addRegistrationCheckIns(Collection $series, EventRegistration $registration, Collection $sessionIndexes): void
+    private function addRegistrationCheckIns(Collection $series, Attendee $registration, Collection $sessionIndexes): void
     {
-        $level = $registration->attendee?->organization_level?->value ?? 'unassigned';
+        $level = $registration->organization_level?->value ?? 'unassigned';
         $organizationId = match ($level) {
-            'union' => $registration->attendee?->union_id,
-            'mission' => $registration->attendee?->mission_id,
+            'union' => $registration->union_id,
+            'mission' => $registration->mission_id,
             default => null,
         };
         $key = $level.':'.($organizationId ?? 'unassigned');

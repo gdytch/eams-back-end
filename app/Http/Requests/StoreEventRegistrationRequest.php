@@ -2,7 +2,7 @@
 
 namespace App\Http\Requests;
 
-use App\Models\EventRegistration;
+use App\Models\Attendee;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
@@ -12,7 +12,7 @@ class StoreEventRegistrationRequest extends FormRequest
 {
     public function authorize(): Response|bool
     {
-        return Gate::forUser($this->user())->inspect('create', [EventRegistration::class, $this->route('event')]);
+        return Gate::forUser($this->user())->inspect('create', [Attendee::class, $this->route('event')]);
     }
 
     /**
@@ -36,7 +36,7 @@ class StoreEventRegistrationRequest extends FormRequest
                 'nullable',
                 'email',
                 'max:255',
-                Rule::unique('attendees', 'email_address'),
+                Rule::unique('attendees', 'email_address')->where('event_id', $this->route('event')->id),
                 Rule::unique('users', 'email'),
             ],
             'union_id' => ['nullable', Rule::exists('unions', 'id')->where('organization_id', $organizationId)],

@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -35,7 +34,7 @@ class AttendeeDashboardData
     /** @return array<string, mixed> */
     public function profileDashboard(Attendee $attendee, Collection $registrations): array
     {
-        $registrationRows = $registrations->map(fn (EventRegistration $registration): array => $this->profileRegistration($registration));
+        $registrationRows = $registrations->map(fn (Attendee $registration): array => $this->profileRegistration($registration));
         $completedSessions = $registrationRows->sum(fn (array $registration): int => $registration['attendance']['completed_sessions']);
         $attendedSessions = $registrationRows->sum(fn (array $registration): int => $registration['attendance']['attended_sessions']);
 
@@ -72,7 +71,7 @@ class AttendeeDashboardData
     }
 
     /** @return array<string, mixed> */
-    public function eventAttendance(Event $event, EventRegistration $registration, Collection $sessions): array
+    public function eventAttendance(Event $event, Attendee $registration, Collection $sessions): array
     {
         $sessionRows = $this->eventAttendanceRows($registration, $sessions);
 
@@ -93,19 +92,19 @@ class AttendeeDashboardData
     private function sortedRegistrations(Collection $registrations): array
     {
         [$upcoming, $past] = $registrations->partition(
-            fn (EventRegistration $registration): bool => $registration->event->end_date->isFuture()
+            fn (Attendee $registration): bool => $registration->event->end_date->isFuture()
                 || $registration->event->end_date->isToday()
         );
 
         return [
-            $upcoming->sortBy(fn (EventRegistration $registration) => $registration->event->start_date),
-            $past->sortByDesc(fn (EventRegistration $registration) => $registration->event->end_date),
+            $upcoming->sortBy(fn (Attendee $registration) => $registration->event->start_date),
+            $past->sortByDesc(fn (Attendee $registration) => $registration->event->end_date),
         ];
     }
 
     private function upcomingEvents(Collection $registrations): Collection
     {
-        return $registrations->map(fn (EventRegistration $registration): array => [
+        return $registrations->map(fn (Attendee $registration): array => [
             'registration_id' => $registration->id,
             'event' => $registration->event,
             'qr_token' => $registration->qr_token,
@@ -117,7 +116,7 @@ class AttendeeDashboardData
 
     private function pastEvents(Collection $registrations): Collection
     {
-        return $registrations->map(fn (EventRegistration $registration): array => [
+        return $registrations->map(fn (Attendee $registration): array => [
             'registration_id' => $registration->id,
             'event' => $registration->event,
             'attendance_summary' => [
@@ -134,7 +133,7 @@ class AttendeeDashboardData
     private function overviewStats(Collection $registrations, Collection $upcoming, Collection $past, Collection $pastEvents): array
     {
         $totalSessionsAttended = $pastEvents->sum('attendance_summary.sessions_attended');
-        $totalSessionsAvailable = $past->sum(fn (EventRegistration $registration): int => $registration->event->sessions->count());
+        $totalSessionsAvailable = $past->sum(fn (Attendee $registration): int => $registration->event->sessions->count());
 
         return [
             'total_events_registered' => $registrations->count(),
@@ -160,7 +159,7 @@ class AttendeeDashboardData
         ];
     }
 
-    private function eventAttendanceRows(EventRegistration $registration, Collection $sessions): Collection
+    private function eventAttendanceRows(Attendee $registration, Collection $sessions): Collection
     {
         $attendanceBySession = $registration->attendanceRecords->keyBy('event_session_id');
 
@@ -189,7 +188,7 @@ class AttendeeDashboardData
         ];
     }
 
-    private function profileRegistration(EventRegistration $registration): array
+    private function profileRegistration(Attendee $registration): array
     {
         $event = $registration->event;
         $completedSessionIds = $event->sessions
@@ -228,7 +227,7 @@ class AttendeeDashboardData
         ];
     }
 
-    private function profileSessionRows(EventRegistration $registration): Collection
+    private function profileSessionRows(Attendee $registration): Collection
     {
         $attendanceBySession = $registration->attendanceRecords->keyBy('event_session_id');
 

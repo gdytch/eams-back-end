@@ -125,8 +125,7 @@ class GenerateIdCardGridDownloadJobV2 implements ShouldQueue
             $event = $this->download->event;
 
             $query = $event
-                ->registrations()
-                ->with('attendee');
+                ->attendees();
 
             // Filter to requested registrations,
             // or all registrations if registration_ids is null.

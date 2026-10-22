@@ -3,9 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\AuditLog;
+use App\Models\Event;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class AuditLogTest extends TestCase
@@ -14,10 +17,15 @@ class AuditLogTest extends TestCase
 
     public function test_creating_an_attendee_writes_an_audit_log_entry(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'Maria',
             'last_name' => 'Santos',
         ])->assertCreated();

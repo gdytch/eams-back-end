@@ -9,9 +9,9 @@ use App\Http\Requests\UploadEventBannerRequest;
 use App\Http\Requests\UploadEventIdCardBackgroundRequest;
 use App\Http\Resources\EventResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
+use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\User;
 use App\Services\ImageUploadService;
 use App\Support\ImageInput;
@@ -209,14 +209,14 @@ class EventController extends Controller
      */
     private function regenerateIdCardsFor(Event $event): void
     {
-        $event->registrations()->update([
+        $event->attendees()->update([
             'id_card_path' => null,
             'id_card_images_path' => null,
             'id_card_generated_at' => null,
         ]);
 
-        $event->registrations->each(function (EventRegistration $registration) {
-            GenerateAttendeeIdCardJob::dispatch($registration);
+        $event->attendees()->get()->each(function (Attendee $attendee) {
+            GenerateAttendeeIdCardJob::dispatch($attendee);
         });
     }
 }

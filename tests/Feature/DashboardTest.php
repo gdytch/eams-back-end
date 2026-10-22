@@ -6,7 +6,6 @@ use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\User;
@@ -79,10 +78,7 @@ class DashboardTest extends TestCase
             $organization = Organization::factory()->create();
             $organizationIds->push($organization->id);
             $event = Event::factory()->for($organization)->state(['status' => 'completed'])->create();
-            EventRegistration::factory()
-                ->for($event)
-                ->for(Attendee::factory()->for($organization))
-                ->create();
+            Attendee::factory()->for($event)->for($organization)->create();
         };
 
         $createOrganizationWithCompletedEvent();
@@ -160,7 +156,7 @@ class DashboardTest extends TestCase
         $session = EventSession::factory()->for($event)->create(['session_date' => now()->toDateString()]);
 
         $attendee = Attendee::factory()->for($org)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = $this->registerInEvent($event, $attendee);
         AttendanceRecord::factory()->for($registration)->for($session)->create(['check_in_at' => now()]);
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->getJson('/api/v1/dashboard');
@@ -180,7 +176,7 @@ class DashboardTest extends TestCase
         $secondSession = EventSession::factory()->for($event)->create();
         $attendees = Attendee::factory()->for($org)->count(2)->create();
         $registrations = $attendees->map(
-            fn (Attendee $attendee) => EventRegistration::factory()->for($event)->for($attendee)->create()
+            fn (Attendee $attendee) => $this->registerInEvent($event, $attendee)
         );
 
         AttendanceRecord::factory()->for($registrations[0])->for($firstSession)->create();
@@ -247,7 +243,7 @@ class DashboardTest extends TestCase
 
         $event = Event::factory()->for($org)->create();
         $attendee = Attendee::factory()->for($org)->create();
-        $registration = EventRegistration::factory()->for($event)->for($attendee)->create();
+        $registration = $this->registerInEvent($event, $attendee);
 
         AttendanceRecord::factory()->for($registration)->create([
             'check_in_at' => now(),

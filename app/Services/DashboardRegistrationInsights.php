@@ -2,8 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
@@ -18,7 +18,7 @@ class DashboardRegistrationInsights
      */
     public function build(Builder $events): array
     {
-        $registrations = EventRegistration::query()
+        $registrations = Attendee::query()
             ->whereIn('event_id', (clone $events)->select('events.id'));
 
         $territories = $this->territoryBreakdown(clone $registrations);
@@ -27,27 +27,26 @@ class DashboardRegistrationInsights
         return $this->formatInsights($territories, $dailyCounts);
     }
 
-    /** @param Builder<EventRegistration> $registrations
+    /** @param Builder<Attendee> $registrations
      * @return Collection<int, object>
      */
     private function territoryBreakdown(Builder $registrations): Collection
     {
         return $registrations
-            ->leftJoin('attendees', 'attendees.id', '=', 'event_registrations.attendee_id')
             ->leftJoin('unions', 'unions.id', '=', 'attendees.union_id')
             ->leftJoin('missions', 'missions.id', '=', 'attendees.mission_id')
             ->selectRaw("COALESCE(attendees.organization_level, 'unassigned') as organization_level")
             ->selectRaw("CASE attendees.organization_level WHEN 'union' THEN unions.id WHEN 'mission' THEN missions.id END as territory_id")
             ->selectRaw("CASE attendees.organization_level WHEN 'union' THEN unions.name WHEN 'mission' THEN missions.name END as organization_name")
             ->selectRaw('COUNT(*) as registrations')
-            ->selectRaw('SUM(CASE WHEN EXISTS (SELECT 1 FROM attendance_records WHERE attendance_records.event_registration_id = event_registrations.id AND check_in_at IS NOT NULL) THEN 1 ELSE 0 END) as checked_in')
+            ->selectRaw('SUM(CASE WHEN EXISTS (SELECT 1 FROM attendance_records WHERE attendance_records.attendee_id = attendees.id AND check_in_at IS NOT NULL) THEN 1 ELSE 0 END) as checked_in')
             ->groupBy('attendees.organization_level', 'territory_id', 'organization_name')
             ->orderByDesc('registrations')
             ->orderBy('organization_name')
             ->toBase()->get();
     }
 
-    /** @param Builder<EventRegistration> $registrations */
+    /** @param Builder<Attendee> $registrations */
     private function dailyRegistrationCounts(Builder $registrations): Collection
     {
         return $registrations

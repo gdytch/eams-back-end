@@ -20,7 +20,7 @@ class EventSessionPolicy
     public function view(User $user, EventSession $eventSession): bool
     {
         if ($user->isAttendee()) {
-            return $user->attendee()->whereHas('registrations', fn ($query) => $query->where('event_id', $eventSession->event_id))->exists();
+            return $user->attendees()->withoutGlobalScopes()->where('event_id', $eventSession->event_id)->exists();
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $eventSession->event->organization_id)

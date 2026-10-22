@@ -7,7 +7,6 @@ use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\EventProgramItem;
-use App\Models\EventRegistration;
 use App\Models\User;
 use DomainException;
 use Illuminate\Support\Collection;
@@ -47,6 +46,10 @@ class AttendeeDuplicateMergeService
                 throw new DomainException('Attendees must be active duplicates from one organization.');
             }
 
+            if ($attendees->pluck('event_id')->unique()->count() !== 1) {
+                throw new DomainException('Attendees must be duplicates registered for the same event.');
+            }
+
             $linkedUserIds = $attendees->pluck('user_id')->filter()->unique()->values();
             if ($linkedUserIds->count() > 1) {
                 throw new DomainException('Merge blocked: selected attendees have multiple linked accounts.');
@@ -78,7 +81,7 @@ class AttendeeDuplicateMergeService
                 $this->syncLinkedUserName($primary, $transferredUserId);
             }
 
-            $registrationSummary = $this->moveRegistrations($primary, $sources);
+            $registrationSummary = $this->moveAttendance($primary, $sources);
             EventProgramItem::query()
                 ->whereIn('attendee_id', $sources->pluck('id'))
                 ->update(['attendee_id' => $primary->id]);
@@ -99,14 +102,7 @@ class AttendeeDuplicateMergeService
                 'registrations' => $registrationSummary,
             ]);
 
-            $retainedRegistrations = EventRegistration::query()
-                ->whereKey($registrationSummary['retained_registration_ids'])
-                ->get()
-                ->keyBy('id');
-
-            foreach ($registrationSummary['retained_registration_ids'] as $registrationId) {
-                GenerateAttendeeIdCardJob::dispatch($retainedRegistrations->get($registrationId))->afterCommit();
-            }
+            GenerateAttendeeIdCardJob::dispatch($primary)->afterCommit();
 
             return $primary->fresh(['union', 'mission', 'church']);
         });
@@ -154,43 +150,28 @@ class AttendeeDuplicateMergeService
         ]);
     }
 
-    /** @param Collection<int, Attendee> $sources */
-    private function moveRegistrations(Attendee $primary, Collection $sources): array
+    /**
+     * Fold the sources' attendance into the primary; every attendee is one registration in the same event.
+     *
+     * @param  Collection<int, Attendee>  $sources
+     */
+    private function moveAttendance(Attendee $primary, Collection $sources): array
     {
-        $allAttendeeIds = $sources->pluck('id')->prepend($primary->id);
-        $registrations = EventRegistration::query()
-            ->whereIn('attendee_id', $allAttendeeIds)
-            ->lockForUpdate()
-            ->get();
         $records = AttendanceRecord::query()
-            ->whereIn('event_registration_id', $registrations->pluck('id'))
+            ->whereIn('attendee_id', $sources->pluck('id')->prepend($primary->id))
             ->lockForUpdate()
             ->get()
-            ->groupBy('event_registration_id');
+            ->groupBy('attendee_id');
 
-        $primaryByEvent = $registrations->where('attendee_id', $primary->id)->keyBy('event_id');
-        $retainedIds = $primaryByEvent->pluck('id')->all();
-        $movedRegistrationIds = [];
-        $removedRegistrationIds = [];
+        $primaryRecords = $records->get($primary->id, collect())->keyBy('event_session_id');
         $mergedAttendanceCount = 0;
 
-        foreach ($registrations->whereIn('attendee_id', $sources->pluck('id')) as $sourceRegistration) {
-            $target = $primaryByEvent->get($sourceRegistration->event_id);
-            if ($target === null) {
-                $sourceRegistration->update(['attendee_id' => $primary->id]);
-                $primaryByEvent->put($sourceRegistration->event_id, $sourceRegistration);
-                $retainedIds[] = $sourceRegistration->id;
-                $movedRegistrationIds[] = $sourceRegistration->id;
-
-                continue;
-            }
-
-            $targetRecords = $records->get($target->id, collect())->keyBy('event_session_id');
-            foreach ($records->get($sourceRegistration->id, collect()) as $sourceRecord) {
-                $targetRecord = $targetRecords->get($sourceRecord->event_session_id);
+        foreach ($sources as $source) {
+            foreach ($records->get($source->id, collect()) as $sourceRecord) {
+                $targetRecord = $primaryRecords->get($sourceRecord->event_session_id);
                 if ($targetRecord === null) {
-                    $sourceRecord->update(['event_registration_id' => $target->id]);
-                    $targetRecords->put($sourceRecord->event_session_id, $sourceRecord);
+                    $sourceRecord->update(['attendee_id' => $primary->id]);
+                    $primaryRecords->put($sourceRecord->event_session_id, $sourceRecord);
 
                     continue;
                 }
@@ -199,15 +180,12 @@ class AttendeeDuplicateMergeService
                 $sourceRecord->delete();
                 $mergedAttendanceCount++;
             }
-
-            $sourceRegistration->delete();
-            $removedRegistrationIds[] = $sourceRegistration->id;
         }
 
         return [
-            'retained_registration_ids' => array_values(array_unique($retainedIds)),
-            'moved_registration_ids' => $movedRegistrationIds,
-            'removed_registration_ids' => $removedRegistrationIds,
+            'retained_registration_ids' => [$primary->id],
+            'moved_registration_ids' => [],
+            'removed_registration_ids' => $sources->pluck('id')->all(),
             'merged_attendance_records' => $mergedAttendanceCount,
         ];
     }

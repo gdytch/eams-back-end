@@ -10,7 +10,6 @@ use App\Models\EventProgram;
 use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Mission;
 use App\Models\Organization;
@@ -45,8 +44,8 @@ class GlobalSearchTest extends TestCase
         $secondEvent = Event::factory()->for($organization)->create(['name' => 'Meridian Autumn']);
         $firstAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Meridian', 'last_name' => 'First', 'mobile_no' => '09171234567']);
         $secondAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Meridian', 'last_name' => 'Second']);
-        $firstRegistration = EventRegistration::create(['event_id' => $firstEvent->id, 'attendee_id' => $firstAttendee->id]);
-        EventRegistration::create(['event_id' => $secondEvent->id, 'attendee_id' => $secondAttendee->id]);
+        $firstRegistration = $this->registerInEvent($firstEvent, $firstAttendee);
+        $this->registerInEvent($secondEvent, $secondAttendee);
         $session = EventSession::factory()->for($firstEvent)->create(['name' => 'Meridian Session']);
         $attendance = AttendanceRecord::factory()->for($firstRegistration)->for($session, 'eventSession')->create();
         $program = EventProgram::factory()->for($firstEvent)->create(['title' => 'Meridian Program']);
@@ -93,9 +92,9 @@ class GlobalSearchTest extends TestCase
         $checker = User::factory()->checker()->for($ownOrganization)->create();
         $checker->accessibleEvents()->attach($ownEvent);
         $otherAttendee = Attendee::create(['organization_id' => $otherOrganization->id, 'first_name' => 'Hidden', 'last_name' => 'Person']);
-        EventRegistration::create(['event_id' => $otherEvent->id, 'attendee_id' => $otherAttendee->id]);
+        $this->registerInEvent($otherEvent, $otherAttendee);
         $restrictedAttendee = Attendee::create(['organization_id' => $ownOrganization->id, 'first_name' => 'Hidden', 'last_name' => 'Restricted']);
-        EventRegistration::create(['event_id' => $restrictedEvent->id, 'attendee_id' => $restrictedAttendee->id]);
+        $this->registerInEvent($restrictedEvent, $restrictedAttendee);
         Speaker::factory()->for($ownEvent)->create(['name' => 'Hidden Speaker']);
 
         $result = $this->actingAs($checker, 'sanctum')->getJson('/api/v1/search?q=Hidden&all_events=1')->assertOk()->json();
@@ -144,16 +143,15 @@ class GlobalSearchTest extends TestCase
         $attendee = Attendee::create(['organization_id' => $organization->id, 'user_id' => $user->id, 'first_name' => 'Registered', 'last_name' => 'Guest']);
         $ownEvent = Event::factory()->for($organization)->create(['name' => 'Summit Own']);
         $otherEvent = Event::factory()->for($organization)->create(['name' => 'Summit Other']);
-        EventRegistration::create(['event_id' => $ownEvent->id, 'attendee_id' => $attendee->id]);
+        $ownRegistration = $this->registerInEvent($ownEvent, $attendee);
         $session = EventSession::factory()->for($ownEvent)->create(['name' => 'Summit Session']);
-        $ownRegistration = $attendee->registrations()->where('event_id', $ownEvent->id)->firstOrFail();
         $ownAttendance = AttendanceRecord::factory()->for($ownRegistration)->for($session, 'eventSession')->create();
         Speaker::factory()->for($ownEvent)->create(['name' => 'Summit Speaker']);
         EventProgram::factory()->for($ownEvent)->create(['title' => 'Summit Program']);
         $otherAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Other', 'last_name' => 'Guest']);
-        EventRegistration::create(['event_id' => $otherEvent->id, 'attendee_id' => $otherAttendee->id]);
+        $this->registerInEvent($otherEvent, $otherAttendee);
         $sameEventAttendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Registered', 'last_name' => 'Other']);
-        $otherRegistration = EventRegistration::create(['event_id' => $ownEvent->id, 'attendee_id' => $sameEventAttendee->id]);
+        $otherRegistration = $this->registerInEvent($ownEvent, $sameEventAttendee);
         AttendanceRecord::factory()->for($otherRegistration)->for($session, 'eventSession')->create();
 
         $result = $this->actingAs($user, 'sanctum')->getJson('/api/v1/search?q=Summit&all_events=1')->assertOk()->json();

@@ -53,9 +53,19 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->belongsToMany(Event::class, 'event_checker_access');
     }
 
+    /**
+     * The user's most recent per-event Attendee, the source for prefilling a new registration.
+     */
+    /** @return HasOne<Attendee, $this> */
     public function attendee(): HasOne
     {
-        return $this->hasOne(Attendee::class);
+        return $this->hasOne(Attendee::class)->latestOfMany();
+    }
+
+    /** @return HasMany<Attendee, $this> */
+    public function attendees(): HasMany
+    {
+        return $this->hasMany(Attendee::class);
     }
 
     public function identities(): HasMany
@@ -85,7 +95,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     public function getHasAttendeeAccountAttribute(): bool
     {
-        return $this->attendee()->exists();
+        return $this->attendees()->exists();
     }
 
     public function hasAccessToEvent(Event $event): bool

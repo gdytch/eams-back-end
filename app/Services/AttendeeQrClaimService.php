@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Models\Attendee;
-use App\Models\EventRegistration;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -20,12 +19,12 @@ class AttendeeQrClaimService
         return $claim !== null && ($claim['expires_at'] ?? 0) > now()->timestamp ? $claim : null;
     }
 
-    public function createClaim(EventRegistration $registration): string
+    public function createClaim(Attendee $attendee): string
     {
         $claimToken = Str::random(64);
 
         Cache::put($this->cacheKey($claimToken), [
-            'registration_id' => $registration->id,
+            'attendee_id' => $attendee->id,
             'email' => null,
             'email_verified' => false,
             'expires_at' => now()->addMinutes(self::CLAIM_TTL_MINUTES)->timestamp,
@@ -88,9 +87,9 @@ class AttendeeQrClaimService
         });
     }
 
-    public function allowVerificationAttempt(int $registrationId): bool
+    public function allowVerificationAttempt(int $attendeeId): bool
     {
-        $key = 'attendee-qr-verify:'.$registrationId;
+        $key = 'attendee-qr-verify:'.$attendeeId;
         Cache::add($key, 0, now()->addHour());
         $attempts = Cache::increment($key);
 

@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Services\AttendeeQrClaimService;
@@ -20,7 +19,7 @@ class AttendeeQrClaimSecurityTest extends TestCase
     {
         Cache::flush();
         $claims = new AttendeeQrClaimService;
-        $registration = new EventRegistration;
+        $registration = new Attendee;
         $registration->id = 42;
 
         for ($attempt = 0; $attempt < 10; $attempt++) {
@@ -45,7 +44,7 @@ class AttendeeQrClaimSecurityTest extends TestCase
     {
         Cache::flush();
         $claims = new AttendeeQrClaimService;
-        $registration = new EventRegistration;
+        $registration = new Attendee;
         $registration->id = 99;
         $claimToken = $claims->createClaim($registration);
         $originalExpiry = $claims->claim($claimToken)['expires_at'];
@@ -70,10 +69,7 @@ class AttendeeQrClaimSecurityTest extends TestCase
             'last_name' => 'Rivera',
             'mission_id' => null,
         ]);
-        $registration = EventRegistration::factory()
-            ->for(Event::factory()->for($organization))
-            ->for($attendee)
-            ->create();
+        $registration = $this->registerInEvent(Event::factory()->for($organization), $attendee);
 
         for ($attempt = 1; $attempt <= 10; $attempt++) {
             $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.'.$attempt])
@@ -100,7 +96,7 @@ class AttendeeQrClaimSecurityTest extends TestCase
     {
         Cache::flush();
         $claims = new AttendeeQrClaimService;
-        $registration = new EventRegistration;
+        $registration = new Attendee;
         $registration->id = 100;
         $claimToken = $claims->createClaim($registration);
         $claims->storeEmailCode($claimToken, 'person@example.com', '123456');

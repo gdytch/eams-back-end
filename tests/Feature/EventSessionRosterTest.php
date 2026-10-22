@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use App\Models\Mission;
 use App\Models\Organization;
@@ -28,7 +27,7 @@ class EventSessionRosterTest extends TestCase
             'first_name' => 'Ana',
             'last_name' => 'Cruz',
         ]);
-        $earlyRegistration = EventRegistration::factory()->for($event)->for($earlyCheckIn)->create();
+        $earlyRegistration = $this->registerInEvent($event, $earlyCheckIn);
         $earlyRegistration->attendanceRecords()->create([
             'event_session_id' => $session->id,
             'check_in_at' => now()->subMinutes(30),
@@ -40,7 +39,7 @@ class EventSessionRosterTest extends TestCase
             'first_name' => 'Ben',
             'last_name' => 'Reyes',
         ]);
-        $lateRegistration = EventRegistration::factory()->for($event)->for($lateCheckIn)->create();
+        $lateRegistration = $this->registerInEvent($event, $lateCheckIn);
         $lateRegistration->attendanceRecords()->create([
             'event_session_id' => $session->id,
             'check_in_at' => now()->subMinutes(5),
@@ -52,7 +51,7 @@ class EventSessionRosterTest extends TestCase
             'first_name' => 'Cara',
             'last_name' => 'Diaz',
         ]);
-        $absentRegistration = EventRegistration::factory()->for($event)->for($absentee)->create();
+        $absentRegistration = $this->registerInEvent($event, $absentee);
 
         return compact('event', 'session', 'earlyRegistration', 'lateRegistration', 'absentRegistration');
     }

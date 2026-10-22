@@ -13,7 +13,6 @@ use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\EventSession;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
@@ -36,26 +35,26 @@ class AttendanceController extends Controller
         $event = Event::findOrFail($request->validated('event_id'));
         $session = EventSession::where('event_id', $event->id)->findOrFail($request->validated('session_id'));
 
-        $registration = EventRegistration::where('event_id', $event->id)
+        $attendee = Attendee::where('event_id', $event->id)
             ->where('qr_token', $request->validated('qr_token'))
             ->first();
 
-        if ($registration === null) {
+        if ($attendee === null) {
             throw ValidationException::withMessages([
                 'qr_token' => 'This QR code is not registered for this event.',
             ]);
         }
 
         if ($request->boolean('test_mode')) {
-            $registration->load(['attendee.union', 'attendee.mission']);
+            $attendee->load(['union', 'mission']);
             $attendance = new AttendanceRecord([
-                'event_registration_id' => $registration->id,
+                'attendee_id' => $attendee->id,
                 'event_session_id' => $session->id,
                 'check_in_at' => now(),
                 'method' => AttendanceMethod::Qr,
                 'recorded_by' => $request->user()->id,
             ]);
-            $attendance->setRelation('eventRegistration', $registration);
+            $attendance->setRelation('attendee', $attendee);
 
             return AttendanceRecordResource::make($attendance)
                 ->additional([
@@ -66,7 +65,7 @@ class AttendanceController extends Controller
                 ->setStatusCode(200);
         }
 
-        return $this->recordAttendance($request, $registration, $session, AttendanceMethod::Qr);
+        return $this->recordAttendance($request, $attendee, $session, AttendanceMethod::Qr);
     }
 
     /**
@@ -76,11 +75,9 @@ class AttendanceController extends Controller
     {
         $event = Event::findOrFail($request->validated('event_id'));
         $session = EventSession::where('event_id', $event->id)->findOrFail($request->validated('session_id'));
-        $registration = EventRegistration::where('event_id', $event->id)
-            ->with(['attendee.union', 'attendee.mission'])
-            ->findOrFail($request->validated('event_registration_id'));
+        $attendee = $this->resolveAttendee($event, $request->validated())->load(['union', 'mission']);
 
-        return $this->recordAttendance($request, $registration, $session, AttendanceMethod::Manual);
+        return $this->recordAttendance($request, $attendee, $session, AttendanceMethod::Manual);
     }
 
     /**
@@ -90,7 +87,7 @@ class AttendanceController extends Controller
     {
         $this->authorize('checkOut', $attendanceRecord);
 
-        $event = $attendanceRecord->eventRegistration->event;
+        $event = $attendanceRecord->attendee->event;
 
         if (! $event->requires_check_out) {
             throw ValidationException::withMessages([
@@ -117,17 +114,16 @@ class AttendanceController extends Controller
             'record_id' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $records = AttendanceRecord::whereHas('eventRegistration', fn ($q) => $q->where('event_id', $event->id))
+        $records = AttendanceRecord::whereHas('attendee', fn ($q) => $q->where('event_id', $event->id))
             ->where('event_session_id', $session->id)
             ->when(isset($input['record_id']), fn ($query) => $query->whereKey($input['record_id']))
-            ->with('eventRegistration.attendee');
+            ->with('attendee');
         if ($request->has('sort_by')) {
             $sortBy = $request->input('sort_by');
             $sortOrder = strtolower($request->input('sort_order', 'asc')) === 'desc' ? 'desc' : 'asc';
 
             if ($sortBy === 'last_name') {
-                $records->join('event_registrations', 'attendance_records.event_registration_id', '=', 'event_registrations.id')
-                    ->join('attendees', 'event_registrations.attendee_id', '=', 'attendees.id')
+                $records->join('attendees', 'attendance_records.attendee_id', '=', 'attendees.id')
                     ->orderBy('attendees.last_name', $sortOrder)
                     ->select('attendance_records.*');
             } else {
@@ -158,21 +154,21 @@ class AttendanceController extends Controller
             ]);
         }
 
-        $checkedInRegistrationIds = AttendanceRecord::where('event_session_id', $session->id)
+        $checkedInAttendeeIds = AttendanceRecord::where('event_session_id', $session->id)
             ->whereNotNull('check_in_at')
-            ->select('event_registration_id');
+            ->select('attendee_id');
 
         $sessionHasStarted = now()->greaterThanOrEqualTo($session->startsAt());
 
-        $registrations = $event->registrations()
-            ->with(['attendee.union', 'attendee.mission'])
+        $registrations = $event->attendees()
+            ->with(['union', 'mission'])
             ->addSelect([
                 'session_check_in_at' => AttendanceRecord::select('check_in_at')
-                    ->whereColumn('event_registration_id', 'event_registrations.id')
+                    ->whereColumn('attendee_id', 'attendees.id')
                     ->where('event_session_id', $session->id)
                     ->limit(1),
                 'session_check_out_at' => AttendanceRecord::select('check_out_at')
-                    ->whereColumn('event_registration_id', 'event_registrations.id')
+                    ->whereColumn('attendee_id', 'attendees.id')
                     ->where('event_session_id', $session->id)
                     ->limit(1),
             ])
@@ -180,17 +176,13 @@ class AttendanceController extends Controller
                 'session_check_in_at' => 'datetime',
                 'session_check_out_at' => 'datetime',
             ])
-            ->when($status === 'present', fn ($q) => $q->whereIn('id', $checkedInRegistrationIds))
-            ->when($status === 'absent', fn ($q) => $q->whereNotIn('id', $checkedInRegistrationIds))
-            ->when($search !== '', fn ($q) => $q->whereHas('attendee', function ($query) use ($search) {
+            ->when($status === 'present', fn ($q) => $q->whereIn('attendees.id', $checkedInAttendeeIds))
+            ->when($status === 'absent', fn ($q) => $q->whereNotIn('attendees.id', $checkedInAttendeeIds))
+            ->when($search !== '', fn ($q) => $q->where(function ($query) use ($search) {
                 $query->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
             }))
-            ->when($status === 'absent', function ($q) {
-                foreach (['last_name', 'first_name'] as $column) {
-                    $q->orderBy(Attendee::select($column)->whereColumn('attendees.id', 'event_registrations.attendee_id'));
-                }
-            }, fn ($q) => $q->orderByRaw('session_check_in_at is null, session_check_in_at asc'))
+            ->when($status === 'absent', fn ($q) => $q->orderBy('last_name')->orderBy('first_name'), fn ($q) => $q->orderByRaw('session_check_in_at is null, session_check_in_at asc'))
             ->paginate($request->input('per_page', 15));
 
         // Attach session status information to each registration
@@ -234,33 +226,30 @@ class AttendanceController extends Controller
                     continue;
                 }
 
-                // Resolve the registration.
-                $registration = null;
-
+                // Resolve the attendee.
                 if (! empty($scan['qr_token'])) {
-                    $registration = EventRegistration::where('event_id', $event->id)
+                    $attendee = Attendee::where('event_id', $event->id)
                         ->where('qr_token', $scan['qr_token'])
                         ->first();
 
-                    if ($registration === null) {
+                    if ($attendee === null) {
                         $result['message'] = 'This QR code is not registered for this event.';
                         $results[] = $result;
 
                         continue;
                     }
                 } else {
-                    $registration = EventRegistration::where('event_id', $event->id)
-                        ->findOrFail($scan['event_registration_id']);
+                    $attendee = $this->resolveAttendee($event, $scan);
                 }
 
                 $method = AttendanceMethod::from($scan['method']);
                 $scannedAt = ! empty($scan['scanned_at']) ? Carbon::parse($scan['scanned_at']) : null;
 
                 // Process the attendance in its own transaction.
-                $attendance = DB::transaction(function () use ($registration, $session, $method, $request, $scannedAt, $scan) {
+                $attendance = DB::transaction(function () use ($attendee, $session, $method, $request, $scannedAt, $scan) {
                     return $this->recordAttendance(
                         $request,
-                        $registration,
+                        $attendee,
                         $session,
                         $method,
                         $scannedAt,
@@ -288,7 +277,7 @@ class AttendanceController extends Controller
                 $result['message'] = $firstMessage;
             } catch (ModelNotFoundException $e) {
                 $result['status'] = 'error';
-                $result['message'] = 'Registration not found for this event.';
+                $result['message'] = 'Attendee not found for this event.';
             } catch (\Exception $e) {
                 $result['status'] = 'error';
                 $result['message'] = $e->getMessage() ?: 'An unexpected error occurred.';
@@ -302,24 +291,40 @@ class AttendanceController extends Controller
         return response()->json(['results' => $results], 200);
     }
 
+    /**
+     * Find the event's Attendee by attendee_id, or by the deprecated event_registration_id
+     * (translated through legacy_registration_id, removed in Release 2).
+     *
+     * @param  array<string, mixed>  $input
+     */
+    private function resolveAttendee(Event $event, array $input): Attendee
+    {
+        $query = Attendee::where('event_id', $event->id);
+
+        if (! empty($input['attendee_id'])) {
+            return $query->findOrFail($input['attendee_id']);
+        }
+
+        return $query->where('legacy_registration_id', $input['event_registration_id'] ?? null)->firstOrFail();
+    }
+
     private function recordAttendance(
         Request $request,
-        EventRegistration $registration,
+        Attendee $attendee,
         EventSession $session,
         AttendanceMethod $method,
         ?Carbon $scannedAt = null,
         bool $isBatchSync = false,
         bool $overrideFlag = false
     ) {
-        $existing = AttendanceRecord::where('event_registration_id', $registration->id)
+        $existing = AttendanceRecord::where('attendee_id', $attendee->id)
             ->where('event_session_id', $session->id)
             ->first();
 
         if ($existing !== null && $existing->check_in_at !== null) {
-            return response()->json([
-                'message' => 'Already Checked In for this session.',
-                'attendance_record_id' => $existing->id,
-            ], 200);
+            throw ValidationException::withMessages([
+                $method === AttendanceMethod::Qr ? 'qr_token' : 'attendee_id' => 'Already Checked In.',
+            ]);
         }
 
         $canOverride = ($overrideFlag || $request->boolean('override'))
@@ -333,9 +338,9 @@ class AttendanceController extends Controller
             ]);
         }
 
-        return DB::transaction(function () use ($existing, $registration, $session, $method, $request, $isEarly, $scannedAt, $isBatchSync) {
+        return DB::transaction(function () use ($existing, $attendee, $session, $method, $request, $isEarly, $scannedAt, $isBatchSync) {
             $attendance = $existing ?? new AttendanceRecord([
-                'event_registration_id' => $registration->id,
+                'attendee_id' => $attendee->id,
                 'event_session_id' => $session->id,
             ]);
 
@@ -354,7 +359,7 @@ class AttendanceController extends Controller
                 return $attendance;
             }
 
-            return AttendanceRecordResource::make($attendance->load(['eventRegistration.attendee.union', 'eventRegistration.attendee.mission']))
+            return AttendanceRecordResource::make($attendance->load(['attendee.union', 'attendee.mission']))
                 ->response()
                 ->setStatusCode(201);
         });

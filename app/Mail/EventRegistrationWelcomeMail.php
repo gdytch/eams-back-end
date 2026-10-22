@@ -2,7 +2,7 @@
 
 namespace App\Mail;
 
-use App\Models\EventRegistration;
+use App\Models\Attendee;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -17,7 +17,7 @@ class EventRegistrationWelcomeMail extends Mailable implements ShouldQueue
     /**
      * Create a new message instance.
      */
-    public function __construct(public EventRegistration $registration) {}
+    public function __construct(public Attendee $registration) {}
 
     /**
      * Get the message envelope.
@@ -36,11 +36,11 @@ class EventRegistrationWelcomeMail extends Mailable implements ShouldQueue
      */
     public function content(): Content
     {
-        $this->registration->loadMissing(['event', 'attendee']);
+        $this->registration->loadMissing('event');
         $event = $this->registration->event;
-        $attendee = $this->registration->attendee;
+        $attendee = $this->registration;
 
-        $sessions = $event?->sessions?->map(fn($session) => [
+        $sessions = $event?->sessions?->map(fn ($session) => [
             'name' => $session->name,
             'start_time' => $session->startsAt()->format('M d, Y @ g:i A'),
         ])->toArray() ?? [];

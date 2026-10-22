@@ -74,9 +74,20 @@ class Event extends Model
         return $this->hasOne(EventProgram::class);
     }
 
+    /** @return HasMany<Attendee, $this> */
+    public function attendees(): HasMany
+    {
+        return $this->hasMany(Attendee::class);
+    }
+
+    /**
+     * Same rows as attendees(). Scoped route binding for `events/{event}/registrations/{registration}` resolves through this name.
+     *
+     * @return HasMany<Attendee, $this>
+     */
     public function registrations(): HasMany
     {
-        return $this->hasMany(EventRegistration::class);
+        return $this->attendees();
     }
 
     public function speakers(): HasMany

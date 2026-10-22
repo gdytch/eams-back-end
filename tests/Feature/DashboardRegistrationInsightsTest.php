@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
@@ -31,7 +30,7 @@ class DashboardRegistrationInsightsTest extends TestCase
                 'mission_id' => $mission->id,
             ]);
             foreach ($events as $event) {
-                $registration = EventRegistration::factory()->for($event)->for($attendee)->create(['registered_at' => now()]);
+                $registration = $this->registerInEvent($event, $attendee, ['registered_at' => now()]);
                 if ($level === 'mission') {
                     AttendanceRecord::factory()->for($registration)->count(2)->create(['check_in_at' => now()]);
                 }
@@ -64,7 +63,7 @@ class DashboardRegistrationInsightsTest extends TestCase
         $hidden = Event::factory()->for($organization)->create();
         $foreign = Event::factory()->for($otherOrganization)->create();
         foreach ([$allowed, $hidden, $foreign] as $event) {
-            EventRegistration::factory()->for($event)->for(Attendee::factory()->for($event->organization))->create(['registered_at' => now()]);
+            Attendee::factory()->for($event)->for($event->organization)->create(['registered_at' => now()]);
         }
         $admin = User::factory()->orgAdmin()->for($organization)->create();
         foreach (['/api/v1/dashboard', "/api/v1/organizations/{$organization->id}/reports/dashboard"] as $url) {
@@ -87,7 +86,7 @@ class DashboardRegistrationInsightsTest extends TestCase
         $organization = Organization::factory()->create();
         $union = Union::factory()->for($organization)->create();
         $attendee = Attendee::factory()->for($organization)->create(['organization_level' => 'mission', 'union_id' => $union->id, 'mission_id' => null]);
-        EventRegistration::factory()->for(Event::factory()->for($organization))->for($attendee)->create(['registered_at' => now()->subDays(20)]);
+        $this->registerInEvent(Event::factory()->for($organization), $attendee, ['registered_at' => now()->subDays(20)]);
         $this->getJson('/api/v1/dashboard')->assertOk()
             ->assertJsonPath('registrations_by_organization_level.0.organization_name', 'Unassigned')
             ->assertJsonPath('registrations_by_organization_level.0.organization_level', 'mission')

@@ -5,8 +5,10 @@ namespace Tests\Feature;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\Organization;
+use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 class DuplicateEmailPreventionTest extends TestCase
@@ -76,11 +78,16 @@ class DuplicateEmailPreventionTest extends TestCase
 
     public function test_cannot_create_attendee_with_email_that_exists_in_users_table(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         User::factory()->for($org)->create(['email' => 'test@example.com']);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'Test',
             'last_name' => 'User',
             'email_address' => 'test@example.com',
@@ -92,13 +99,19 @@ class DuplicateEmailPreventionTest extends TestCase
 
     public function test_cannot_create_attendee_with_duplicate_email(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
-        Attendee::factory()->for($org)->create([
+        $event = Event::factory()->for($org)->create();
+        Attendee::factory()->for($event)->create([
             'email_address' => 'test@example.com',
         ]);
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => $event->id,
             'first_name' => 'Test',
             'last_name' => 'User',
             'email_address' => 'test@example.com',
@@ -128,10 +141,15 @@ class DuplicateEmailPreventionTest extends TestCase
 
     public function test_can_create_attendee_without_email(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'Test',
             'last_name' => 'User',
         ]);
@@ -146,15 +164,23 @@ class DuplicateEmailPreventionTest extends TestCase
 
     public function test_can_create_multiple_attendees_without_email(): void
     {
+        Queue::fake();
+
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
 
         $response1 = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'Test1',
             'last_name' => 'User',
         ]);
 
         $response2 = $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'Test2',
             'last_name' => 'User',
         ]);
@@ -162,5 +188,24 @@ class DuplicateEmailPreventionTest extends TestCase
         $response1->assertCreated();
         $response2->assertCreated();
         $this->assertCount(2, Attendee::where('last_name', 'User')->get());
+    }
+
+    public function test_same_email_can_register_in_different_events(): void
+    {
+        Queue::fake();
+
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $union = Union::factory()->for($org)->create();
+        Attendee::factory()->for(Event::factory()->for($org)->create())->create(['email_address' => 'test@example.com']);
+
+        $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+            'organization_level' => 'union',
+            'union_id' => $union->id,
+            'event_id' => Event::factory()->for($org)->create()->id,
+            'first_name' => 'Test',
+            'last_name' => 'User',
+            'email_address' => 'test@example.com',
+        ])->assertCreated();
     }
 }

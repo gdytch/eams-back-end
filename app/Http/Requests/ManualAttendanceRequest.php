@@ -25,7 +25,9 @@ class ManualAttendanceRequest extends FormRequest
         return [
             'event_id' => ['required', 'integer', 'exists:events,id'],
             'session_id' => ['required', 'integer', 'exists:event_sessions,id'],
-            'event_registration_id' => ['required', 'integer', 'exists:event_registrations,id'],
+            'attendee_id' => ['required_without:event_registration_id', 'nullable', 'integer', 'exists:attendees,id'],
+            // Deprecated: translated through attendees.legacy_registration_id. Use attendee_id.
+            'event_registration_id' => ['required_without:attendee_id', 'nullable', 'integer'],
             'override' => ['sometimes', 'boolean'],
         ];
     }

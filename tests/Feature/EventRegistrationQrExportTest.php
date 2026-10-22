@@ -4,7 +4,6 @@ namespace Tests\Feature;
 
 use App\Models\Attendee;
 use App\Models\Event;
-use App\Models\EventRegistration;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -20,7 +19,7 @@ class EventRegistrationQrExportTest extends TestCase
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
         Attendee::factory()->for($org)->count(3)->create()->each(
-            fn (Attendee $attendee) => EventRegistration::factory()->for($event)->for($attendee)->create()
+            fn (Attendee $attendee) => $this->registerInEvent($event, $attendee)
         );
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->get("/api/v1/events/{$event->id}/registrations/qr-export");
@@ -52,7 +51,7 @@ class EventRegistrationQrExportTest extends TestCase
         $orgAdmin = User::factory()->orgAdmin()->for($org)->create();
         $event = Event::factory()->for($org)->create();
         $registrations = Attendee::factory()->for($org)->count(3)->create()->map(
-            fn (Attendee $attendee) => EventRegistration::factory()->for($event)->for($attendee)->create()
+            fn (Attendee $attendee) => $this->registerInEvent($event, $attendee)
         );
 
         $response = $this->actingAs($orgAdmin, 'sanctum')->get(

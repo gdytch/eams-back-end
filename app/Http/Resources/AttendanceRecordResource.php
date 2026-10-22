@@ -16,13 +16,17 @@ class AttendanceRecordResource extends JsonResource
     {
         return [
             'id' => $this->id,
-            'event_registration_id' => $this->event_registration_id,
+            'attendee_id' => $this->attendee_id,
+            // Deprecated alias of attendee_id, removed in Release 2.
+            'event_registration_id' => $this->attendee_id,
             'event_session_id' => $this->event_session_id,
             'check_in_at' => $this->check_in_at,
             'check_out_at' => $this->check_out_at,
             'method' => $this->method,
             'recorded_by' => $this->recorded_by,
-            'event_registration' => EventRegistrationResource::make($this->whenLoaded('eventRegistration')),
+            'attendee' => EventRegistrationResource::make($this->whenLoaded('attendee')),
+            // Deprecated alias of `attendee`, removed in Release 2.
+            'event_registration' => EventRegistrationResource::make($this->whenLoaded('attendee')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

@@ -20,7 +20,7 @@ class EventPolicy
     {
         if ($user->isAttendee()) {
             return $event->status->value === 'published'
-                && $user->attendee()->whereHas('registrations', fn ($query) => $query->where('event_id', $event->id))->exists();
+                && $user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->exists();
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $event->organization_id)

@@ -17,6 +17,7 @@ class AttendeeResource extends JsonResource
         return [
             'id' => $this->id,
             'organization_id' => $this->organization_id,
+            'event_id' => $this->event_id,
             'organization_level' => $this->organization_level,
             'union_id' => $this->union_id,
             'mission_id' => $this->mission_id,

@@ -4,7 +4,7 @@ namespace Database\Factories;
 
 use App\Enums\AttendanceMethod;
 use App\Models\AttendanceRecord;
-use App\Models\EventRegistration;
+use App\Models\Attendee;
 use App\Models\EventSession;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
@@ -21,7 +21,7 @@ class AttendanceRecordFactory extends Factory
     public function definition(): array
     {
         return [
-            'event_registration_id' => EventRegistration::factory(),
+            'attendee_id' => Attendee::factory(),
             'event_session_id' => EventSession::factory(),
             'check_in_at' => now(),
             'method' => AttendanceMethod::Qr,

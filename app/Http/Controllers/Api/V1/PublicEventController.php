@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\EventStatus;
 use App\Http\Controllers\Controller;
-use App\Http\Resources\EventRegistrationResource;
+use App\Http\Resources\EventAttendeeResource;
 use App\Http\Resources\PublicEventResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AuditLog;
@@ -50,11 +50,11 @@ class PublicEventController extends Controller
                 // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
                 // $email = $attendee->email_address ?? $attendee->user?->email;
                 // if ($email) {
-                //     Mail::to($email)->send(new EventRegistrationWelcomeMail($attendee));
+                //     Mail::to($email)->send(new AttendeeRegistrationWelcomeMail($attendee));
                 // }
             }
 
-            return EventRegistrationResource::make($attendee)
+            return EventAttendeeResource::make($attendee)
                 ->response()
                 ->setStatusCode($created ? 201 : 200);
         });

@@ -24,9 +24,9 @@ class AttendanceRecordResource extends JsonResource
             'check_out_at' => $this->check_out_at,
             'method' => $this->method,
             'recorded_by' => $this->recorded_by,
-            'attendee' => EventRegistrationResource::make($this->whenLoaded('attendee')),
+            'attendee' => EventAttendeeResource::make($this->whenLoaded('attendee')),
             // Deprecated alias of `attendee`, removed in Release 2.
-            'event_registration' => EventRegistrationResource::make($this->whenLoaded('attendee')),
+            'event_registration' => EventAttendeeResource::make($this->whenLoaded('attendee')),
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,
         ];

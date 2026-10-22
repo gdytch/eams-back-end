@@ -3,15 +3,15 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\ExportEventRegistrationsQrRequest;
+use App\Http\Requests\ExportEventAttendeesQrRequest;
 use App\Http\Requests\StartIdCardGridDownloadRequest;
-use App\Http\Requests\StoreEventRegistrationRequest;
+use App\Http\Requests\StoreEventAttendeeRequest;
 use App\Http\Resources\AttendeeResource;
-use App\Http\Resources\EventRegistrationResource;
+use App\Http\Resources\EventAttendeeResource;
 use App\Http\Resources\IdCardGridDownloadResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Jobs\PrepareIdCardGridDownloadJob;
-use App\Mail\EventRegistrationWelcomeMail;
+use App\Mail\AttendeeRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
@@ -29,7 +29,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
-class EventRegistrationController extends Controller
+class EventAttendeeController extends Controller
 {
     public function __construct(
         private AttendeeInvitationService $invitationService,
@@ -67,14 +67,14 @@ class EventRegistrationController extends Controller
             $query->orderBy('created_at', 'desc');
         }
 
-        return EventRegistrationResource::collection($query->paginate($request->input('per_page', 10)));
+        return EventAttendeeResource::collection($query->paginate($request->input('per_page', 10)));
     }
 
     /**
      * Store a newly created resource in storage: registers a known person in this event
      * (prefilled from their earlier Attendee), or creates a new Attendee, in a single call.
      */
-    public function store(StoreEventRegistrationRequest $request, Event $event)
+    public function store(StoreEventAttendeeRequest $request, Event $event)
     {
         $data = $request->validated();
         $override = (bool) ($data['override_duplicate'] ?? false);
@@ -130,7 +130,7 @@ class EventRegistrationController extends Controller
             // Temporarily disabled sending welcome email to because of email sending rate limits. Can be re-enabled later if needed.
             // $email = $attendee->email_address ?? $attendee->user?->email;
             // if ($email) {
-            //     Mail::to($email)->send(new EventRegistrationWelcomeMail($attendee));
+            //     Mail::to($email)->send(new AttendeeRegistrationWelcomeMail($attendee));
             // }
 
             // Send account invitation if attendee was just created
@@ -138,7 +138,7 @@ class EventRegistrationController extends Controller
                 $this->invitationService->sendIfEligible($attendee, $request->user());
             }
 
-            return EventRegistrationResource::make($attendee)->response()->setStatusCode(201);
+            return EventAttendeeResource::make($attendee)->response()->setStatusCode(201);
         });
     }
 
@@ -150,7 +150,7 @@ class EventRegistrationController extends Controller
         abort_unless($registration->event_id === $event->id, 404);
         $this->authorize('view', $registration);
 
-        return EventRegistrationResource::make($registration);
+        return EventAttendeeResource::make($registration);
     }
 
     /**
@@ -171,7 +171,7 @@ class EventRegistrationController extends Controller
     /**
      * Generate a print-ready PDF of QR codes for all or selected attendees registered to the event.
      */
-    public function exportQr(ExportEventRegistrationsQrRequest $request, Event $event)
+    public function exportQr(ExportEventAttendeesQrRequest $request, Event $event)
     {
         $this->authorize('manageIdCards', $event);
 

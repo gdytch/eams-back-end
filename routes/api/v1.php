@@ -8,11 +8,11 @@ use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
+use App\Http\Controllers\Api\V1\EventAttendeeController;
 use App\Http\Controllers\Api\V1\EventController;
 use App\Http\Controllers\Api\V1\EventProgramBuilderController;
 use App\Http\Controllers\Api\V1\EventProgramController;
 use App\Http\Controllers\Api\V1\EventProgramItemController;
-use App\Http\Controllers\Api\V1\EventRegistrationController;
 use App\Http\Controllers\Api\V1\EventSessionController;
 use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\MissionController;
@@ -153,18 +153,18 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/program/items/{itemId}/photos', [EventProgramItemController::class, 'uploadPhoto']);
         Route::delete('events/{event}/program/items/{itemId}/photos', [EventProgramItemController::class, 'removePhoto']);
 
-        Route::get('events/{event}/registrations/qr-export', [EventRegistrationController::class, 'exportQr'])->middleware('throttle:6,1');
-        Route::get('events/{event}/registrations/id-cards/bulk-download', [EventRegistrationController::class, 'bulkDownloadIdCards'])->middleware('throttle:60,1,id-card-download:');
-        Route::get('events/{event}/registrations/id-cards/download-all', [EventRegistrationController::class, 'downloadAllIdCards'])->middleware('throttle:60,1,id-card-download:');
-        Route::post('events/{event}/registrations/id-cards/grid-download', [EventRegistrationController::class, 'startIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-start:');
-        Route::post('events/{event}/registrations/id-cards/grid-download-all', [EventRegistrationController::class, 'startIdCardGridDownloadAll'])->middleware('throttle:60,1,id-card-grid-start:');
-        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}', [EventRegistrationController::class, 'showIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-status:')->name('events.registrations.id-card-grid-download');
-        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}/file', [EventRegistrationController::class, 'downloadIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-file:')->name('events.registrations.id-card-grid-download-file');
-        Route::apiResource('events.registrations', EventRegistrationController::class)
+        Route::get('events/{event}/registrations/qr-export', [EventAttendeeController::class, 'exportQr'])->middleware('throttle:6,1');
+        Route::get('events/{event}/registrations/id-cards/bulk-download', [EventAttendeeController::class, 'bulkDownloadIdCards'])->middleware('throttle:60,1,id-card-download:');
+        Route::get('events/{event}/registrations/id-cards/download-all', [EventAttendeeController::class, 'downloadAllIdCards'])->middleware('throttle:60,1,id-card-download:');
+        Route::post('events/{event}/registrations/id-cards/grid-download', [EventAttendeeController::class, 'startIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-start:');
+        Route::post('events/{event}/registrations/id-cards/grid-download-all', [EventAttendeeController::class, 'startIdCardGridDownloadAll'])->middleware('throttle:60,1,id-card-grid-start:');
+        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}', [EventAttendeeController::class, 'showIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-status:')->name('events.registrations.id-card-grid-download');
+        Route::get('events/{event}/registrations/id-cards/grid-download/{gridDownload}/file', [EventAttendeeController::class, 'downloadIdCardGridDownload'])->middleware('throttle:60,1,id-card-grid-file:')->name('events.registrations.id-card-grid-download-file');
+        Route::apiResource('events.registrations', EventAttendeeController::class)
             ->only(['index', 'store', 'show', 'destroy']);
-        Route::get('events/{event}/registrations/{registration}/id-card', [EventRegistrationController::class, 'downloadIdCard']);
-        Route::get('events/{event}/registrations/{registration}/id-card-image', [EventRegistrationController::class, 'getIdCardImage'])->name('events.registrations.id-card-image');
-        Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventRegistrationController::class, 'regenerateIdCard'])->middleware('throttle:120,1,id-card-regenerate:');
+        Route::get('events/{event}/registrations/{registration}/id-card', [EventAttendeeController::class, 'downloadIdCard']);
+        Route::get('events/{event}/registrations/{registration}/id-card-image', [EventAttendeeController::class, 'getIdCardImage'])->name('events.registrations.id-card-image');
+        Route::post('events/{event}/registrations/{registration}/id-card/regenerate', [EventAttendeeController::class, 'regenerateIdCard'])->middleware('throttle:120,1,id-card-regenerate:');
 
         Route::get('events/{event}/sessions/{session}/attendance', [AttendanceController::class, 'forSession']);
         Route::get('events/{event}/sessions/{session}/roster', [AttendanceController::class, 'roster']);

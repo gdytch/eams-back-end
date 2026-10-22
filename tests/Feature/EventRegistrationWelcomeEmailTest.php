@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Mail\EventRegistrationWelcomeMail;
+use App\Mail\AttendeeRegistrationWelcomeMail;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventSession;
@@ -28,7 +28,7 @@ class EventRegistrationWelcomeEmailTest extends TestCase
         $response->assertStatus(201);
 
         // Verify mail was sent to user's email
-        Mail::assertSent(EventRegistrationWelcomeMail::class, function ($mail) use ($user) {
+        Mail::assertSent(AttendeeRegistrationWelcomeMail::class, function ($mail) use ($user) {
             return $mail->hasTo($user->email);
         });
     }
@@ -51,7 +51,7 @@ class EventRegistrationWelcomeEmailTest extends TestCase
         $response->assertStatus(201);
 
         // Verify mail was sent to provided email
-        Mail::assertSent(EventRegistrationWelcomeMail::class, function ($mail) use ($attendeeEmail) {
+        Mail::assertSent(AttendeeRegistrationWelcomeMail::class, function ($mail) use ($attendeeEmail) {
             return $mail->hasTo($attendeeEmail);
         });
     }
@@ -97,7 +97,7 @@ class EventRegistrationWelcomeEmailTest extends TestCase
             ->postJson("/api/v1/public/event/{$event->invite_token}/register")
             ->assertStatus(201);
 
-        Mail::assertSent(EventRegistrationWelcomeMail::class, function ($mail) use ($event) {
+        Mail::assertSent(AttendeeRegistrationWelcomeMail::class, function ($mail) use ($event) {
             return $mail->registration->event->id === $event->id;
         });
     }

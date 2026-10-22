@@ -1149,9 +1149,8 @@ paths:
       tags: [Attendees]
       summary: Export attendees as Excel or PDF
       description: >
-        Export all attendees or filter by event registration. Returns a downloadable file
-        in the specified format with styled headers and formatting. Supports optional name search
-        and event_id filtering.
+        Export one event's attendees. event_id is required. Returns a downloadable file
+        in the specified format with styled headers and formatting. Supports optional name search.
       parameters:
         - name: format
           in: query
@@ -1160,9 +1159,9 @@ paths:
           description: Export file format (defaults to xlsx).
         - name: event_id
           in: query
-          required: false
+          required: true
           schema: { type: integer }
-          description: If provided, exports only attendees registered to this event.
+          description: Event whose attendees are exported.
         - name: search
           in: query
           required: false
@@ -1184,6 +1183,7 @@ paths:
                 description: PDF document with styled table
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /attendees/{attendee}:
     parameters:

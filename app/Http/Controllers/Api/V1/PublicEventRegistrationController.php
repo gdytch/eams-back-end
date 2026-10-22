@@ -5,16 +5,20 @@ namespace App\Http\Controllers\Api\V1;
 use App\Enums\EventStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SaveBreakoutPicksRequest;
+use App\Http\Requests\SaveFormAnswersRequest;
 use App\Http\Requests\SaveWizardTerritoryRequest;
+use App\Http\Resources\AttendeeFormResource;
 use App\Http\Resources\EventAttendeeResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Event;
+use App\Models\Form;
 use App\Models\User;
 use App\Services\AttendeeLinkingService;
 use App\Services\AttendeeRegistrationService;
 use App\Services\BreakoutPickService;
+use App\Services\FormAnswerService;
 use App\Services\RegistrationCompleteness;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -32,6 +36,7 @@ class PublicEventRegistrationController extends Controller
         private AttendeeLinkingService $linking,
         private RegistrationCompleteness $completeness,
         private BreakoutPickService $picks,
+        private FormAnswerService $answers,
     ) {}
 
     public function show(Request $request, string $eventInviteToken): JsonResponse
@@ -86,6 +91,60 @@ class PublicEventRegistrationController extends Controller
             $note = $this->picks->save($attendee, $request->validated('breakout_ids'));
 
             return $this->respond($attendee, $note);
+        });
+    }
+
+    public function forms(Request $request, string $eventInviteToken): JsonResponse|\Illuminate\Http\Resources\Json\AnonymousResourceCollection
+    {
+        $event = $this->resolvePublishedEvent($eventInviteToken);
+
+        return DB::transaction(function () use ($request, $event) {
+            if ($this->mustVerifyEmail($request->user(), $event)) {
+                return $this->verifyEmailResponse();
+            }
+
+            $attendee = $this->registration->userAttendeeIn($request->user(), $event) ?? abort(422, 'Save Basic info first.');
+
+            return AttendeeFormResource::collection($this->answers->formsFor($attendee, $event))->additional(['steps' => $this->completeness->steps($attendee)]);
+        });
+    }
+
+    public function saveForm(SaveFormAnswersRequest $request, string $eventInviteToken, int $form): JsonResponse
+    {
+        $event = $request->event();
+
+        return DB::transaction(function () use ($request, $event) {
+            if ($this->mustVerifyEmail($request->user(), $event)) {
+                return $this->verifyEmailResponse();
+            }
+
+            $attendee = $this->registration->userAttendeeIn($request->user(), $event) ?? abort(422, 'Save Basic info first.');
+            abort_if($attendee->registration_completed_at !== null, 403, 'Answers are final once you are fully registered.');
+
+            $this->answers->save($attendee, $request->form(), $request->validated('answers'));
+
+            return $this->respondForm($attendee, $request->form());
+        });
+    }
+
+    /**
+     * Skipping is only allowed for an optional form that is not started; a started form keeps its required fields.
+     */
+    public function skipForm(Request $request, string $eventInviteToken, int $form): JsonResponse
+    {
+        $event = $this->resolveWritableEvent($eventInviteToken);
+        $form = $this->answers->publishedForm($event, $form);
+
+        return DB::transaction(function () use ($request, $event, $form) {
+            if ($this->mustVerifyEmail($request->user(), $event)) {
+                return $this->verifyEmailResponse();
+            }
+
+            $attendee = $this->registration->userAttendeeIn($request->user(), $event) ?? abort(422, 'Save Basic info first.');
+            abort_if($form->is_required, 422, 'A required form cannot be skipped.');
+            abort_if($attendee->formSubmissions()->where('form_id', $form->id)->exists(), 422, 'This form is already started.');
+
+            return $this->respondForm($attendee, $form);
         });
     }
 
@@ -151,6 +210,13 @@ class PublicEventRegistrationController extends Controller
 
             return $this->respond($attendee);
         });
+    }
+
+    private function respondForm(Attendee $attendee, Form $form): JsonResponse
+    {
+        return AttendeeFormResource::make($this->answers->withSubmission($attendee, $form))
+            ->additional(['status' => 'ready', 'steps' => $this->completeness->steps($attendee->refresh())])
+            ->response();
     }
 
     private function respond(Attendee $attendee, ?string $note = null): JsonResponse

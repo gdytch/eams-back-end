@@ -8,9 +8,11 @@ use App\Exports\AttendeeExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CheckAttendeeDuplicatesRequest;
 use App\Http\Requests\SaveBreakoutPicksRequest;
+use App\Http\Requests\SaveFormAnswersRequest;
 use App\Http\Requests\StoreAttendeeRequest;
 use App\Http\Requests\UpdateAttendeeRequest;
 use App\Http\Requests\UploadAttendeePhotoRequest;
+use App\Http\Resources\AttendeeFormResource;
 use App\Http\Resources\AttendeeResource;
 use App\Http\Resources\EventAttendeeResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
@@ -23,6 +25,7 @@ use App\Services\AttendeeDashboardData;
 use App\Services\AttendeeDuplicateMergeService;
 use App\Services\AttendeeRegistrationService;
 use App\Services\BreakoutPickService;
+use App\Services\FormAnswerService;
 use App\Services\ImageUploadService;
 use App\Services\RegistrationCompleteness;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -196,6 +199,41 @@ class AttendeeController extends Controller
 
             return AttendeeResource::make($attendee->load('breakouts'))->additional(['note' => $note]);
         });
+    }
+
+    public function forms(Attendee $attendee, FormAnswerService $answers)
+    {
+        $this->authorize('view', $attendee);
+
+        return AttendeeFormResource::collection($answers->formsFor($attendee, Event::withoutGlobalScopes()->findOrFail($attendee->event_id)));
+    }
+
+    /**
+     * Admin wizard, Forms: admins may change answers after registration. Audited.
+     */
+    public function saveForm(SaveFormAnswersRequest $request, Attendee $attendee, int $form, FormAnswerService $answers, RegistrationCompleteness $completeness)
+    {
+        return DB::transaction(function () use ($request, $attendee, $answers, $completeness) {
+            $changes = $answers->save($attendee, $request->form(), $request->validated('answers'));
+            AuditLog::record('attendee.form_answers_changed', $attendee, ['form_id' => $request->form()->id, ...$changes]);
+
+            return AttendeeFormResource::make($answers->withSubmission($attendee, $request->form()))
+                ->additional(['steps' => $completeness->steps($attendee->refresh())]);
+        });
+    }
+
+    /**
+     * Skipping is only allowed for an optional form that is not started.
+     */
+    public function skipForm(Attendee $attendee, int $form, FormAnswerService $answers, RegistrationCompleteness $completeness)
+    {
+        $this->authorize('registerOnBehalf', $attendee);
+        $form = $answers->publishedForm(Event::withoutGlobalScopes()->findOrFail($attendee->event_id), $form);
+
+        abort_if($form->is_required, 422, 'A required form cannot be skipped.');
+        abort_if($attendee->formSubmissions()->where('form_id', $form->id)->exists(), 422, 'This form is already started.');
+
+        return AttendeeFormResource::make($answers->withSubmission($attendee, $form))->additional(['steps' => $completeness->steps($attendee)]);
     }
 
     /**

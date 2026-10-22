@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\EventProgramBuilderController;
 use App\Http\Controllers\Api\V1\EventProgramController;
 use App\Http\Controllers\Api\V1\EventProgramItemController;
 use App\Http\Controllers\Api\V1\EventSessionController;
+use App\Http\Controllers\Api\V1\FormAnswerFileController;
 use App\Http\Controllers\Api\V1\FormController;
 use App\Http\Controllers\Api\V1\GlobalSearchController;
 use App\Http\Controllers\Api\V1\MissionController;
@@ -73,6 +74,9 @@ Route::middleware('auth:sanctum')->prefix('public/event/{eventInviteToken}/regis
     Route::put('basic-info', [PublicEventRegistrationController::class, 'saveBasicInfo']);
     Route::put('territory', [PublicEventRegistrationController::class, 'saveTerritory']);
     Route::put('breakouts', [PublicEventRegistrationController::class, 'saveBreakouts']);
+    Route::get('forms', [PublicEventRegistrationController::class, 'forms']);
+    Route::post('forms/{form}', [PublicEventRegistrationController::class, 'saveForm'])->whereNumber('form')->middleware('throttle:60,1');
+    Route::post('forms/{form}/skip', [PublicEventRegistrationController::class, 'skipForm'])->whereNumber('form');
     Route::post('finish', [PublicEventRegistrationController::class, 'finish']);
 });
 Route::get('public/unions', [PublicUnionController::class, 'index']);
@@ -89,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
     Route::get('attendee/events/{event}/program', [AttendeeDashboardController::class, 'program']);
     Route::get('attendee/events/{eventId}/speakers', [AttendeeDashboardController::class, 'speakers'])->whereNumber('eventId');
+    Route::get('form-answers/{answer}/file', FormAnswerFileController::class)->middleware('throttle:60,1')->name('form-answers.file');
     Route::get('dashboard', [DashboardController::class, 'index']);
 
     Route::get('reports/dashboard', [ReportController::class, 'globalDashboard']);
@@ -128,6 +133,9 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendees/{attendeeId}', [AttendeeController::class, 'showById'])->whereNumber('attendeeId');
     Route::apiResource('attendees', AttendeeController::class)->except('show');
     Route::put('attendees/{attendee}/breakouts', [AttendeeController::class, 'saveBreakouts']);
+    Route::get('attendees/{attendee}/forms', [AttendeeController::class, 'forms']);
+    Route::post('attendees/{attendee}/forms/{form}', [AttendeeController::class, 'saveForm'])->whereNumber('form')->middleware('throttle:60,1');
+    Route::post('attendees/{attendee}/forms/{form}/skip', [AttendeeController::class, 'skipForm'])->whereNumber('form');
     Route::post('attendees/{attendee}/finish', [AttendeeController::class, 'finish']);
     Route::post('attendees/{attendee}/resend-invite', [AttendeeController::class, 'resendInvite']);
     Route::post('attendees/{attendee}/photo', [AttendeeController::class, 'uploadPhoto']);

@@ -21,12 +21,15 @@ class SyncAttendanceBatchRequest extends FormRequest
             'scans' => ['required', 'array', 'min:1', 'max:100'],
             'scans.*.client_ref' => ['required', 'string'],
             'scans.*.event_id' => ['required', 'integer', 'exists:events,id'],
-            'scans.*.session_id' => ['required', 'integer', 'exists:event_sessions,id'],
+            'scans.*.session_id' => ['required_without:scans.*.breakout_id', 'nullable', 'prohibits:scans.*.breakout_id', 'integer', 'exists:event_sessions,id'],
+            'scans.*.breakout_id' => ['required_without:scans.*.session_id', 'nullable', 'integer', 'exists:breakouts,id'],
             'scans.*.qr_token' => ['nullable', 'string'],
             'scans.*.attendee_id' => ['required_without:scans.*.qr_token', 'nullable', 'integer', 'exists:attendees,id'],
             'scans.*.scanned_at' => ['nullable', 'date_format:Y-m-d H:i:s'],
             'scans.*.method' => ['required', Rule::in(['qr', 'manual'])],
             'scans.*.override' => ['sometimes', 'boolean'],
+            'scans.*.late' => ['sometimes', 'boolean'],
+            'scans.*.walk_in' => ['sometimes', 'boolean'],
         ];
     }
 }

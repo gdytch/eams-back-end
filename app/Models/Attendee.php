@@ -153,18 +153,20 @@ class Attendee extends Model
      *
      * @param  Builder<Attendee>  $query
      */
-    public function scopeExpectedAt(Builder $query, EventSession $slot): void
+    public function scopeExpectedAt(Builder $query, EventSession|Breakout $slot): void
     {
-        $query->where('attendees.first_registered_at', '<', $slot->endsAt());
+        $query->where('attendees.first_registered_at', '<', $slot->endsAt())
+            // At a breakout only current pick holders are Expected; walk-ins never are.
+            ->when($slot instanceof Breakout, fn (Builder $q) => $q->whereHas('breakouts', fn ($picks) => $picks->whereKey($slot->id)));
     }
 
     /**
      * @param  Builder<Attendee>  $query
      */
-    public function scopePresentAt(Builder $query, EventSession $slot): void
+    public function scopePresentAt(Builder $query, EventSession|Breakout $slot): void
     {
         $query->whereHas('attendanceRecords', fn ($records) => $records
-            ->where('event_session_id', $slot->id)
+            ->where(AttendanceRecord::slotColumn($slot), $slot->id)
             ->whereNotNull('check_in_at'));
     }
 
@@ -173,10 +175,10 @@ class Attendee extends Model
      *
      * @param  Builder<Attendee>  $query
      */
-    public function scopeNotCheckedInAt(Builder $query, EventSession $slot): void
+    public function scopeNotCheckedInAt(Builder $query, EventSession|Breakout $slot): void
     {
         $query->expectedAt($slot)->whereDoesntHave('attendanceRecords', fn ($records) => $records
-            ->where('event_session_id', $slot->id)
+            ->where(AttendanceRecord::slotColumn($slot), $slot->id)
             ->whereNotNull('check_in_at'));
     }
 
@@ -185,7 +187,7 @@ class Attendee extends Model
      *
      * @param  Builder<Attendee>  $query
      */
-    public function scopeInAttendanceOf(Builder $query, EventSession $slot): void
+    public function scopeInAttendanceOf(Builder $query, EventSession|Breakout $slot): void
     {
         $query->where(fn ($q) => $q->expectedAt($slot)->orWhere(fn ($p) => $p->presentAt($slot)));
     }

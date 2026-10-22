@@ -358,6 +358,13 @@ return new class extends Migration
             Schema::table($table, fn (Blueprint $blueprint) => $blueprint->dropIndex($unique));
         }
 
+        // Later migrations may index the column too (SQLite cannot drop an indexed column).
+        foreach (Schema::getIndexes($table) as $index) {
+            if (! $index['primary'] && in_array($column, $index['columns'], true)) {
+                Schema::table($table, fn (Blueprint $blueprint) => $blueprint->dropIndex($index['name']));
+            }
+        }
+
         Schema::table($table, fn (Blueprint $blueprint) => $blueprint->dropColumn($column));
     }
 

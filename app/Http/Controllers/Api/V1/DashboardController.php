@@ -291,7 +291,7 @@ class DashboardController extends Controller
                 'attendees',
                 'sessions',
                 'attendees as checked_in_registrations_count' => fn (Builder $query) => $query
-                    ->whereHas('attendanceRecords', fn (Builder $records) => $records->whereNotNull('check_in_at')),
+                    ->whereHas('attendanceRecords', fn (Builder $records) => $records->whereNotNull('check_in_at')->whereNotNull('event_session_id')),
             ])
             ->orderByDesc('end_date')
             ->limit($limit)
@@ -299,6 +299,7 @@ class DashboardController extends Controller
         $eventIds = $events->modelKeys();
         $sessionCheckIns = AttendanceRecord::query()
             ->whereNotNull('check_in_at')
+            ->whereNotNull('event_session_id')
             ->join('attendees', 'attendees.id', '=', 'attendance_records.attendee_id')
             ->whereIn('attendees.event_id', $eventIds)
             ->selectRaw('attendees.event_id, COUNT(attendance_records.id) as session_check_ins')

@@ -202,11 +202,13 @@ class Attendee extends Model
         };
     }
 
+    /** @return BelongsTo<Union, $this> */
     public function union(): BelongsTo
     {
         return $this->belongsTo(Union::class);
     }
 
+    /** @return BelongsTo<Mission, $this> */
     public function mission(): BelongsTo
     {
         return $this->belongsTo(Mission::class);

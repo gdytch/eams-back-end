@@ -70,6 +70,12 @@
             font-weight: bold;
         }
 
+        .status-present,
+        .status-walk-in {
+            color: #28a745;
+            font-weight: bold;
+        }
+
         .text-center {
             text-align: center;
         }
@@ -86,6 +92,7 @@
         Event Attendance Report — Generated {{ now()->format('Y-m-d H:i') }}
     </div>
 
+    @if (count($sessionSummaries))
     <h2>Attendance Summary by Session</h2>
     <table>
         <thead>
@@ -113,8 +120,78 @@
             @endforeach
         </tbody>
     </table>
+    @endif
+
+    @if (count($breakoutSummaries))
+        <h2>Attendance Summary by Breakout</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Breakout</th>
+                    <th>Date</th>
+                    <th class="text-right">Capacity</th>
+                    <th class="text-right">Picks</th>
+                    <th class="text-right">Expected</th>
+                    <th class="text-right">Present</th>
+                    <th class="text-right">Absent</th>
+                    <th class="text-right">Walk-ins</th>
+                    <th class="text-right">Rate</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach ($breakoutSummaries as $summary)
+                    <tr>
+                        <td>{{ $summary['title'] }}@if ($summary['overbooked']) (Overbooked)@endif</td>
+                        <td>{{ $summary['date'] }}</td>
+                        <td class="text-center">{{ $summary['capacity'] ?? '—' }}</td>
+                        <td class="text-center">{{ $summary['picks'] }}</td>
+                        <td class="text-center">{{ $summary['expected'] }}</td>
+                        <td class="text-center status-checked-in">{{ $summary['present'] }}</td>
+                        <td class="text-center status-no-show">{{ $summary['absent'] }}</td>
+                        <td class="text-center">{{ $summary['walk_ins'] }}</td>
+                        <td class="text-center">{{ $summary['rate'] }}%</td>
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
+    @endif
 
     @if ($includeDetailedRoster)
+        @foreach ($breakoutRosters as $breakoutRoster)
+            <h2>Detailed Attendance Roster — {{ $breakoutRoster['title'] }} ({{ $breakoutRoster['date'] }})</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Union</th>
+                        <th>Mission</th>
+                        <th>Status</th>
+                        <th>Method</th>
+                        <th>Check-in</th>
+                        <th>Recorded by</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach ($breakoutRoster['rows'] as $row)
+                        <tr>
+                            <td>{{ $row['first_name'] }}</td>
+                            <td>{{ $row['last_name'] }}</td>
+                            <td>{{ $row['union'] ?? 'N/A' }}</td>
+                            <td>{{ $row['mission'] ?? 'N/A' }}</td>
+                            <td>
+                                <span class="status-{{ strtolower(str_replace(' ', '-', $row['status'])) }}">
+                                    {{ $row['status'] }}
+                                </span>
+                            </td>
+                            <td>{{ ucfirst($row['method'] ?? '') }}</td>
+                            <td>{{ $row['check_in_at'] }}</td>
+                            <td>{{ $row['recorded_by'] }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        @endforeach
         @foreach ($sessionDetailedRosters as $sessionRoster)
             <h2>Detailed Attendance Roster — {{ $sessionRoster['name'] }} ({{ $sessionRoster['date'] }})</h2>
             <table>
@@ -128,6 +205,7 @@
                         <th>Method</th>
                         <th>Check-in</th>
                         <th>Check-out</th>
+                        <th>Via breakout</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -145,6 +223,7 @@
                             <td>{{ ucfirst($registration['method']) }}</td>
                             <td>{{ $registration['check_in_at'] }}</td>
                             <td>{{ $registration['check_out_at'] }}</td>
+                            <td>{{ $registration['via_breakout'] }}</td>
                         </tr>
                     @endforeach
                 </tbody>

@@ -12,6 +12,8 @@ return new class extends Migration
             $table->timestamp('verified_at')->nullable();
             $table->foreignId('verified_by')->nullable()->constrained('users')->nullOnDelete();
             // Identity is normalized name plus address, checked in the app.
+            // MySQL needs an index on the mission_id foreign key once the unique one goes.
+            $table->index('mission_id');
             $table->dropUnique(['mission_id', 'name']);
         });
     }
@@ -23,6 +25,7 @@ return new class extends Migration
             $table->dropColumn('verified_at');
             // Fails if two churches now share a name in one mission; merge them first.
             $table->unique(['mission_id', 'name']);
+            $table->dropIndex(['mission_id']);
         });
     }
 };

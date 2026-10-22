@@ -20,6 +20,9 @@ class AttendanceRecordResource extends JsonResource
             // Deprecated alias of attendee_id, removed in Release 2.
             'event_registration_id' => $this->attendee_id,
             'event_session_id' => $this->event_session_id,
+            'breakout_id' => $this->breakout_id,
+            'via_breakout_id' => $this->via_breakout_id,
+            'is_walk_in' => $this->is_walk_in,
             'check_in_at' => $this->check_in_at,
             'check_out_at' => $this->check_out_at,
             'method' => $this->method,

@@ -57,6 +57,7 @@ class EventDashboardReport
                 'mission',
                 'attendanceRecords' => fn ($query) => $query
                     ->whereNotNull('check_in_at')
+                    ->whereNotNull('event_session_id')
                     ->orderBy('check_in_at'),
             ])
             ->get();

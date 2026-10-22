@@ -12,9 +12,11 @@ use App\Http\Resources\EventSessionRosterEntryResource;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\AuditLog;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +35,7 @@ class AttendanceController extends Controller
         }
 
         $event = Event::findOrFail($request->validated('event_id'));
-        $session = EventSession::where('event_id', $event->id)->findOrFail($request->validated('session_id'));
+        $slot = $this->resolveSlot($event, $request->validated());
 
         $attendee = Attendee::where('event_id', $event->id)
             ->where('qr_token', $request->validated('qr_token'))
@@ -49,7 +51,7 @@ class AttendanceController extends Controller
             $attendee->load(['union', 'mission']);
             $attendance = new AttendanceRecord([
                 'attendee_id' => $attendee->id,
-                'event_session_id' => $session->id,
+                AttendanceRecord::slotColumn($slot) => $slot->id,
                 'check_in_at' => now(),
                 'method' => AttendanceMethod::Qr,
                 'recorded_by' => $request->user()->id,
@@ -65,7 +67,7 @@ class AttendanceController extends Controller
                 ->setStatusCode(200);
         }
 
-        return $this->recordAttendance($request, $attendee, $session, AttendanceMethod::Qr);
+        return $this->recordAttendance($request, $attendee, $slot, AttendanceMethod::Qr, flags: $this->flags($request->validated()));
     }
 
     /**
@@ -74,10 +76,10 @@ class AttendanceController extends Controller
     public function manual(ManualAttendanceRequest $request)
     {
         $event = Event::findOrFail($request->validated('event_id'));
-        $session = EventSession::where('event_id', $event->id)->findOrFail($request->validated('session_id'));
+        $slot = $this->resolveSlot($event, $request->validated());
         $attendee = $this->resolveAttendee($event, $request->validated())->load(['union', 'mission']);
 
-        return $this->recordAttendance($request, $attendee, $session, AttendanceMethod::Manual);
+        return $this->recordAttendance($request, $attendee, $slot, AttendanceMethod::Manual, flags: $this->flags($request->validated()));
     }
 
     /**
@@ -88,6 +90,10 @@ class AttendanceController extends Controller
         $this->authorize('checkOut', $attendanceRecord);
 
         $event = $attendanceRecord->attendee->event;
+
+        if ($attendanceRecord->breakout_id !== null) {
+            throw ValidationException::withMessages(['attendance_record' => 'Breakouts have no check-out.']);
+        }
 
         if (! $event->requires_check_out) {
             throw ValidationException::withMessages([
@@ -210,7 +216,7 @@ class AttendanceController extends Controller
 
             try {
                 $event = Event::findOrFail($scan['event_id']);
-                $session = EventSession::where('event_id', $event->id)->findOrFail($scan['session_id']);
+                $slot = $this->resolveSlot($event, $scan);
 
                 // Check authorization for this event; the scan's client time is not trusted for the archive check.
                 $decision = Gate::forUser($request->user())->inspect('create', [AttendanceRecord::class, $event]);
@@ -243,16 +249,8 @@ class AttendanceController extends Controller
                 $scannedAt = ! empty($scan['scanned_at']) ? Carbon::parse($scan['scanned_at']) : null;
 
                 // Process the attendance in its own transaction.
-                $attendance = DB::transaction(function () use ($attendee, $session, $method, $request, $scannedAt, $scan) {
-                    return $this->recordAttendance(
-                        $request,
-                        $attendee,
-                        $session,
-                        $method,
-                        $scannedAt,
-                        true,
-                        $scan['override'] ?? false
-                    );
+                $attendance = DB::transaction(function () use ($attendee, $slot, $method, $request, $scannedAt, $scan) {
+                    return $this->recordAttendance($request, $attendee, $slot, $method, $scannedAt, true, $this->flags($scan));
                 });
 
                 $result['status'] = 'created';
@@ -297,21 +295,74 @@ class AttendanceController extends Controller
         return Attendee::where('event_id', $event->id)->findOrFail($input['attendee_id'] ?? null);
     }
 
+    /**
+     * @param  array<string, mixed>  $input
+     */
+    private function resolveSlot(Event $event, array $input): EventSession|Breakout
+    {
+        return empty($input['breakout_id'])
+            ? EventSession::where('event_id', $event->id)->findOrFail($input['session_id'])
+            : Breakout::where('event_id', $event->id)->findOrFail($input['breakout_id']);
+    }
+
+    /**
+     * @param  array<string, mixed>  $input
+     * @return array{override: bool, late: bool, walk_in: bool}
+     */
+    private function flags(array $input): array
+    {
+        return [
+            'override' => (bool) ($input['override'] ?? false),
+            'late' => (bool) ($input['late'] ?? false),
+            'walk_in' => (bool) ($input['walk_in'] ?? false),
+        ];
+    }
+
+    /**
+     * Checkers check in only while the slot is open; early and late check-ins need an admin and the matching flag.
+     *
+     * @param  array{override: bool, late: bool, walk_in: bool}  $flags
+     * @return array{0: ?string, 1: ?string} [early|late|null, error message]
+     */
+    private function timing(EventSession|Breakout $slot, Carbon $at, bool $isAdmin, array $flags): array
+    {
+        if ($at->lessThan($slot->checkInOpensAt())) {
+            return $isAdmin && $flags['override'] ? ['early', null] : [null, 'Attendance for this '.$this->label($slot).' has not opened yet.'];
+        }
+
+        if ($at->greaterThan($slot->endsAt())) {
+            return $isAdmin && $flags['late']
+                ? ['late', null]
+                : [null, 'This '.$this->label($slot).' has ended.'.($isAdmin ? ' Confirm as a late check-in.' : ' Only an event admin can record a late check-in.')];
+        }
+
+        return [null, null];
+    }
+
+    private function label(EventSession|Breakout $slot): string
+    {
+        return $slot instanceof Breakout ? 'breakout' : 'session';
+    }
+
+    /**
+     * @param  array{override: bool, late: bool, walk_in: bool}  $flags
+     */
     private function recordAttendance(
         Request $request,
         Attendee $attendee,
-        EventSession $session,
+        EventSession|Breakout $slot,
         AttendanceMethod $method,
         ?Carbon $scannedAt = null,
         bool $isBatchSync = false,
-        bool $overrideFlag = false
+        array $flags = ['override' => false, 'late' => false, 'walk_in' => false]
     ) {
         if ($attendee->first_registered_at === null) {
             throw ValidationException::withMessages(['attendee_id' => 'Registration incomplete.']);
         }
 
+        $column = AttendanceRecord::slotColumn($slot);
         $existing = AttendanceRecord::where('attendee_id', $attendee->id)
-            ->where('event_session_id', $session->id)
+            ->where($column, $slot->id)
             ->first();
 
         if ($existing !== null && $existing->check_in_at !== null) {
@@ -320,42 +371,93 @@ class AttendanceController extends Controller
             ]);
         }
 
-        $canOverride = ($overrideFlag || $request->boolean('override'))
-            && ($request->user()->isSuperAdmin() || $request->user()->isOrgAdmin());
+        $user = $request->user();
+        $isAdmin = $user->isSuperAdmin() || $user->isOrgAdmin();
+        // The scan's own time decides early / late, so an offline scan synced after the slot ended still counts.
+        $at = $scannedAt === null || $scannedAt->isFuture() ? now() : $scannedAt;
 
-        $isEarly = now()->lessThan($session->checkInOpensAt());
-
-        if ($isEarly && ! $canOverride) {
+        $walkIn = $slot instanceof Breakout && ! $attendee->breakouts()->whereKey($slot->id)->exists();
+        if ($walkIn && ! ($isAdmin && $flags['walk_in'])) {
             throw ValidationException::withMessages([
-                'session_id' => 'Attendance for this session has not opened yet.',
+                'attendee_id' => $isAdmin
+                    ? 'This Attendee did not pick this breakout. Confirm as a walk-in.'
+                    : 'This Attendee did not pick this breakout. Only an event admin can admit a walk-in.',
             ]);
         }
 
-        return DB::transaction(function () use ($existing, $attendee, $session, $method, $request, $isEarly, $scannedAt, $isBatchSync) {
-            $attendance = $existing ?? new AttendanceRecord([
-                'attendee_id' => $attendee->id,
-                'event_session_id' => $session->id,
-            ]);
+        [$timing, $error] = $this->timing($slot, $at, $isAdmin, $flags);
+        if ($error !== null) {
+            throw ValidationException::withMessages([$column => $error]);
+        }
 
-            $attendance->check_in_at = $scannedAt ?? now();
-            $attendance->method = $method;
-            $attendance->recorded_by = $request->user()->id;
-            $attendance->save();
+        try {
+            return DB::transaction(function () use ($existing, $attendee, $slot, $column, $method, $user, $timing, $walkIn, $at, $isAdmin, $flags, $isBatchSync) {
+                $attendance = $existing ?? new AttendanceRecord(['attendee_id' => $attendee->id, $column => $slot->id]);
 
-            AuditLog::record(
-                $isEarly ? 'attendance.checked_in_override' : 'attendance.checked_in',
-                $attendance,
-                ['method' => $method->value, 'session_id' => $session->id],
-            );
+                $attendance->check_in_at = $at;
+                $attendance->method = $method;
+                $attendance->recorded_by = $user->id;
+                $attendance->is_walk_in = $walkIn;
+                $attendance->save();
 
-            if ($isBatchSync) {
-                return $attendance;
+                AuditLog::record(
+                    match (true) {
+                        $walkIn => 'attendance.walk_in',
+                        $timing === 'late' => 'attendance.checked_in_late',
+                        $timing === 'early' => 'attendance.checked_in_override',
+                        default => 'attendance.checked_in',
+                    },
+                    $attendance,
+                    ['method' => $method->value, $slot instanceof Breakout ? 'breakout_id' : 'session_id' => $slot->id, 'late' => $timing === 'late', 'early' => $timing === 'early'],
+                );
+
+                if ($slot instanceof Breakout) {
+                    $this->checkInOverlappingSessions($attendee, $slot, $method, $user->id, $at, $isAdmin, $flags);
+                }
+
+                if ($isBatchSync) {
+                    return $attendance;
+                }
+
+                return AttendanceRecordResource::make($attendance->load(['attendee.union', 'attendee.mission']))
+                    ->additional($attendee->registration_completed_at === null ? ['incomplete' => true, 'note' => 'Registration incomplete.'] : [])
+                    ->response()
+                    ->setStatusCode(201);
+            });
+        } catch (UniqueConstraintViolationException) {
+            // A concurrent scan of the same slot won the unique index.
+            throw ValidationException::withMessages([$column => 'Already Checked In.']);
+        }
+    }
+
+    /**
+     * A breakout check-in also checks in to each same-date session it overlaps (half-open), where this actor could check in directly. The earliest check-in wins.
+     *
+     * @param  array{override: bool, late: bool, walk_in: bool}  $flags
+     */
+    private function checkInOverlappingSessions(Attendee $attendee, Breakout $breakout, AttendanceMethod $method, int $userId, Carbon $at, bool $isAdmin, array $flags): void
+    {
+        $sessions = $breakout->event->sessions()->whereDate('session_date', $breakout->date->toDateString())->get()
+            ->filter(fn (EventSession $session) => $session->startsAt()->lt($breakout->endsAt()) && $breakout->startsAt()->lt($session->endsAt()));
+
+        foreach ($sessions as $session) {
+            $session->setRelation('event', $breakout->event);
+            if ($this->timing($session, $at, $isAdmin, $flags)[1] !== null) {
+                continue;
             }
 
-            return AttendanceRecordResource::make($attendance->load(['attendee.union', 'attendee.mission']))
-                ->additional($attendee->registration_completed_at === null ? ['incomplete' => true, 'note' => 'Registration incomplete.'] : [])
-                ->response()
-                ->setStatusCode(201);
-        });
+            $record = AttendanceRecord::firstOrNew(['attendee_id' => $attendee->id, 'event_session_id' => $session->id]);
+            if ($record->check_in_at !== null && $record->check_in_at->lessThanOrEqualTo($at)) {
+                continue;
+            }
+
+            $record->fill(['check_in_at' => $at, 'method' => $method, 'recorded_by' => $userId, 'via_breakout_id' => $breakout->id])->save();
+
+            AuditLog::record('attendance.checked_in_via_breakout', $record, [
+                'method' => $method->value,
+                'session_id' => $session->id,
+                'breakout_id' => $breakout->id,
+            ]);
+        }
     }
 }

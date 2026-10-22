@@ -17,7 +17,7 @@ class OrganizationAttendanceOverview
             ->whereIn('event_id', $events->modelKeys())
             ->orderBy('event_id')
             ->orderBy('id')
-            ->with(['attendanceRecords', 'union', 'mission'])
+            ->with(['attendanceRecords' => fn ($records) => $records->whereNotNull('event_session_id'), 'union', 'mission'])
             ->get();
 
         $overview = [

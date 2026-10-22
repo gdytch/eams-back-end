@@ -17,10 +17,14 @@ class EventRegistrationPolicy
         return $user->can('viewStaffData', $event);
     }
 
-    public function view(User $user, EventRegistration $eventRegistration): bool
+    public function view(User $user, EventRegistration $eventRegistration): Response|bool
     {
         if ($user->isAttendee()) {
             return $eventRegistration->attendee?->user_id === $user->id;
+        }
+
+        if ($eventRegistration->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
         }
 
         return ($user->isSuperAdmin() || $user->organization_id === $eventRegistration->event->organization_id)
@@ -49,8 +53,12 @@ class EventRegistrationPolicy
         );
     }
 
-    public function downloadIdCard(User $user, EventRegistration $eventRegistration): bool
+    public function downloadIdCard(User $user, EventRegistration $eventRegistration): Response|bool
     {
+        if ($eventRegistration->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         if ($user->isAttendee()) {
             return $eventRegistration->attendee?->user_id === $user->id;
         }
@@ -59,8 +67,12 @@ class EventRegistrationPolicy
             && $user->hasAccessToEvent($eventRegistration->event);
     }
 
-    public function viewIdCardImage(User $user, EventRegistration $eventRegistration): bool
+    public function viewIdCardImage(User $user, EventRegistration $eventRegistration): Response|bool
     {
+        if ($eventRegistration->event->isHiddenFrom($user)) {
+            return Response::denyAsNotFound();
+        }
+
         if ($user->isAttendee()) {
             return $eventRegistration->attendee?->user_id === $user->id;
         }

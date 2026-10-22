@@ -70,6 +70,7 @@ class AttendeeDashboardTest extends TestCase
         $this->assertEquals($attendeeUser->email, $data['account']['email']);
         $this->assertEmpty($data['upcoming_events']);
         $this->assertEmpty($data['past_events']);
+        $this->assertFalse($data['has_upcoming_events']);
         $this->assertEquals(0, $data['stats']['total_events_registered']);
         $this->assertEquals(0, $data['stats']['total_sessions_attended']);
     }
@@ -123,6 +124,8 @@ class AttendeeDashboardTest extends TestCase
         $this->assertStringContainsString('/id-card', $upcomingEvent['id_card_url']);
         $this->assertNotNull($upcomingEvent['next_session']);
         $this->assertEquals($session1->id, $upcomingEvent['next_session']['id']);
+        $this->assertFalse($upcomingEvent['archived']);
+        $this->assertTrue($data['has_upcoming_events']);
     }
 
     public function test_attendee_sees_past_event_with_attendance_summary(): void
@@ -167,6 +170,11 @@ class AttendeeDashboardTest extends TestCase
         $this->assertEquals($pastEvent->id, $pastEventData['event']['id']);
         $this->assertEquals(2, $pastEventData['attendance_summary']['sessions_total']);
         $this->assertEquals(1, $pastEventData['attendance_summary']['sessions_attended']);
+        $this->assertFalse($pastEventData['archived']);
+        $this->assertSame($registration->qr_token, $pastEventData['qr_token']);
+        $this->assertFalse($pastEventData['id_card_ready']);
+        $this->assertSame("/api/v1/events/{$pastEvent->id}/registrations/{$registration->id}/id-card", $pastEventData['id_card_url']);
+        $this->assertFalse($data['has_upcoming_events']);
     }
 
     public function test_attendee_with_multiple_registrations_sees_all_correctly_sorted(): void

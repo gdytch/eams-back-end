@@ -47,6 +47,7 @@ class EventRegistration extends Model
         return config('app.CLIENT_URL').'/attendee/'.$token;
     }
 
+    /** @return BelongsTo<Event, $this> */
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);

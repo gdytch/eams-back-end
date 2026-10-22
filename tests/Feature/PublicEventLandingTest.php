@@ -32,6 +32,7 @@ class PublicEventLandingTest extends TestCase
                 'status',
                 'organization' => ['id', 'name'],
                 'sessions' => [['id', 'name', 'session_date', 'start_time', 'end_time']],
+                'closed',
             ],
         ]);
         $this->assertSame($event->id, $response->json('data.id'));

@@ -137,8 +137,8 @@ class DashboardController extends Controller
     {
         $restricted = $user->accessibleEvents()->exists();
         $eventsQuery = $restricted
-            ? fn () => Event::query()->whereIn('id', $user->accessibleEvents()->pluck('events.id'))
-            : fn () => Event::query();
+            ? fn () => Event::query()->whereNull('archived_at')->whereIn('id', $user->accessibleEvents()->pluck('events.id'))
+            : fn () => Event::query()->whereNull('archived_at');
 
         return [
             'access_restricted' => $restricted,
@@ -164,15 +164,26 @@ class DashboardController extends Controller
     private function myScanStats(User $user): array
     {
         return [
-            'today' => AttendanceRecord::query()->where('recorded_by', $user->id)->whereDate('created_at', today())->count(),
-            'total' => AttendanceRecord::query()->where('recorded_by', $user->id)->count(),
+            'today' => $this->scansRecordedBy($user)->whereDate('created_at', today())->count(),
+            'total' => $this->scansRecordedBy($user)->count(),
         ];
+    }
+
+    /**
+     * Scans the user recorded on events that are not archived.
+     *
+     * @return Builder<AttendanceRecord>
+     */
+    private function scansRecordedBy(User $user): Builder
+    {
+        return AttendanceRecord::query()
+            ->where('recorded_by', $user->id)
+            ->whereHas('eventRegistration.event', fn (Builder $query) => $query->whereNull('archived_at'));
     }
 
     private function recentScans(User $user): array
     {
-        return AttendanceRecord::query()
-            ->where('recorded_by', $user->id)
+        return $this->scansRecordedBy($user)
             ->with(['eventRegistration.attendee', 'eventRegistration.event', 'eventSession'])
             ->latest('created_at')
             ->limit(10)

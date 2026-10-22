@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\MissionController;
 use App\Http\Controllers\Api\V1\OrganizationController;
 use App\Http\Controllers\Api\V1\ProfilePhotoController;
 use App\Http\Controllers\Api\V1\PublicEventController;
+use App\Http\Controllers\Api\V1\PublicEventRegistrationController;
 use App\Http\Controllers\Api\V1\PublicEventProgramController;
 use App\Http\Controllers\Api\V1\PublicMissionController;
 use App\Http\Controllers\Api\V1\PublicUnionController;
@@ -63,7 +64,12 @@ Route::middleware('throttle:6,1')->group(function () {
 
 Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'show']);
 Route::get('public/programs/{publicSlug}', [PublicEventProgramController::class, 'show']);
-Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');
+Route::middleware('auth:sanctum')->prefix('public/event/{eventInviteToken}/registration')->group(function () {
+    Route::get('/', [PublicEventRegistrationController::class, 'show']);
+    Route::put('basic-info', [PublicEventRegistrationController::class, 'saveBasicInfo']);
+    Route::put('territory', [PublicEventRegistrationController::class, 'saveTerritory']);
+    Route::post('finish', [PublicEventRegistrationController::class, 'finish']);
+});
 Route::get('public/unions', [PublicUnionController::class, 'index']);
 Route::get('public/missions', [PublicMissionController::class, 'index']);
 Route::get('public/churches', [PublicChurchController::class, 'index']);

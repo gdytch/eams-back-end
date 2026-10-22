@@ -61,6 +61,7 @@ class ArchivedEventWriteBlockTest extends TestCase
     {
         $admins = ['super_admin', 'org_admin'];
         $staff = ['super_admin', 'org_admin', 'checker'];
+        $everyone = ['super_admin', 'org_admin', 'checker', 'attendee'];
 
         return [
             'event update' => ['PUT', 'events/:event', ['name' => 'Renamed'], $admins],
@@ -96,7 +97,9 @@ class ArchivedEventWriteBlockTest extends TestCase
             'attendance scan' => ['POST', 'attendance/scan', ['event_id' => ':event', 'session_id' => ':session', 'qr_token' => ':qr'], $staff],
             'attendance manual' => ['POST', 'attendance/manual', ['event_id' => ':event', 'session_id' => ':session', 'attendee_id' => ':attendee'], $staff],
             'attendance check-out' => ['POST', 'attendance/:record/check-out', [], $staff],
-            'public register' => ['POST', 'public/event/:invite/register', [], ['super_admin', 'org_admin', 'checker', 'attendee']],
+            'public wizard basic-info' => ['PUT', 'public/event/:invite/registration/basic-info', [], $everyone],
+            'public wizard territory' => ['PUT', 'public/event/:invite/registration/territory', [], $everyone],
+            'public wizard finish' => ['POST', 'public/event/:invite/registration/finish', [], $everyone],
             'attendee update' => ['PUT', 'attendees/:attendee', ['first_name' => 'Changed'], $admins],
             'attendee destroy' => ['DELETE', 'attendees/:attendee', [], $admins],
             'attendee photo upload' => ['POST', 'attendees/:attendee/photo', [], $admins],

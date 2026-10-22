@@ -2,11 +2,13 @@
 
 namespace App\Http\Requests;
 
+use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 
 class RemoveEventProgramItemPhotoRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): Response|bool
     {
         $program = $this->route('event')?->program;
         if (! $program) {
@@ -14,7 +16,7 @@ class RemoveEventProgramItemPhotoRequest extends FormRequest
             return true;
         }
 
-        return $this->user()->can('update', $program);
+        return Gate::forUser($this->user())->inspect('update', $program);
     }
 
     /**

@@ -3,14 +3,16 @@
 namespace App\Http\Requests;
 
 use App\Enums\OrganizationLevel;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
 class UpdateAttendeeRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): Response|bool
     {
-        return $this->user()->can('update', $this->route('attendee'));
+        return Gate::forUser($this->user())->inspect('update', $this->route('attendee'));
     }
 
     /**

@@ -5,9 +5,13 @@ namespace App\Policies;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\User;
+use App\Policies\Concerns\DeniesArchivedEvents;
+use Illuminate\Auth\Access\Response;
 
 class EventSessionPolicy
 {
+    use DeniesArchivedEvents;
+
     public function viewAny(User $user): bool
     {
         return true;
@@ -28,19 +32,20 @@ class EventSessionPolicy
         return $user->can('viewStaffData', $eventSession->event);
     }
 
-    public function create(User $user, Event $event): bool
+    public function create(User $user, Event $event): Response|bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isOrgAdmin() && $user->organization_id === $event->organization_id);
+        return $this->allowWrite(
+            $user->isSuperAdmin() || ($user->isOrgAdmin() && $user->organization_id === $event->organization_id),
+            $event,
+        );
     }
 
-    public function update(User $user, EventSession $eventSession): bool
+    public function update(User $user, EventSession $eventSession): Response|bool
     {
-        return $user->isSuperAdmin()
-            || ($user->isOrgAdmin() && $user->organization_id === $eventSession->event->organization_id);
+        return $this->create($user, $eventSession->event);
     }
 
-    public function delete(User $user, EventSession $eventSession): bool
+    public function delete(User $user, EventSession $eventSession): Response|bool
     {
         return $this->update($user, $eventSession);
     }

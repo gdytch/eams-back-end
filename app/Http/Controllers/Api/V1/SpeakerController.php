@@ -22,7 +22,7 @@ class SpeakerController extends Controller
 {
     public function index(Event $event): AnonymousResourceCollection
     {
-        $this->authorize('update', $event);
+        $this->authorize('viewSpeakers', $event);
 
         return SpeakerResource::collection($event->speakers()->with('programItems')->get());
     }

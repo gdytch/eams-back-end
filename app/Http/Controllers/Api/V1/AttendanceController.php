@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\ValidationException;
 
 class AttendanceController extends Controller
@@ -87,7 +88,7 @@ class AttendanceController extends Controller
      */
     public function checkOut(Request $request, AttendanceRecord $attendanceRecord)
     {
-        $this->authorize('view', $attendanceRecord);
+        $this->authorize('checkOut', $attendanceRecord);
 
         $event = $attendanceRecord->eventRegistration->event;
 
@@ -222,9 +223,12 @@ class AttendanceController extends Controller
                 $event = Event::findOrFail($scan['event_id']);
                 $session = EventSession::where('event_id', $event->id)->findOrFail($scan['session_id']);
 
-                // Check authorization for this event.
-                if (! $request->user()->can('create', [AttendanceRecord::class, $event])) {
-                    $result['message'] = 'Unauthorized to record attendance for this event.';
+                // Check authorization for this event; the scan's client time is not trusted for the archive check.
+                $decision = Gate::forUser($request->user())->inspect('create', [AttendanceRecord::class, $event]);
+                if ($decision->denied()) {
+                    $archived = $decision->code() === 'event_archived';
+                    $result['status'] = $archived ? 'event_archived' : 'error';
+                    $result['message'] = $archived ? $decision->message() : 'Unauthorized to record attendance for this event.';
                     $results[] = $result;
 
                     continue;

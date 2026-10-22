@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\AttendanceStatus;
 use App\Exports\AttendeeSummaryExport;
 use App\Exports\EventAttendanceExport;
 use App\Http\Controllers\Controller;
@@ -31,23 +32,17 @@ class ReportController extends Controller
 
         $this->authorize('viewRoster', $session);
 
-        $totalRegistered = $event->attendees()->count();
-        $present = $event->attendees()
-            ->whereHas('attendanceRecords', fn ($query) => $query
-                ->where('event_session_id', $session->id)
-                ->whereNotNull('check_in_at'))
-            ->count();
+        $counts = $session->attendanceCounts($event);
 
         return response()->json([
             'event_id' => $event->id,
             'session_id' => $session->id,
-            'total_registered' => $totalRegistered,
+            'total_registered' => $event->attendees()->expectedAt($session)->count(),
             'attendance' => [
-                'present' => $present,
-                'absent' => $totalRegistered - $present,
-                'attendance_rate' => $totalRegistered > 0
-                    ? round(($present / $totalRegistered) * 100, 1)
-                    : 0,
+                'present' => $counts['present'],
+                'absent' => $counts['absent'],
+                'upcoming' => $counts['upcoming'],
+                'attendance_rate' => $counts['rate'],
             ],
         ]);
     }
@@ -79,6 +74,7 @@ class ReportController extends Controller
         // Fetch paginated attendance records with related data
         $perPage = $request->input('per_page', 10);
         $attendanceRecords = $event->attendees()
+            ->whereNotNull('first_registered_at')
             ->with([
                 'attendanceRecords.eventSession',
                 'attendanceRecords.recordedBy',
@@ -107,7 +103,7 @@ class ReportController extends Controller
                     'status' => match (true) {
                         $attendanceRecord->check_out_at !== null => 'Checked Out',
                         $attendanceRecord->check_in_at !== null => 'Checked In',
-                        default => 'Absent',
+                        default => 'Not checked in',
                     },
                 ]);
             }
@@ -189,17 +185,20 @@ class ReportController extends Controller
     private function buildAttendeeSummary(Event $event)
     {
         $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get();
-        $started = $sessions->filter(fn ($session) => now()->greaterThanOrEqualTo($session->startsAt()));
-        $startedCount = $started->count();
         $levelOrder = ['union' => 0, 'mission' => 1];
 
         return $event->attendees()
+            ->whereNotNull('first_registered_at')
             ->with(['union', 'mission', 'attendanceRecords' => fn ($q) => $q->whereNotNull('check_in_at')])
             ->get()
-            ->map(function ($registration) use ($sessions, $started, $startedCount) {
+            ->map(function ($registration) use ($sessions) {
                 $attendee = $registration;
                 $presentIds = $registration->attendanceRecords->pluck('event_session_id')->unique();
                 $present = $presentIds->count();
+                $status = fn ($session) => $session->attendanceStatus($presentIds->contains($session->id), $registration->first_registered_at);
+                $absent = $sessions->filter(fn ($s) => $status($s) === AttendanceStatus::Absent);
+                $upcoming = $sessions->filter(fn ($s) => $status($s) === AttendanceStatus::Upcoming);
+                $presentEnded = $sessions->filter(fn ($s) => $presentIds->contains($s->id) && $s->hasEnded() && $s->isExpected($registration->first_registered_at))->count();
 
                 return [
                     'event_registration_id' => $registration->id,
@@ -214,13 +213,16 @@ class ReportController extends Controller
                     'mission' => $attendee->mission,
                     'present' => $present,
                     'present_sessions' => $sessions->whereIn('id', $presentIds)->pluck('name')->values(),
-                    'absent_sessions' => $started->whereNotIn('id', $presentIds)->pluck('name')->values(),
-                    'remaining_sessions' => $sessions->diff($started)->whereNotIn('id', $presentIds)->pluck('name')->values(),
-                    'absent' => $started->whereNotIn('id', $presentIds)->count(),
-                    'remaining' => $sessions->diff($started)->whereNotIn('id', $presentIds)->count(),
-                    'attendance_rating' => $startedCount > 0 ? round($present / $startedCount * 100, 1) : 0,
+                    'absent_sessions' => $absent->pluck('name')->values(),
+                    'remaining_sessions' => $upcoming->pluck('name')->values(),
+                    'absent' => $absent->count(),
+                    'remaining' => $upcoming->count(),
+                    'attendance_rating' => $presentEnded + $absent->count() > 0
+                        ? round($presentEnded / ($presentEnded + $absent->count()) * 100, 1)
+                        : 0,
                 ];
             })
+            ->reject(fn ($row) => $row['present'] + $row['absent'] + $row['remaining'] === 0)
             ->sort(fn ($a, $b) => $this->summarySortKey($a, $levelOrder) <=> $this->summarySortKey($b, $levelOrder));
     }
 
@@ -259,19 +261,21 @@ class ReportController extends Controller
     {
         $sessions = $event->sessions()->with(['attendanceRecords' => fn ($q) => $q->with('attendee')])->get();
 
-        $totalRegistered = $event->attendees()->count();
+        $totalRegistered = $event->attendees()->whereNotNull('first_registered_at')->count();
         $totalCheckedIn = 0;
         $totalCheckedOut = 0;
+        $totalAbsent = 0;
 
         $sessionSummaries = [];
 
         foreach ($sessions as $session) {
-            $sessionRegistered = $event->attendees()->count();
-            $sessionCheckedIn = $session->attendanceRecords()->whereNotNull('check_in_at')->count();
+            $counts = $session->attendanceCounts($event);
+            $sessionCheckedIn = $counts['present'];
             $sessionCheckedOut = $session->attendanceRecords()->whereNotNull('check_out_at')->count();
 
             $totalCheckedIn += $sessionCheckedIn;
             $totalCheckedOut += $sessionCheckedOut;
+            $totalAbsent += $counts['absent'];
 
             $sessionSummaries[] = [
                 'session_id' => $session->id,
@@ -279,10 +283,12 @@ class ReportController extends Controller
                 'session_date' => $session->session_date->toDateString(),
                 'start_time' => $session->start_time,
                 'end_time' => $session->end_time,
-                'registered' => $sessionRegistered,
+                'registered' => $event->attendees()->expectedAt($session)->count(),
                 'checked_in' => $sessionCheckedIn,
                 'checked_out' => $sessionCheckedOut,
-                'no_show' => $sessionRegistered - $sessionCheckedIn,
+                'no_show' => $counts['absent'],
+                'upcoming' => $counts['upcoming'],
+                'attendance_rate' => $counts['rate'],
             ];
         }
 
@@ -292,15 +298,13 @@ class ReportController extends Controller
             'total_registered' => $totalRegistered,
             'total_checked_in' => $totalCheckedIn,
             'total_checked_out' => $totalCheckedOut,
-            'total_no_show' => ($totalRegistered * $sessions->count()) - $totalCheckedIn,
+            'total_no_show' => $totalAbsent,
             'sessions' => $sessionSummaries,
         ];
     }
 
     private function exportEventAttendanceAsPdf(Event $event, ?EventSession $session = null)
     {
-        $registrations = $event->attendees()->with('union', 'mission', 'attendanceRecords')->get();
-
         if ($session) {
             // Export only the specific session - include detailed roster
             $sessions = (new EventSession)->newCollection([$session]);
@@ -323,24 +327,22 @@ class ReportController extends Controller
         $sessionDetailedRosters = [];
 
         foreach ($sessions as $sess) {
-            $checkedIn = $sess->checked_in_count;
-            $checkedOut = $sess->checked_out_count;
-            $total = $registrations->count();
-            $noShow = $total - $checkedIn;
+            $counts = $sess->attendanceCounts($event);
 
             $sessionSummaries[] = [
                 'name' => $sess->name,
                 'date' => $sess->session_date->format('M d, Y'),
-                'total_registered' => $total,
-                'checked_in' => $checkedIn,
-                'checked_out' => $checkedOut,
-                'no_show' => $noShow,
-                'check_in_rate' => $total > 0 ? round(($checkedIn / $total) * 100, 1) : 0,
+                'total_registered' => $event->attendees()->expectedAt($sess)->count(),
+                'checked_in' => $counts['present'],
+                'checked_out' => $sess->checked_out_count,
+                'no_show' => $counts['absent'],
+                'check_in_rate' => $counts['rate'],
             ];
 
             // Only prepare detailed roster when viewing a single session
             if ($includeDetailedRoster) {
-                $sessionRoster = $registrations->map(fn ($reg) => $this->mapRegistrationToRow($reg, $reg->attendanceRecords->firstWhere('event_session_id', $sess->id)));
+                $sessionRoster = $event->attendees()->inAttendanceOf($sess)->with('union', 'mission', 'attendanceRecords')->get()
+                    ->map(fn ($reg) => $this->mapRegistrationToRow($reg, $sess, $reg->attendanceRecords->firstWhere('event_session_id', $sess->id)));
 
                 $sessionDetailedRosters[] = [
                     'name' => $sess->name,
@@ -360,7 +362,7 @@ class ReportController extends Controller
         return $pdf->download($filename);
     }
 
-    private function mapRegistrationToRow($registration, $attendanceRecord): array
+    private function mapRegistrationToRow($registration, EventSession $session, $attendanceRecord): array
     {
         $checkInAt = $attendanceRecord?->check_in_at;
         $checkOutAt = $attendanceRecord?->check_out_at;
@@ -368,7 +370,7 @@ class ReportController extends Controller
         $status = match (true) {
             $checkOutAt !== null => 'Checked Out',
             $checkInAt !== null => 'Checked In',
-            default => 'Absent',
+            default => $session->attendanceStatus(false, $registration->first_registered_at)?->label(),
         };
 
         return [

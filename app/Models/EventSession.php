@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\HasAttendanceStatus;
 use Database\Factories\EventSessionFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -14,7 +15,7 @@ use Illuminate\Support\Carbon;
 class EventSession extends Model
 {
     /** @use HasFactory<EventSessionFactory> */
-    use HasFactory;
+    use HasAttendanceStatus, HasFactory;
 
     protected function casts(): array
     {

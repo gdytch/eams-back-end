@@ -20,19 +20,19 @@ class AuditLogTest extends TestCase
         Queue::fake();
 
         $org = Organization::factory()->create();
-        $checker = User::factory()->checker()->for($org)->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
 
-        $this->actingAs($checker, 'sanctum')->postJson('/api/v1/attendees', [
+        $this->actingAs($admin, 'sanctum')->postJson('/api/v1/attendees', [
             'organization_level' => 'union',
-            'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
-            'event_id' => Event::factory()->create(['organization_id' => $checker->organization_id])->id,
+            'union_id' => Union::factory()->create(['organization_id' => $admin->organization_id])->id,
+            'event_id' => Event::factory()->create(['organization_id' => $admin->organization_id])->id,
             'first_name' => 'Maria',
             'last_name' => 'Santos',
         ])->assertCreated();
 
         $this->assertDatabaseHas('audit_logs', [
             'organization_id' => $org->id,
-            'user_id' => $checker->id,
+            'user_id' => $admin->id,
             'action' => 'attendee.created',
             'auditable_type' => 'App\Models\Attendee',
         ]);

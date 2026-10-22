@@ -74,6 +74,14 @@ class AttendeePolicy
     }
 
     /**
+     * Admin wizard actions on an existing Attendee (finish, resend invite): admins only, never checkers.
+     */
+    public function registerOnBehalf(User $user, Attendee $attendee): Response|bool
+    {
+        return $this->delete($user, $attendee);
+    }
+
+    /**
      * Merging as primary or as duplicate source, denied when the attendee's event is archived.
      */
     public function merge(User $user, Attendee $attendee): Response|bool

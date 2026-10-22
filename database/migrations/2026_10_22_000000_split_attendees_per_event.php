@@ -12,9 +12,10 @@ use Illuminate\Support\Facades\Schema;
  * other registration gets a copied row. Registration fields move onto the
  * row, and attendance records are remapped through legacy_registration_id.
  *
- * up() can be re-run after a partial failure: each step skips work that is
- * already done. event_registrations is kept; it is dropped at the end of the
- * Release 1 migration chain.
+ * up() and down() can be re-run after a partial failure. MySQL commits each
+ * DDL statement on its own, so every statement checks its own state first.
+ * event_registrations is kept; it is dropped at the end of the Release 1
+ * migration chain.
  */
 return new class extends Migration
 {
@@ -57,36 +58,56 @@ return new class extends Migration
 
     private function addRegistrationColumnsToAttendees(): void
     {
-        if (Schema::hasColumn('attendees', 'legacy_registration_id')) {
-            return;
+        $this->addColumn('attendees', 'event_id', fn (Blueprint $table) => $table->unsignedBigInteger('event_id')->nullable()->after('organization_id'));
+
+        if (! $this->hasForeignKey('attendees', 'event_id')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->foreign('event_id')->references('id')->on('events')->cascadeOnDelete());
         }
 
-        Schema::table('attendees', function (Blueprint $table) {
-            $table->foreignId('event_id')->nullable()->after('organization_id')->constrained()->cascadeOnDelete();
-            $table->string('qr_token', 512)->nullable()->unique()->after('event_id');
-            $table->string('id_card_path')->nullable()->after('qr_token');
-            $table->json('id_card_images_path')->nullable()->after('id_card_path');
-            $table->timestamp('id_card_generated_at')->nullable()->after('id_card_images_path');
-            $table->foreignId('registered_by')->nullable()->after('id_card_generated_at')->constrained('users')->nullOnDelete();
-            $table->timestamp('registered_at')->nullable()->after('registered_by');
-            $table->unsignedBigInteger('legacy_registration_id')->nullable()->unique()->after('registered_at');
-        });
+        $this->addColumn('attendees', 'qr_token', fn (Blueprint $table) => $table->string('qr_token', 512)->nullable()->after('event_id'));
+        $this->addColumn('attendees', 'id_card_path', fn (Blueprint $table) => $table->string('id_card_path')->nullable()->after('qr_token'));
+        $this->addColumn('attendees', 'id_card_images_path', fn (Blueprint $table) => $table->json('id_card_images_path')->nullable()->after('id_card_path'));
+        $this->addColumn('attendees', 'id_card_generated_at', fn (Blueprint $table) => $table->timestamp('id_card_generated_at')->nullable()->after('id_card_images_path'));
+        $this->addColumn('attendees', 'registered_by', fn (Blueprint $table) => $table->unsignedBigInteger('registered_by')->nullable()->after('id_card_generated_at'));
+
+        if (! $this->hasForeignKey('attendees', 'registered_by')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->foreign('registered_by')->references('id')->on('users')->nullOnDelete());
+        }
+
+        $this->addColumn('attendees', 'registered_at', fn (Blueprint $table) => $table->timestamp('registered_at')->nullable()->after('registered_by'));
+        $this->addColumn('attendees', 'legacy_registration_id', fn (Blueprint $table) => $table->unsignedBigInteger('legacy_registration_id')->nullable()->after('registered_at'));
+
+        if (! Schema::hasIndex('attendees', 'attendees_qr_token_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->unique('qr_token'));
+        }
+
+        if (! Schema::hasIndex('attendees', 'attendees_legacy_registration_id_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->unique('legacy_registration_id'));
+        }
     }
 
     private function scopeAttendeeUniqueIndexesToEvent(): void
     {
-        if (! Schema::hasIndex('attendees', 'attendees_user_id_unique')) {
-            return;
+        // MySQL needs an index on user_id for its foreign key once the unique index is gone.
+        if (! Schema::hasIndex('attendees', 'attendees_user_id_index')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->index('user_id'));
         }
 
-        Schema::table('attendees', function (Blueprint $table) {
-            // MySQL needs an index on user_id for its foreign key once the unique index is gone.
-            $table->index('user_id');
-            $table->dropUnique(['user_id']);
-            $table->dropUnique(['email_address']);
-            $table->unique(['event_id', 'user_id']);
-            $table->unique(['event_id', 'email_address']);
-        });
+        if (Schema::hasIndex('attendees', 'attendees_user_id_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropUnique(['user_id']));
+        }
+
+        if (Schema::hasIndex('attendees', 'attendees_email_address_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropUnique(['email_address']));
+        }
+
+        if (! Schema::hasIndex('attendees', 'attendees_event_id_user_id_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->unique(['event_id', 'user_id']));
+        }
+
+        if (! Schema::hasIndex('attendees', 'attendees_event_id_email_address_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->unique(['event_id', 'email_address']));
+        }
     }
 
     private function splitAttendeesPerEvent(): void
@@ -112,7 +133,11 @@ return new class extends Migration
                 continue;
             }
 
-            $fields = ['event_id' => $registration->event_id, 'legacy_registration_id' => $registration->id];
+            $fields = [
+                'event_id' => $registration->event_id,
+                'organization_id' => $eventOrganizations[$registration->event_id],
+                'legacy_registration_id' => $registration->id,
+            ];
 
             foreach (self::REGISTRATION_COLUMNS as $column) {
                 $fields[$column] = $registration->{$column};
@@ -127,7 +152,6 @@ return new class extends Migration
                 DB::table('attendees')->insert([
                     ...$this->identityOf($original),
                     ...$fields,
-                    'organization_id' => $eventOrganizations[$registration->event_id],
                     'updated_at' => now(),
                 ]);
             }
@@ -148,42 +172,29 @@ return new class extends Migration
         return $identity;
     }
 
+    /**
+     * Records are remapped only while event_registration_id still exists;
+     * the finishing steps run on their own checks.
+     */
     private function remapAttendanceToAttendees(): void
     {
-        if (! Schema::hasColumn('attendance_records', 'event_registration_id')) {
-            return;
+        $this->addColumn('attendance_records', 'attendee_id', fn (Blueprint $table) => $table->unsignedBigInteger('attendee_id')->nullable()->after('id'));
+
+        if (Schema::hasColumn('attendance_records', 'event_registration_id')) {
+            DB::table('attendance_records')->update([
+                'attendee_id' => DB::raw('(select attendees.id from attendees where attendees.legacy_registration_id = attendance_records.event_registration_id)'),
+            ]);
+
+            $unmapped = DB::table('attendance_records')->whereNull('attendee_id')->count();
+
+            if ($unmapped > 0) {
+                throw new RuntimeException("{$unmapped} attendance records have no per-event Attendee; event_registration_id was kept.");
+            }
+
+            $this->dropColumnWithKeys('attendance_records', 'event_registration_id', 'attendance_records_event_registration_id_event_session_id_unique');
         }
 
-        if (! Schema::hasColumn('attendance_records', 'attendee_id')) {
-            Schema::table('attendance_records', function (Blueprint $table) {
-                $table->unsignedBigInteger('attendee_id')->nullable()->after('id');
-            });
-        }
-
-        DB::table('attendance_records')->update([
-            'attendee_id' => DB::raw('(select attendees.id from attendees where attendees.legacy_registration_id = attendance_records.event_registration_id)'),
-        ]);
-
-        $unmapped = DB::table('attendance_records')->whereNull('attendee_id')->count();
-
-        if ($unmapped > 0) {
-            throw new RuntimeException("{$unmapped} attendance records have no per-event Attendee; event_registration_id was kept.");
-        }
-
-        Schema::table('attendance_records', function (Blueprint $table) {
-            $table->dropForeign(['event_registration_id']);
-            $table->dropUnique(['event_registration_id', 'event_session_id']);
-        });
-
-        Schema::table('attendance_records', function (Blueprint $table) {
-            $table->dropColumn('event_registration_id');
-        });
-
-        Schema::table('attendance_records', function (Blueprint $table) {
-            $table->unsignedBigInteger('attendee_id')->nullable(false)->change();
-            $table->unique(['attendee_id', 'event_session_id']);
-            $table->foreign('attendee_id')->references('id')->on('attendees')->cascadeOnDelete();
-        });
+        $this->finishKeyColumn('attendance_records', 'attendee_id', 'attendees', 'attendance_records_attendee_id_event_session_id_unique');
     }
 
     /**
@@ -192,7 +203,7 @@ return new class extends Migration
      */
     private function ensureRollbackKeepsData(): void
     {
-        if (! Schema::hasColumn('attendees', 'legacy_registration_id')) {
+        if (! Schema::hasColumn('attendees', 'legacy_registration_id') || ! Schema::hasColumn('attendees', 'event_id')) {
             return;
         }
 
@@ -208,38 +219,23 @@ return new class extends Migration
 
     private function remapAttendanceToRegistrations(): void
     {
-        if (! Schema::hasColumn('attendance_records', 'attendee_id')) {
-            return;
+        $this->addColumn('attendance_records', 'event_registration_id', fn (Blueprint $table) => $table->unsignedBigInteger('event_registration_id')->nullable()->after('id'));
+
+        if (Schema::hasColumn('attendance_records', 'attendee_id')) {
+            DB::table('attendance_records')->update([
+                'event_registration_id' => DB::raw('(select attendees.legacy_registration_id from attendees where attendees.id = attendance_records.attendee_id)'),
+            ]);
+
+            $this->dropColumnWithKeys('attendance_records', 'attendee_id', 'attendance_records_attendee_id_event_session_id_unique');
         }
 
-        if (! Schema::hasColumn('attendance_records', 'event_registration_id')) {
-            Schema::table('attendance_records', function (Blueprint $table) {
-                $table->unsignedBigInteger('event_registration_id')->nullable()->after('id');
-            });
-        }
-
-        DB::table('attendance_records')->update([
-            'event_registration_id' => DB::raw('(select attendees.legacy_registration_id from attendees where attendees.id = attendance_records.attendee_id)'),
-        ]);
-
-        Schema::table('attendance_records', function (Blueprint $table) {
-            $table->dropForeign(['attendee_id']);
-            $table->dropUnique(['attendee_id', 'event_session_id']);
-        });
-
-        Schema::table('attendance_records', function (Blueprint $table) {
-            $table->dropColumn('attendee_id');
-        });
-
-        Schema::table('attendance_records', function (Blueprint $table) {
-            $table->unsignedBigInteger('event_registration_id')->nullable(false)->change();
-            $table->unique(['event_registration_id', 'event_session_id']);
-            $table->foreign('event_registration_id')->references('id')->on('event_registrations')->cascadeOnDelete();
-        });
+        $this->finishKeyColumn('attendance_records', 'event_registration_id', 'event_registrations', 'attendance_records_event_registration_id_event_session_id_unique');
     }
 
     /**
      * ID cards may have been regenerated after the split; keep the newest paths.
+     * The original row's organization_id is not restored: Release 1 rolls
+     * back by snapshot restore.
      */
     private function writeRegistrationColumnsBack(): void
     {
@@ -284,51 +280,114 @@ return new class extends Migration
      */
     private function dropAttendeeForeignKeysToEventsAndUsers(): void
     {
-        if (! Schema::hasColumn('attendees', 'event_id')) {
-            return;
+        if ($this->hasForeignKey('attendees', 'event_id')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropForeign(['event_id']));
         }
 
-        $foreignKeys = collect(Schema::getForeignKeys('attendees'))->pluck('columns')->flatten();
-
-        Schema::table('attendees', function (Blueprint $table) use ($foreignKeys) {
-            if ($foreignKeys->contains('event_id')) {
-                $table->dropForeign(['event_id']);
-            }
-
-            if ($foreignKeys->contains('registered_by')) {
-                $table->dropForeign(['registered_by']);
-            }
-        });
+        if ($this->hasForeignKey('attendees', 'registered_by')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropForeign(['registered_by']));
+        }
     }
 
     private function restoreGlobalAttendeeUniqueIndexes(): void
     {
-        if (Schema::hasIndex('attendees', 'attendees_user_id_unique')) {
-            return;
+        if (Schema::hasIndex('attendees', 'attendees_event_id_user_id_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropUnique(['event_id', 'user_id']));
         }
 
-        Schema::table('attendees', function (Blueprint $table) {
-            $table->dropUnique(['event_id', 'user_id']);
-            $table->dropUnique(['event_id', 'email_address']);
-            $table->unique('user_id');
-            $table->unique('email_address');
-            $table->dropIndex(['user_id']);
-        });
+        if (Schema::hasIndex('attendees', 'attendees_event_id_email_address_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropUnique(['event_id', 'email_address']));
+        }
+
+        if (! Schema::hasIndex('attendees', 'attendees_user_id_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->unique('user_id'));
+        }
+
+        if (! Schema::hasIndex('attendees', 'attendees_email_address_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->unique('email_address'));
+        }
+
+        // The unique index now backs the user_id foreign key on MySQL.
+        if (Schema::hasIndex('attendees', 'attendees_user_id_index')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropIndex(['user_id']));
+        }
     }
 
+    /**
+     * legacy_registration_id goes first: once it is gone, the data steps of
+     * a re-run down() skip themselves.
+     */
     private function dropRegistrationColumnsFromAttendees(): void
     {
-        if (! Schema::hasColumn('attendees', 'legacy_registration_id')) {
-            return;
+        if (Schema::hasIndex('attendees', 'attendees_qr_token_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropUnique(['qr_token']));
         }
 
-        Schema::table('attendees', function (Blueprint $table) {
-            $table->dropUnique(['qr_token']);
-            $table->dropUnique(['legacy_registration_id']);
-        });
+        if (Schema::hasIndex('attendees', 'attendees_legacy_registration_id_unique')) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropUnique(['legacy_registration_id']));
+        }
 
-        Schema::table('attendees', function (Blueprint $table) {
-            $table->dropColumn(['event_id', 'legacy_registration_id', ...self::REGISTRATION_COLUMNS]);
-        });
+        $columns = array_values(array_filter(
+            ['legacy_registration_id', 'event_id', ...self::REGISTRATION_COLUMNS],
+            fn (string $column) => Schema::hasColumn('attendees', $column),
+        ));
+
+        if ($columns !== []) {
+            Schema::table('attendees', fn (Blueprint $table) => $table->dropColumn($columns));
+        }
+    }
+
+    private function addColumn(string $table, string $column, Closure $definition): void
+    {
+        if (! Schema::hasColumn($table, $column)) {
+            Schema::table($table, $definition);
+        }
+    }
+
+    /**
+     * Drops a foreign key column together with its foreign key and its
+     * unique(column, event_session_id) index, in that order.
+     */
+    private function dropColumnWithKeys(string $table, string $column, string $unique): void
+    {
+        if ($this->hasForeignKey($table, $column)) {
+            Schema::table($table, fn (Blueprint $blueprint) => $blueprint->dropForeign([$column]));
+        }
+
+        if (Schema::hasIndex($table, $unique)) {
+            Schema::table($table, fn (Blueprint $blueprint) => $blueprint->dropIndex($unique));
+        }
+
+        Schema::table($table, fn (Blueprint $blueprint) => $blueprint->dropColumn($column));
+    }
+
+    /**
+     * Makes a remapped column required and adds its unique(column,
+     * event_session_id) index, then its foreign key, which on MySQL uses
+     * that index.
+     */
+    private function finishKeyColumn(string $table, string $column, string $references, string $unique): void
+    {
+        if ($this->isNullable($table, $column)) {
+            Schema::table($table, fn (Blueprint $blueprint) => $blueprint->unsignedBigInteger($column)->nullable(false)->change());
+        }
+
+        if (! Schema::hasIndex($table, $unique)) {
+            Schema::table($table, fn (Blueprint $blueprint) => $blueprint->unique([$column, 'event_session_id']));
+        }
+
+        if (! $this->hasForeignKey($table, $column)) {
+            Schema::table($table, fn (Blueprint $blueprint) => $blueprint->foreign($column)->references('id')->on($references)->cascadeOnDelete());
+        }
+    }
+
+    private function hasForeignKey(string $table, string $column): bool
+    {
+        return collect(Schema::getForeignKeys($table))->contains(fn (array $foreignKey) => $foreignKey['columns'] === [$column]);
+    }
+
+    private function isNullable(string $table, string $column): bool
+    {
+        return (bool) collect(Schema::getColumns($table))->firstWhere('name', $column)['nullable'];
     }
 };

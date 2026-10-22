@@ -7,6 +7,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\DataProvider;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -39,6 +40,10 @@ class AttendeePerEventMigrationTest extends TestCase
 
     /** @var array<string, int> */
     private array $attendance = [];
+
+    private ?string $crashPattern = null;
+
+    private int $crashCountdown = 0;
 
     protected function setUp(): void
     {
@@ -126,6 +131,30 @@ class AttendeePerEventMigrationTest extends TestCase
             $this->assertNull($copy->invite_token);
             $this->assertNull($copy->invited_at);
         }
+    }
+
+    public function test_original_row_takes_the_organization_of_its_earliest_event(): void
+    {
+        $this->seedPreMigrationData();
+        $otherOrgId = DB::table('organizations')->insertGetId([
+            'name' => 'North Conference',
+            'code' => 'north',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        $this->events['north_rally'] = $this->insertEvent('North Rally', $otherOrgId);
+        $this->attendees['dan'] = $this->insertAttendee('Dan', 'Lim', ['email_address' => 'dan@example.test']);
+        $this->registrations['dan_rally'] = $this->insertRegistration('dan', 'north_rally', 'token-dan-rally', '2026-01-03 09:00:00');
+        $this->registrations['dan_camp'] = $this->insertRegistration('dan', 'camp', 'token-dan-camp', '2026-03-03 09:00:00');
+
+        $this->migration->up();
+
+        $original = DB::table('attendees')->find($this->attendees['dan']);
+        $this->assertSame($this->events['north_rally'], (int) $original->event_id);
+        $this->assertSame($otherOrgId, (int) $original->organization_id);
+
+        $copy = DB::table('attendees')->where('legacy_registration_id', $this->registrations['dan_camp'])->first();
+        $this->assertSame($this->orgId, (int) $copy->organization_id);
     }
 
     public function test_attendee_without_registrations_is_left_without_an_event(): void
@@ -251,6 +280,116 @@ class AttendeePerEventMigrationTest extends TestCase
         $this->assertEquals($expected, DB::table('attendees')->whereNotNull('legacy_registration_id')->orderBy('legacy_registration_id')->pluck('qr_token', 'legacy_registration_id'));
     }
 
+    /**
+     * MySQL commits each DDL statement on its own. Each crash point names
+     * the first statement of a step whose re-run used to skip or fail, as
+     * [SQLite statement, occurrence] and [MySQL statement, occurrence].
+     * SQLite runs a column change or foreign key change as a table rebuild
+     * that starts with create table "__temp__…".
+     *
+     * @return array<string, array{array{string, int}, array{string, int}}>
+     */
+    public static function upCrashPoints(): array
+    {
+        return [
+            'qr_token column' => [['/add column "qr_token"/', 1], ['/add `qr_token`/', 1]],
+            'qr_token unique' => [['/create unique index "attendees_qr_token_unique"/', 1], ['/add unique `attendees_qr_token_unique`/', 1]],
+            'global user unique dropped' => [['/drop index "attendees_user_id_unique"/', 1], ['/drop index `attendees_user_id_unique`/', 1]],
+            'global email unique dropped' => [['/drop index "attendees_email_address_unique"/', 1], ['/drop index `attendees_email_address_unique`/', 1]],
+            'per-event user unique' => [['/create unique index "attendees_event_id_user_id_unique"/', 1], ['/add unique `attendees_event_id_user_id_unique`/', 1]],
+            'old attendance unique dropped' => [['/drop index "attendance_records_event_registration_id_event_session_id_unique"/', 1], ['/drop index `attendance_records_event_registration_id_event_session_id_unique`/', 1]],
+            'event_registration_id dropped' => [['/drop column "event_registration_id"/', 1], ['/drop `event_registration_id`/', 1]],
+            'attendee_id made required' => [['/create table "__temp__attendance_records"/', 2], ['/modify `attendee_id`/', 1]],
+            'attendee_id foreign key' => [['/create table "__temp__attendance_records"/', 3], ['/add constraint `attendance_records_attendee_id_foreign`/', 1]],
+        ];
+    }
+
+    #[DataProvider('upCrashPoints')]
+    public function test_up_resumes_after_a_crash_between_schema_statements(array $sqlite, array $mysql): void
+    {
+        $this->seedPreMigrationData();
+        $registrationCount = DB::table('event_registrations')->count();
+        $attendanceCount = DB::table('attendance_records')->count();
+
+        $this->crashBefore(DB::getDriverName() === 'mysql' ? $mysql : $sqlite);
+        $this->assertThrows(fn () => $this->migration->up(), RuntimeException::class, 'Simulated crash');
+        $this->crashPattern = null;
+
+        $this->migration->up();
+
+        $attendeeId = $this->column('attendance_records', 'attendee_id');
+        $this->assertNotNull($attendeeId);
+        $this->assertFalse($attendeeId['nullable']);
+        $this->assertFalse(Schema::hasColumn('attendance_records', 'event_registration_id'));
+        $this->assertTrue(Schema::hasIndex('attendance_records', 'attendance_records_attendee_id_event_session_id_unique', 'unique'));
+        $this->assertSame('attendees', $this->foreignKey('attendance_records', 'attendee_id')['foreign_table'] ?? null);
+
+        foreach (['attendees_qr_token_unique', 'attendees_legacy_registration_id_unique', 'attendees_event_id_user_id_unique', 'attendees_event_id_email_address_unique'] as $index) {
+            $this->assertTrue(Schema::hasIndex('attendees', $index, 'unique'), "{$index} is missing");
+        }
+
+        $this->assertFalse(Schema::hasIndex('attendees', 'attendees_user_id_unique'));
+        $this->assertFalse(Schema::hasIndex('attendees', 'attendees_email_address_unique'));
+        $this->assertNotNull($this->foreignKey('attendees', 'event_id'));
+        $this->assertNotNull($this->foreignKey('attendees', 'registered_by'));
+
+        $this->assertSame($registrationCount, DB::table('attendees')->whereNotNull('legacy_registration_id')->count());
+        $this->assertSame($attendanceCount, DB::table('attendance_records')->count());
+        $this->assertSame(0, DB::table('attendance_records')
+            ->join('attendees', 'attendees.id', '=', 'attendance_records.attendee_id')
+            ->join('event_sessions', 'event_sessions.id', '=', 'attendance_records.event_session_id')
+            ->whereColumn('attendees.event_id', '!=', 'event_sessions.event_id')
+            ->count());
+    }
+
+    /**
+     * @return array<string, array{array{string, int}, array{string, int}}>
+     */
+    public static function downCrashPoints(): array
+    {
+        return [
+            'attendee_id foreign key dropped' => [['/create table "__temp__attendance_records"/', 1], ['/drop foreign key `attendance_records_attendee_id_foreign`/', 1]],
+            'new attendance unique dropped' => [['/drop index "attendance_records_attendee_id_event_session_id_unique"/', 1], ['/drop index `attendance_records_attendee_id_event_session_id_unique`/', 1]],
+            'event_registration_id made required' => [['/create table "__temp__attendance_records"/', 2], ['/modify `event_registration_id`/', 1]],
+            'copied attendees deleted' => [['/^delete from "attendees"/', 1], ['/^delete from `attendees`/', 1]],
+            'per-event email unique dropped' => [['/drop index "attendees_event_id_email_address_unique"/', 1], ['/drop index `attendees_event_id_email_address_unique`/', 1]],
+            'user_id index dropped' => [['/drop index "attendees_user_id_index"/', 1], ['/drop index `attendees_user_id_index`/', 1]],
+            'legacy unique dropped' => [['/drop index "attendees_legacy_registration_id_unique"/', 1], ['/drop index `attendees_legacy_registration_id_unique`/', 1]],
+            'registration columns dropped' => [['/drop column "event_id"/', 1], ['/drop `legacy_registration_id`/', 1]],
+        ];
+    }
+
+    #[DataProvider('downCrashPoints')]
+    public function test_down_resumes_after_a_crash_between_schema_statements(array $sqlite, array $mysql): void
+    {
+        $this->seedPreMigrationData();
+        $attendees = DB::table('attendees')->orderBy('id')->get();
+        $registrations = DB::table('event_registrations')->orderBy('id')->get();
+        $attendance = DB::table('attendance_records')->orderBy('id')->get(['id', 'event_registration_id', 'event_session_id']);
+        $this->migration->up();
+
+        $this->crashBefore(DB::getDriverName() === 'mysql' ? $mysql : $sqlite);
+        $this->assertThrows(fn () => $this->migration->down(), RuntimeException::class, 'Simulated crash');
+        $this->crashPattern = null;
+
+        $this->migration->down();
+
+        $registrationId = $this->column('attendance_records', 'event_registration_id');
+        $this->assertNotNull($registrationId);
+        $this->assertFalse($registrationId['nullable']);
+        $this->assertFalse(Schema::hasColumn('attendance_records', 'attendee_id'));
+        $this->assertTrue(Schema::hasIndex('attendance_records', 'attendance_records_event_registration_id_event_session_id_unique', 'unique'));
+        $this->assertSame('event_registrations', $this->foreignKey('attendance_records', 'event_registration_id')['foreign_table'] ?? null);
+
+        $this->assertTrue(Schema::hasIndex('attendees', 'attendees_user_id_unique', 'unique'));
+        $this->assertTrue(Schema::hasIndex('attendees', 'attendees_email_address_unique', 'unique'));
+        $this->assertFalse(Schema::hasIndex('attendees', 'attendees_user_id_index'));
+
+        $this->assertEquals($attendees, DB::table('attendees')->orderBy('id')->get());
+        $this->assertEquals($registrations, DB::table('event_registrations')->orderBy('id')->get());
+        $this->assertEquals($attendance, DB::table('attendance_records')->orderBy('id')->get(['id', 'event_registration_id', 'event_session_id']));
+    }
+
     public function test_down_restores_registrations_and_attendance(): void
     {
         $this->seedPreMigrationData();
@@ -356,10 +495,45 @@ class AttendeePerEventMigrationTest extends TestCase
         ]);
     }
 
-    private function insertEvent(string $name): int
+    /**
+     * Makes the next run throw before the given occurrence of a matching
+     * SQL statement, as a lost connection would.
+     *
+     * @param  array{string, int}  $crashPoint
+     */
+    private function crashBefore(array $crashPoint): void
+    {
+        [$this->crashPattern, $this->crashCountdown] = $crashPoint;
+
+        DB::connection()->beforeExecuting(function (string $sql) {
+            if ($this->crashPattern !== null && preg_match($this->crashPattern, $sql) && --$this->crashCountdown === 0) {
+                $this->crashPattern = null;
+
+                throw new RuntimeException("Simulated crash before: {$sql}");
+            }
+        });
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function column(string $table, string $column): ?array
+    {
+        return collect(Schema::getColumns($table))->firstWhere('name', $column);
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function foreignKey(string $table, string $column): ?array
+    {
+        return collect(Schema::getForeignKeys($table))->first(fn (array $foreignKey) => $foreignKey['columns'] === [$column]);
+    }
+
+    private function insertEvent(string $name, ?int $organizationId = null): int
     {
         return DB::table('events')->insertGetId([
-            'organization_id' => $this->orgId,
+            'organization_id' => $organizationId ?? $this->orgId,
             'name' => $name,
             'start_date' => '2026-01-10',
             'end_date' => '2026-01-11',

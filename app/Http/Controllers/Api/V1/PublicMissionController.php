@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\Event;
 use App\Models\Mission;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -14,7 +15,10 @@ class PublicMissionController extends Controller
      */
     public function index(Request $request)
     {
+        $organizationId = Event::organizationIdForInvite($request->query('event'));
+
         $missions = Mission::query()
+            ->when($organizationId, fn ($query) => $query->where('organization_id', $organizationId))
             ->when($request->filled('union_id'), fn ($query) => $query->where('union_id', $request->integer('union_id')))
             ->get(['id', 'name', 'code']);
 

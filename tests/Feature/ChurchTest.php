@@ -178,6 +178,7 @@ class ChurchTest extends TestCase
             'union_id' => $union->id,
             'mission_id' => $mission->id,
             'name' => 'New Church',
+            'address' => '1 New St',
         ]);
 
         $churchId = $createResponse->json('data.id');

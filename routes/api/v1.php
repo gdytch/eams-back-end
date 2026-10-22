@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\V1\AttendeeQrClaimController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ChurchController;
+use App\Http\Controllers\Api\V1\PublicChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
 use App\Http\Controllers\Api\V1\EventController;
@@ -65,6 +66,7 @@ Route::get('public/programs/{publicSlug}', [PublicEventProgramController::class,
 Route::post('public/event/{eventInviteToken}/register', [PublicEventController::class, 'register'])->middleware('auth:sanctum');
 Route::get('public/unions', [PublicUnionController::class, 'index']);
 Route::get('public/missions', [PublicMissionController::class, 'index']);
+Route::get('public/churches', [PublicChurchController::class, 'index']);
 
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('search', GlobalSearchController::class)->middleware('throttle:60,1');
@@ -103,6 +105,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::apiResource('unions', UnionController::class);
     Route::apiResource('missions', MissionController::class);
+    Route::post('churches/{church}/verify', [ChurchController::class, 'verify']);
+    Route::post('churches/{church}/merge', [ChurchController::class, 'merge']);
     Route::apiResource('churches', ChurchController::class);
 
     Route::get('attendees/check-duplicates', [AttendeeController::class, 'checkDuplicates']);

@@ -10,11 +10,16 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['organization_id', 'union_id', 'mission_id', 'name', 'address'])]
+#[Fillable(['organization_id', 'union_id', 'mission_id', 'name', 'address', 'verified_at', 'verified_by'])]
 class Church extends Model
 {
     /** @use HasFactory<ChurchFactory> */
     use BelongsToOrganization, HasFactory;
+
+    protected function casts(): array
+    {
+        return ['verified_at' => 'datetime'];
+    }
 
     public function union(): BelongsTo
     {

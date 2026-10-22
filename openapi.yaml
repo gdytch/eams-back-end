@@ -994,27 +994,49 @@ paths:
       summary: List churches
       parameters:
         - $ref: "#/components/parameters/Page"
+        - { name: mission_id, in: query, schema: { type: integer } }
+        - name: unverified
+          in: query
+          description: Only unverified churches. Honoured for org_admin and super_admin only.
+          schema: { type: boolean }
       responses:
         "200": { $ref: "#/components/responses/ChurchList" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
     post:
       tags: [Territories]
       summary: Create a church
+      description: |
+        The mission must belong to the union. A church is identified by normalized name plus normalized address
+        (case-insensitive, trimmed, whitespace collapsed) within its mission. Churches created by org_admin or
+        super_admin are verified on creation; others start unverified.
+        Same name and address: 422 with `existing_church`. Same name, other address: 422 with `existing_churches`
+        unless `confirm_same_name` is true. A similar name creates the church and returns `similar_churches`.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [union_id, mission_id, name]
+              required: [union_id, mission_id, name, address]
               properties:
                 organization_id: { type: integer }
                 union_id: { type: integer }
                 mission_id: { type: integer }
                 name: { type: string, maxLength: 255 }
-                address: { type: string, maxLength: 255, nullable: true }
+                address: { type: string, maxLength: 255 }
+                confirm_same_name: { type: boolean }
       responses:
-        "201": { $ref: "#/components/responses/ChurchItem" }
+        "201":
+          description: Created. `similar_churches` lists churches with a similar name in the mission ("Did you mean...?").
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Church" }
+                  similar_churches:
+                    type: array
+                    items: { $ref: "#/components/schemas/Church" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -1032,7 +1054,7 @@ paths:
     put:
       tags: [Territories]
       summary: Update a church
-      description: Also accepts `PATCH`.
+      description: Also accepts `PATCH`. `address`, when sent, is required. Same duplicate rules as create.
       requestBody:
         required: true
         content:
@@ -1044,7 +1066,8 @@ paths:
                 union_id: { type: integer }
                 mission_id: { type: integer }
                 name: { type: string, maxLength: 255 }
-                address: { type: string, maxLength: 255, nullable: true }
+                address: { type: string, maxLength: 255 }
+                confirm_same_name: { type: boolean }
       responses:
         "200": { $ref: "#/components/responses/ChurchItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
@@ -1059,6 +1082,45 @@ paths:
         "401": { $ref: "#/components/responses/Unauthenticated" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /churches/{church}/verify:
+    parameters:
+      - $ref: "#/components/parameters/ChurchId"
+    post:
+      tags: [Territories]
+      summary: Verify a church
+      description: org_admin of the organization or super_admin. 422 when the church has no address.
+      responses:
+        "200": { $ref: "#/components/responses/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /churches/{church}/merge:
+    parameters:
+      - $ref: "#/components/parameters/ChurchId"
+    post:
+      tags: [Territories]
+      summary: Merge a church into another church of the same mission
+      description: |
+        org_admin of the organization or super_admin. Repoints `church_id` on Attendees of non-archived events,
+        nulls it on Attendees of archived events, deletes the source church and writes an audit log entry.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_church_id]
+              properties:
+                target_church_id: { type: integer }
+      responses:
+        "200": { $ref: "#/components/responses/ChurchItem" }
+        "401": { $ref: "#/components/responses/Unauthenticated" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   # ---------------------------------------------------------------- Attendees
   /attendees:
@@ -3236,6 +3298,8 @@ paths:
       tags: [Public]
       summary: List unions for public forms
       security: []
+      parameters:
+        - &publicEventParam { name: event, in: query, description: "Event invite token. Limits the list to the event's organization; 404 when unknown.", schema: { type: string } }
       responses:
         "200":
           description: Unions with id, name, code and organization_id
@@ -3261,6 +3325,7 @@ paths:
       security: []
       parameters:
         - { name: union_id, in: query, schema: { type: integer } }
+        - *publicEventParam
       responses:
         "200":
           description: Missions with id, name and code
@@ -3277,6 +3342,35 @@ paths:
                         id: { type: integer }
                         name: { type: string }
                         code: { type: string, nullable: true }
+
+  /public/churches:
+    get:
+      tags: [Public]
+      summary: List churches of a mission for public forms
+      description: Verified and unverified churches alike. Never exposes the verification flag.
+      security: []
+      parameters:
+        - { name: mission_id, in: query, required: true, schema: { type: integer } }
+        - { name: event, in: query, required: true, description: "Event invite token. Limits the list to the event's organization; 404 when unknown.", schema: { type: string } }
+      responses:
+        "200":
+          description: Churches with id, name, address and mission_id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        address: { type: string, nullable: true }
+                        mission_id: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /public/programs/{publicSlug}:
     get:
@@ -4139,6 +4233,8 @@ components:
         mission_id: { type: integer }
         name: { type: string }
         address: { type: string, nullable: true }
+        verified_at: { type: string, format: date-time, nullable: true, description: "Admin resources only (org_admin, super_admin)." }
+        verified_by: { type: integer, nullable: true, description: "Admin resources only." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

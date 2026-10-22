@@ -35,6 +35,7 @@ class EventDashboardReport
                 'draft' => $event->attendees()->withRegistrationStatus('draft')->count(),
                 'once_registered' => $event->attendees()->withRegistrationStatus('incomplete')->count(),
             ],
+            'overbooked_breakouts' => $event->breakouts()->overbooked()->count(),
             'attendance' => $this->attendanceSummary($event, $registrations, $sessions),
             'sessions' => $this->sessionSummary($sessions, $registrations->count()),
             'top_check_ins_by_organization' => $this->topCheckInsByOrganization($organizationRows, $attendanceRateTrend),

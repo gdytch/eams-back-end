@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Str;
 
-#[Fillable(['event_id', 'title', 'description', 'is_public', 'public_slug'])]
+#[Fillable(['event_id', 'breakout_id', 'title', 'description', 'is_public', 'public_slug'])]
 class EventProgram extends Model
 {
     /** @use HasFactory<EventProgramFactory> */

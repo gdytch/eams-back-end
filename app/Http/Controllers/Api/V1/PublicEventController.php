@@ -23,6 +23,14 @@ class PublicEventController extends Controller
             404
         );
 
+        // Breakouts follow the event program's public setting.
+        if ($event->program?->is_public) {
+            $event->load(['breakouts' => fn ($query) => $query->withoutGlobalScopes()->orderBy('date')->orderBy('start_time')]);
+            if ($event->speakers_public) {
+                $event->breakouts->load('speakers');
+            }
+        }
+
         return PublicEventResource::make($event);
     }
 

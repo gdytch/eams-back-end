@@ -14,6 +14,7 @@ class PublicEventProgramController extends Controller
         $program = EventProgram::query()
             ->where('public_slug', $publicSlug)
             ->where('is_public', true)
+            ->whereNull('breakout_id')
             ->with(['event.organization', 'days.sections.items.speaker.programItems'])
             ->first();
         if (! $program) {

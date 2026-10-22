@@ -114,6 +114,7 @@ class AttendeeDashboardResource extends JsonResource
 
             if (! $includeAttendance) {
                 $formatted['banner'] = $eventData['banner'];
+                $formatted['breakouts'] = $eventData['breakouts'];
             }
 
             if ($includeAttendance) {

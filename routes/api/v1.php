@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\V1\AttendeeDashboardController;
 use App\Http\Controllers\Api\V1\AttendeeQrClaimController;
 use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BreakoutController;
+use App\Http\Controllers\Api\V1\BreakoutProgramController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
@@ -142,15 +144,23 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::apiResource('events.sessions', EventSessionController::class);
 
+        Route::apiResource('events.breakouts', BreakoutController::class)->scoped();
+        Route::post('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'store'])->scopeBindings();
+        Route::get('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'show'])->scopeBindings();
+        Route::delete('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'destroy'])->scopeBindings();
+
         Route::put('events/{event}/program', [EventProgramBuilderController::class, 'metadata']);
-        Route::prefix('events/{event}/program/builder/{kind}')->whereIn('kind', ['days', 'sections', 'parts'])->group(function () {
-            $controller = EventProgramBuilderController::class;
-            Route::post('/', [$controller, 'store']);
-            Route::put('order', [$controller, 'reorder']);
-            Route::put('{node}', [$controller, 'update'])->whereNumber('node');
-            Route::delete('{node}', [$controller, 'destroy'])->whereNumber('node');
-            Route::post('{node}/duplicate', [$controller, 'duplicate'])->whereNumber('node');
-        });
+        // The breakout program has one fixed day, so it only exposes sections and parts.
+        foreach (['events/{event}/program/builder/{kind}' => ['days', 'sections', 'parts'], 'events/{event}/breakouts/{breakout}/program/builder/{kind}' => ['sections', 'parts']] as $prefix => $kinds) {
+            Route::prefix($prefix)->whereIn('kind', $kinds)->scopeBindings()->group(function () {
+                $controller = EventProgramBuilderController::class;
+                Route::post('/', [$controller, 'store']);
+                Route::put('order', [$controller, 'reorder']);
+                Route::put('{node}', [$controller, 'update'])->whereNumber('node');
+                Route::delete('{node}', [$controller, 'destroy'])->whereNumber('node');
+                Route::post('{node}/duplicate', [$controller, 'duplicate'])->whereNumber('node');
+            });
+        }
 
         Route::post('events/{event}/program', [EventProgramController::class, 'store']);
         Route::get('events/{event}/program', [EventProgramController::class, 'show']);

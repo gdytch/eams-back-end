@@ -33,7 +33,7 @@ class AttendeeDashboardController extends Controller
         $registrations = $user->attendees()
             ->withoutGlobalScopes()
             ->whereHas('event')
-            ->with(['event.sessions', 'attendanceRecords'])
+            ->with(['event.sessions', 'event.program', 'attendanceRecords'])
             ->get();
 
         return AttendeeDashboardResource::make($dashboardData->attendeeDashboard($user, $attendee, $registrations))->response();

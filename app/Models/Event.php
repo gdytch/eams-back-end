@@ -99,9 +99,14 @@ class Event extends Model
         return $this->hasMany(EventSession::class);
     }
 
+    public function breakouts(): HasMany
+    {
+        return $this->hasMany(Breakout::class);
+    }
+
     public function program(): HasOne
     {
-        return $this->hasOne(EventProgram::class);
+        return $this->hasOne(EventProgram::class)->whereNull('breakout_id');
     }
 
     /** @return HasMany<Attendee, $this> */

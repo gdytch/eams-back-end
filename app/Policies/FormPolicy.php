@@ -25,6 +25,12 @@ class FormPolicy
         return $this->manages($user, $form->event);
     }
 
+    /** Reading answers stays allowed on archived events, until the files are deleted. */
+    public function export(User $user, Event $event): bool
+    {
+        return $this->manages($user, $event);
+    }
+
     public function create(User $user, Event $event): Response|bool
     {
         return $this->allowWrite($this->manages($user, $event), $event);

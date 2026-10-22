@@ -164,6 +164,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::put('events/{event}/forms/order', [FormController::class, 'order']);
         Route::post('events/{event}/forms/copy', [FormController::class, 'copy']);
+        Route::get('events/{event}/forms/export', [FormController::class, 'export'])->middleware('throttle:6,1');
         Route::apiResource('events.forms', FormController::class)->scoped();
         Route::post('events/{event}/forms/{form}/publish', [FormController::class, 'publish'])->scopeBindings();
         Route::post('events/{event}/forms/{form}/unpublish', [FormController::class, 'unpublish'])->scopeBindings();

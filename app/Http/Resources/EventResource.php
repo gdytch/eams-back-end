@@ -25,6 +25,7 @@ class EventResource extends JsonResource
             'venue' => $this->venue,
             'status' => $this->status,
             'archived_at' => $this->resource->archived_at,
+            'files_deletion_at' => $this->resource->filesDeletionAt(),
             'requires_check_out' => $this->requires_check_out,
             'check_in_window_minutes' => $this->check_in_window_minutes,
             'id_card_background_url' => $this->id_card_background_path

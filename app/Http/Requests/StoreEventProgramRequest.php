@@ -3,13 +3,15 @@
 namespace App\Http\Requests;
 
 use App\Models\EventProgram;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 
 class StoreEventProgramRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): Response|bool
     {
-        return $this->user()->can('create', [EventProgram::class, $this->route('event')]);
+        return Gate::forUser($this->user())->inspect('create', [EventProgram::class, $this->route('event')]);
     }
 
     /**

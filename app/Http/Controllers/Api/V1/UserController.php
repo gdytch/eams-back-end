@@ -12,6 +12,7 @@ use App\Http\Resources\EventResource;
 use App\Http\Resources\UserResource;
 use App\Mail\UserAccountInviteMail;
 use App\Models\AuditLog;
+use App\Models\Event;
 use App\Models\User;
 use App\Services\ImageUploadService;
 use Illuminate\Http\Request;
@@ -168,10 +169,21 @@ class UserController extends Controller
 
     /**
      * Replace the set of events a Checker is restricted to (empty = full org access).
+     * Newly granted events must not be archived; existing archived assignments are kept,
+     * except when the list is empty, since full org access already covers archived events.
      */
     public function syncEventAccess(SyncUserEventAccessRequest $request, User $user)
     {
-        $user->accessibleEvents()->sync($request->validated('event_ids'));
+        $eventIds = collect($request->validated('event_ids'))->map(fn ($id) => (int) $id);
+        $assigned = $user->accessibleEvents()->get(['events.id', 'events.archived_at']);
+
+        Event::query()
+            ->whereIn('id', $eventIds->diff($assigned->modelKeys()))
+            ->get()
+            ->each(fn (Event $event) => $this->authorize('grantAccess', $event));
+
+        $keptArchivedIds = $eventIds->isEmpty() ? [] : $assigned->whereNotNull('archived_at')->modelKeys();
+        $user->accessibleEvents()->sync($eventIds->merge($keptArchivedIds)->unique()->values()->all());
 
         return EventResource::collection($user->accessibleEvents()->get());
     }

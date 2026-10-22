@@ -110,6 +110,17 @@ class Attendee extends Model
         return $this->hasMany(EventRegistration::class);
     }
 
+    /**
+     * Registrations whose event is archived, regardless of the event organization scope.
+     */
+    public function registrationsInArchivedEvents(): HasMany
+    {
+        return $this->registrations()->whereHas(
+            'event',
+            fn (Builder $query) => $query->withoutGlobalScopes()->whereNotNull('archived_at'),
+        );
+    }
+
     public function mergedInto(): BelongsTo
     {
         return $this->belongsTo(self::class, 'merged_into_id');

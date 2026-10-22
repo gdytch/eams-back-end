@@ -6,12 +6,14 @@ use App\Enums\OrganizationLevel;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\EventRegistration;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
 class StoreAttendeeRequest extends FormRequest
 {
-    public function authorize(): bool
+    public function authorize(): Response|bool
     {
         if (! $this->user()->can('create', Attendee::class)) {
             return false;
@@ -20,7 +22,7 @@ class StoreAttendeeRequest extends FormRequest
         if ($this->boolean('auto_register') && ($eventId = $this->input('event_id'))) {
             $event = Event::find($eventId);
 
-            return $event !== null && $this->user()->can('create', [EventRegistration::class, $event]);
+            return $event === null ? false : Gate::forUser($this->user())->inspect('create', [EventRegistration::class, $event]);
         }
 
         return true;

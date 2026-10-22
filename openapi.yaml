@@ -775,7 +775,9 @@ paths:
         Syncs the `event_checker_access` pivot for this user. An empty `event_ids` array means
         the Checker defaults back to full access to every event in their organization (this is
         also the default for a brand-new Checker with no rows at all). Super Admins and Org
-        Admins always have full access regardless of this list.
+        Admins always have full access regardless of this list. Newly granting an archived
+        event returns 403 `This event is archived.`; archived events already assigned are
+        kept even when left out of `event_ids`.
       requestBody:
         required: true
         content:
@@ -799,7 +801,7 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/Event" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1116,7 +1118,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "409": { $ref: "#/components/responses/DuplicateAttendees" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1232,7 +1234,7 @@ paths:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "409": { $ref: "#/components/responses/DuplicateAttendees" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1247,7 +1249,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /attendees/{attendee}/photo:
@@ -1283,7 +1285,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1293,7 +1295,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
 
@@ -1392,7 +1394,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1459,7 +1461,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1469,7 +1471,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   # ---------------------------------------------------------------- Event Sessions
@@ -1520,7 +1522,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/EventSessionItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1554,7 +1556,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventSessionItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1563,7 +1565,7 @@ paths:
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/sessions/{session}/attendance:
@@ -1652,7 +1654,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/EventProgramItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: Program already exists for this event
@@ -1688,7 +1690,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventProgramItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1698,7 +1700,7 @@ paths:
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/program/items:
@@ -1746,7 +1748,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/EventProgramItemDetail" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1786,7 +1788,7 @@ paths:
                     type: array
                     items: { $ref: "#/components/schemas/EventProgramItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1830,7 +1832,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventProgramItemDetail" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1840,7 +1842,7 @@ paths:
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/program/items/{itemId}/photos:
@@ -1869,7 +1871,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventProgramItemDetail" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -1890,7 +1892,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventProgramItemDetail" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -1945,7 +1947,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/EventRegistrationItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/DuplicateAttendees" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
@@ -2190,7 +2192,7 @@ paths:
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/registrations/{registration}/id-card:
@@ -2242,7 +2244,7 @@ paths:
                       example: "Identification card generation has been queued.",
                     }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/id-card-background:
@@ -2267,7 +2269,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -2277,7 +2279,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   # ---------------------------------------------------------------- Attendance
@@ -2306,7 +2308,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/AttendanceRecordItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "422": { $ref: "#/components/responses/AttendanceValidationFailed" }
 
   /attendance/manual:
@@ -2331,7 +2333,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/AttendanceRecordItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "422": { $ref: "#/components/responses/AttendanceValidationFailed" }
 
   /attendance/{attendanceRecord}/check-out:
@@ -2344,7 +2346,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/AttendanceRecordItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422":
           description: Event does not require check-out
@@ -2603,9 +2605,11 @@ paths:
       description: >
         Submit multiple scans (QR or manual) in a single request. Each scan is processed
         independently; partial failures do not affect other scans in the batch. Returns a
-        per-item result array with status (created/duplicate/error) and message.
+        per-item result array with status (created/duplicate/error/event_archived) and message.
         `scanned_at` (optional, ISO 8601 format) allows offline clients to preserve the
         original scan time; if omitted, defaults to the current server time.
+        A scan for an archived event gets status `event_archived` with message
+        `This event is archived.`, even when `scanned_at` is before the archive time.
       requestBody:
         required: true
         content:
@@ -2785,7 +2789,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/AttendeeItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "409":
           description: Merge not possible
           content:
@@ -2825,7 +2829,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/SpeakerItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -2852,7 +2856,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/SpeakerItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -2861,7 +2865,7 @@ paths:
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/speakers/{speaker}/photo:
@@ -2883,7 +2887,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/SpeakerItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -2905,7 +2909,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/EventItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -2928,7 +2932,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/ProgramNode" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -2956,7 +2960,7 @@ paths:
       responses:
         "204": { description: Reordered }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
@@ -2976,7 +2980,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/ProgramNode" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
@@ -2985,7 +2989,7 @@ paths:
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /events/{event}/program/builder/{kind}/{node}/duplicate:
@@ -2999,7 +3003,7 @@ paths:
       responses:
         "201": { $ref: "#/components/responses/ProgramNode" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403": { $ref: "#/components/responses/Forbidden" }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   # ---------------------------------------------------------------- Event registration ID card image
@@ -3312,12 +3316,7 @@ paths:
         "200": { $ref: "#/components/responses/EventRegistrationItem" }
         "201": { $ref: "#/components/responses/EventRegistrationItem" }
         "401": { $ref: "#/components/responses/Unauthenticated" }
-        "403":
-          description: The event is archived
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-              example: { message: "This event is archived." }
+        "403": { $ref: "#/components/responses/ForbiddenOrArchived" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /public/attendee-claims/status:
@@ -4507,7 +4506,7 @@ components:
       type: object
       properties:
         client_ref: { type: string }
-        status: { type: string, enum: [created, duplicate, error] }
+        status: { type: string, enum: [created, duplicate, error, event_archived] }
         message: { type: string }
         attendance_record_id: { type: integer, nullable: true }
     Error:
@@ -4529,6 +4528,20 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
           example: { message: "This action is unauthorized." }
+
+    ForbiddenOrArchived:
+      description: >
+        Not allowed to perform this action, or the event is archived. Archived events are
+        read-only for every role, including Super Admin; the archived denial always has the
+        message `This event is archived.`
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            unauthorized:
+              value: { message: "This action is unauthorized." }
+            archived:
+              value: { message: "This event is archived." }
 
     NotFound:
       description: >

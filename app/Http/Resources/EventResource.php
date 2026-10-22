@@ -36,6 +36,7 @@ class EventResource extends JsonResource
                     $key => Storage::disk('public')->url($path),
                 ])->toArray()
                 : null,
+            'breakout_picks' => $this->pick_mode ? ['mode' => $this->pick_mode, 'min' => $this->pick_min, 'max' => $this->pick_max] : null,
             'speakers_public' => $this->speakers_public,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

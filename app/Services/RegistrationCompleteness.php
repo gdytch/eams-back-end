@@ -25,6 +25,7 @@ class RegistrationCompleteness
         return [
             'basic_info' => $this->missingBasicInfo($attendee),
             'territory' => $this->missingTerritory($attendee),
+            'breakouts' => $this->missingPicks($attendee),
             'review' => $attendee->registration_confirmed_at === null ? ['confirmation'] : [],
         ];
     }
@@ -44,6 +45,7 @@ class RegistrationCompleteness
             'union_id' => 'Add your union',
             'mission_id' => 'Add your mission',
             'church_id' => 'Add your church',
+            'breakout_picks' => 'Pick your breakouts',
             'confirmation' => 'Finish your registration',
         ];
 
@@ -116,6 +118,14 @@ class RegistrationCompleteness
         return collect(['first_name', 'last_name', 'mobile_no'])
             ->filter(fn (string $field) => blank($attendee->{$field}))
             ->values()->all();
+    }
+
+    /** @return array<int, string> */
+    private function missingPicks(Attendee $attendee): array
+    {
+        $range = $attendee->event?->pickRange();
+
+        return $range === null || ! BreakoutPickRules::picksBreak($attendee->breakouts, ...$range) ? [] : ['breakout_picks'];
     }
 
     /** @return array<int, string> */

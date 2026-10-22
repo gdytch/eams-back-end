@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -50,6 +51,8 @@ class Attendee extends Model
             'registration_confirmed_at' => 'datetime',
             'registration_completed_at' => 'datetime',
             'first_registered_at' => 'datetime',
+            'picks_saved_at' => 'datetime',
+            'picks_released_at' => 'datetime',
             'id_card_generated_at' => 'datetime',
             'id_card_images_path' => 'array',
         ];
@@ -194,6 +197,12 @@ class Attendee extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    /** @return BelongsToMany<Breakout, $this> */
+    public function breakouts(): BelongsToMany
+    {
+        return $this->belongsToMany(Breakout::class, 'breakout_picks')->withPivot('overbooked')->withTimestamps();
     }
 
     /** @return BelongsTo<User, $this> */

@@ -8,8 +8,11 @@ use App\Http\Resources\BreakoutResource;
 use App\Models\AuditLog;
 use App\Models\Breakout;
 use App\Models\Event;
+use App\Services\BreakoutPickRules;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class BreakoutController extends Controller
 {
@@ -50,7 +53,8 @@ class BreakoutController extends Controller
 
     public function update(SaveBreakoutRequest $request, Event $event, Breakout $breakout)
     {
-        DB::transaction(function () use ($request, $breakout) {
+        DB::transaction(function () use ($request, $event, $breakout) {
+            Event::withoutGlobalScopes()->whereKey($event->id)->lockForUpdate()->first();
             $breakout->update($request->safe()->except('speaker_ids'));
             $this->syncSpeakers($breakout, $request->validated('speaker_ids'));
             // The program's single day always follows the breakout date.
@@ -58,6 +62,7 @@ class BreakoutController extends Controller
                 $breakout->program->days()->update(['date' => $breakout->date]);
                 $breakout->program->items()->update(['date' => $breakout->date]);
             }
+            $this->guardPickRules($event, $breakout);
             AuditLog::record('breakout.updated', $breakout);
         });
 
@@ -69,11 +74,13 @@ class BreakoutController extends Controller
         $this->authorize('delete', $breakout);
 
         // Lock the row so a pick cannot arrive between the check and the cascade delete.
-        $deleted = DB::transaction(function () use ($breakout) {
+        $deleted = DB::transaction(function () use ($event, $breakout) {
+            Event::withoutGlobalScopes()->whereKey($event->id)->lockForUpdate()->first();
             Breakout::whereKey($breakout->id)->lockForUpdate()->first();
             if ($breakout->picks()->exists()) {
                 return false;
             }
+            $this->guardMinimum($event, $event->breakouts()->whereKeyNot($breakout->id)->get());
             $breakout->delete();
 
             return true;
@@ -86,6 +93,30 @@ class BreakoutController extends Controller
         AuditLog::record('breakout.deleted', $breakout);
 
         return response()->noContent();
+    }
+
+    /** After a time edit: the minimum stays reachable and no Attendee's picks overlap. Throws to roll back. */
+    private function guardPickRules(Event $event, Breakout $breakout): void
+    {
+        if (! $breakout->wasChanged(['date', 'start_time', 'end_time'])) {
+            return;
+        }
+        $this->guardMinimum($event, $event->breakouts()->get());
+
+        $overlaps = $breakout->picks()->with('breakouts')->cursor()
+            ->contains(fn ($attendee) => $attendee->breakouts->contains(fn (Breakout $other) => $other->id !== $breakout->id && BreakoutPickRules::overlap($breakout, $other)));
+        if ($overlaps) {
+            throw ValidationException::withMessages(['start_time' => "This time change would make an Attendee's picks overlap."]);
+        }
+    }
+
+    /** @param  Collection<int, Breakout>  $remaining */
+    private function guardMinimum(Event $event, Collection $remaining): void
+    {
+        $min = $event->pickRange()[0] ?? null;
+        if ($min !== null && $min > BreakoutPickRules::largestNonOverlapping($remaining)) {
+            throw ValidationException::withMessages(['breakout' => 'This change leaves fewer non-overlapping breakouts than the pick minimum.']);
+        }
     }
 
     /** @param  array<int, int>  $speakerIds */

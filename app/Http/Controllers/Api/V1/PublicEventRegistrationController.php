@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\EventStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\SaveBreakoutPicksRequest;
 use App\Http\Requests\SaveWizardTerritoryRequest;
 use App\Http\Resources\EventAttendeeResource;
 use App\Jobs\GenerateAttendeeIdCardJob;
@@ -13,6 +14,7 @@ use App\Models\Event;
 use App\Models\User;
 use App\Services\AttendeeLinkingService;
 use App\Services\AttendeeRegistrationService;
+use App\Services\BreakoutPickService;
 use App\Services\RegistrationCompleteness;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -29,6 +31,7 @@ class PublicEventRegistrationController extends Controller
         private AttendeeRegistrationService $registration,
         private AttendeeLinkingService $linking,
         private RegistrationCompleteness $completeness,
+        private BreakoutPickService $picks,
     ) {}
 
     public function show(Request $request, string $eventInviteToken): JsonResponse
@@ -66,6 +69,24 @@ class PublicEventRegistrationController extends Controller
         $event = $this->resolveWritableEvent($eventInviteToken);
 
         return $this->save($request->user(), $event, $request->validated(), ['organization_level', 'union_id', 'mission_id', 'church_id']);
+    }
+
+    public function saveBreakouts(SaveBreakoutPicksRequest $request, string $eventInviteToken): JsonResponse
+    {
+        $event = $this->resolveWritableEvent($eventInviteToken);
+
+        return DB::transaction(function () use ($request, $event) {
+            if ($this->mustVerifyEmail($request->user(), $event)) {
+                return $this->verifyEmailResponse();
+            }
+
+            $attendee = $this->registration->userAttendeeIn($request->user(), $event) ?? abort(422, 'Save Basic info first.');
+            abort_if($attendee->registration_completed_at !== null, 403, 'Picks are final once you are fully registered.');
+
+            $note = $this->picks->save($attendee, $request->validated('breakout_ids'));
+
+            return $this->respond($attendee, $note);
+        });
     }
 
     public function finish(Request $request, string $eventInviteToken): JsonResponse
@@ -132,10 +153,10 @@ class PublicEventRegistrationController extends Controller
         });
     }
 
-    private function respond(Attendee $attendee): JsonResponse
+    private function respond(Attendee $attendee, ?string $note = null): JsonResponse
     {
-        return EventAttendeeResource::make($attendee)
-            ->additional(['status' => 'ready', 'steps' => $this->completeness->steps($attendee)])
+        return EventAttendeeResource::make($attendee->load('breakouts'))
+            ->additional(['status' => 'ready', 'steps' => $this->completeness->steps($attendee), 'note' => $note])
             ->response()
             ->setStatusCode(200); // a resource answers 201 for a freshly created model
     }

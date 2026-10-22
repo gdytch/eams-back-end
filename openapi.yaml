@@ -97,6 +97,11 @@ paths:
         Authenticate using OAuth credentials from Google, Microsoft, or Facebook.
         The client obtains an OAuth access token from the provider's native SDK
         and exchanges it with this endpoint for a Sanctum bearer token.
+
+        A new user is created with no Attendee and no `organization_id`. When the provider vouches for the
+        email (Google, verified), the email is marked verified and the user is linked at once to every Attendee
+        without a login that has that email, across all events (see "Linking rule" in the event-scoped
+        registration spec). Other providers leave the email unverified, so nothing is linked.
       security: []
       parameters:
         - name: provider
@@ -120,7 +125,7 @@ paths:
                 invite_token:
                   type: string
                   nullable: true
-                  description: Optional event invite token to assign organization_id and trigger automated event registration
+                  description: Optional Attendee invite token. When it belongs to an Attendee with the signed-in email, the email counts as verified and the link runs. Event invite tokens are ignored.
       responses:
         "201":
           description: New user created and authenticated
@@ -163,23 +168,20 @@ paths:
       tags: [Auth]
       summary: Register a new user account
       description: >
-        Create a new user account and obtain a bearer token.
-        An email verification notification is sent upon successful registration, unless the account
-        is claimed via `invite_token` (see below).
+        Create a new user account (no Attendee, no `organization_id`) and obtain a bearer token.
+        An email verification notification is sent unless the email is verified by `invite_token`.
 
 
-        **Attendee invitation claiming**: when an admin or attendance checker creates an attendee
-        record with an email address (and no linked user account yet), an invitation email is sent
-        containing a unique `invite_token` and a link to this registration flow (the frontend has no
-        dedicated "sign up" entry point otherwise — registration is normally only reached via an
-        event's public registration link). Passing that `invite_token` here:
-          - links the new user to the existing attendee record (`user_id`), so their prior event
-            registrations, ID cards, and attendance history are immediately visible in their dashboard
-          - inherits the attendee's `organization_id`
-          - automatically marks the email as verified (skipping the verification email) **only if**
-            the submitted `email` matches the attendee's `email_address` exactly
+        **Linking rule**: an Attendee without a login is linked to the user only once the user's email is
+        verified. Signing up with an email that matches an Attendee does not link it. Verifying the email
+        (`GET /auth/email/verify/{id}/{hash}`, SSO, or using an invite link) links every Attendee without a
+        login that has that email, across all events, skipping events where the user already has an
+        Attendee. Each link is audited as `attendee.linked`.
 
-        An invite token can only be used once; it is unknown/expired if already claimed.
+
+        **Attendee invitation**: an Attendee invite token (30-day expiry) whose Attendee has the submitted
+        `email` marks the email verified and links at once. A token for another email does not verify.
+        An event invite token is accepted and has no effect on linking.
       security: []
       requestBody:
         required: true
@@ -205,7 +207,7 @@ paths:
                   {
                     type: string,
                     nullable: true,
-                    description: "Token from an attendee account-invitation email. Must reference an attendee that has not yet been claimed by another user.",
+                    description: "Attendee invite token (not expired, Attendee has no login) or an event invite token. Anything else is rejected with a 422 on `invite_token`.",
                   }
       responses:
         "201":
@@ -222,7 +224,7 @@ paths:
                     }
                   user: { $ref: "#/components/schemas/User" }
         "422":
-          description: Validation failed (duplicate email, weak password, missing fields, unknown/already-claimed invite_token, etc.)
+          description: Validation failed (duplicate user email, weak password, missing fields, unknown/expired invite_token, etc.)
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ValidationError" }
@@ -621,7 +623,9 @@ paths:
     get:
       tags: [Users]
       summary: List users
-      description: Super Admin sees all users; everyone else sees only their own organization's users.
+      description: >
+        Super Admin sees all users; everyone else sees only their own organization's users.
+        Users with `role = attendee` are never listed, whatever the `role` filter.
       parameters:
         - $ref: "#/components/parameters/Page"
       responses:
@@ -3361,7 +3365,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  status: { type: string, enum: [unclaimed, claimed] }
+                  status:
+                    type: string
+                    enum: [unclaimed, claimed, unavailable]
+                    description: "`unavailable` when the Attendee has an email and cannot be claimed by QR."
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { description: Too many requests }
@@ -3371,8 +3378,8 @@ paths:
       tags: [Public]
       summary: Verify identity for an unclaimed ID card QR code
       description: >
-        Matches name, union and mission against the attendee behind `qr_token` and returns a
-        short-lived claim token. Throttled to 10 requests per minute plus a per-registration attempt limit.
+        Matches name, union and mission against the Attendee behind `qr_token` and returns a
+        short-lived claim token. Refused (422 on `qr_token`) when the Attendee has a login or an email. Throttled to 10 requests per minute plus a per-registration attempt limit.
       security: []
       requestBody:
         required: true
@@ -3398,7 +3405,7 @@ paths:
                   claim_token: { type: string }
                   requires_email:
                     type: boolean
-                    description: True when the attendee has no email and must verify one before completing.
+                    description: Always true; the Attendee has no email, so one must be verified before completing.
         "422": { $ref: "#/components/responses/ValidationFailed" }
         "429": { description: Too many requests }
 
@@ -3457,9 +3464,9 @@ paths:
       tags: [Public]
       summary: Complete a QR claim by creating the account
       description: >
-        Creates a user with the given password, links it to the attendee and returns an API token.
-        Sends email verification when the email was not verified during the claim. Throttled to 6
-        requests per minute.
+        Creates a user with the given password and the email verified during the claim, links it to the
+        scanned Attendee (the email is saved on it), then links every other Attendee without a login that
+        has that email. Returns an API token. Throttled to 6 requests per minute.
       security: []
       requestBody:
         required: true

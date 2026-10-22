@@ -14,8 +14,8 @@ use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\User;
 use App\Notifications\AttendeeQrClaimEmailCodeNotification;
+use App\Services\AttendeeLinkingService;
 use App\Services\AttendeeQrClaimService;
-use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
@@ -31,9 +31,13 @@ class AttendeeQrClaimController extends Controller
             return response()->json(['message' => 'This ID card link is unavailable.'], 404);
         }
 
-        return response()->json([
-            'status' => $attendee->user_id === null ? 'unclaimed' : 'claimed',
-        ]);
+        $status = match (true) {
+            $attendee->user_id !== null => 'claimed',
+            filled($attendee->email_address) => 'unavailable',
+            default => 'unclaimed',
+        };
+
+        return response()->json(['status' => $status]);
     }
 
     public function verify(VerifyQrClaimRequest $request, AttendeeQrClaimService $claims): JsonResponse
@@ -41,7 +45,7 @@ class AttendeeQrClaimController extends Controller
         $data = $request->validated();
         $attendee = $this->attendee($data['qr_token']);
 
-        if ($attendee === null || $attendee->user_id !== null) {
+        if ($attendee === null || $attendee->user_id !== null || filled($attendee->email_address)) {
             throw ValidationException::withMessages(['qr_token' => 'We could not verify those details. Qrcode not valid or already claimed.']);
         }
 
@@ -57,7 +61,7 @@ class AttendeeQrClaimController extends Controller
 
         return response()->json([
             'claim_token' => $claimToken,
-            'requires_email' => blank($attendee->email_address),
+            'requires_email' => true,
         ]);
     }
 
@@ -97,7 +101,7 @@ class AttendeeQrClaimController extends Controller
         return response()->json(['message' => 'Email verified.']);
     }
 
-    public function complete(CompleteQrClaimRequest $request, AttendeeQrClaimService $claims): JsonResponse
+    public function complete(CompleteQrClaimRequest $request, AttendeeQrClaimService $claims, AttendeeLinkingService $linking): JsonResponse
     {
         $data = $request->validated();
         $claim = $claims->claim($data['claim_token']);
@@ -110,21 +114,19 @@ class AttendeeQrClaimController extends Controller
             throw ValidationException::withMessages(['claim_token' => 'Too many attempts. Scan your ID card again.']);
         }
 
-        $result = DB::transaction(function () use ($claim, $data) {
+        $result = DB::transaction(function () use ($claim, $data, $linking) {
             $attendee = Attendee::withoutGlobalScopes()->lockForUpdate()->find($claim['attendee_id']);
-            if ($attendee === null || $attendee->user_id !== null) {
+            if ($attendee === null || $attendee->user_id !== null || filled($attendee->email_address)) {
                 throw ValidationException::withMessages(['claim_token' => 'This attendee already has an account.']);
             }
 
-            $email = $attendee->email_address;
-            $emailVerified = false;
-            if (blank($email)) {
-                if (! ($claim['email_verified'] ?? false) || blank($claim['email'] ?? null)) {
-                    throw ValidationException::withMessages(['claim_token' => 'Verify your email before creating your account.']);
-                }
+            if (! ($claim['email_verified'] ?? false) || blank($claim['email'] ?? null)) {
+                throw ValidationException::withMessages(['claim_token' => 'Verify your email before creating your account.']);
+            }
 
-                $email = $claim['email'];
-                $emailVerified = true;
+            $email = $claim['email'];
+            if ($linking->emailTakenInEvent($email, $attendee)) {
+                throw ValidationException::withMessages(['email' => 'This email address is already registered for this event. Sign up with it and verify it instead.']);
             }
 
             if (User::withoutGlobalScopes()->where('email', $email)->exists()) {
@@ -139,8 +141,7 @@ class AttendeeQrClaimController extends Controller
                 'middle_name' => $attendee->middle_name,
                 'last_name' => $attendee->last_name,
                 'role' => UserRole::Attendee,
-                'organization_id' => $attendee->organization_id,
-                'email_verified_at' => $emailVerified ? now() : null,
+                'email_verified_at' => now(),
             ]);
 
             $attendee->update([
@@ -150,10 +151,7 @@ class AttendeeQrClaimController extends Controller
             ]);
 
             AuditLog::record('attendee.qr_claimed', $attendee, ['user_id' => $user->id]);
-
-            if (! $emailVerified) {
-                event(new Registered($user));
-            }
+            $linking->linkVerifiedEmail($user);
 
             return [
                 'token' => $user->createToken('api')->plainTextToken,

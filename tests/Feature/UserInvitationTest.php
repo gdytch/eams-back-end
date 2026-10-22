@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Enums\UserRole;
 use App\Mail\UserAccountInviteMail;
+use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -30,6 +32,28 @@ class UserInvitationTest extends TestCase
             'password_confirmation' => 'newpassword123',
         ])->assertUnprocessable();
         $this->assertNotNull($user->fresh()->invite_token);
+    }
+
+    public function test_accepting_a_staff_invite_links_attendees_with_that_email(): void
+    {
+        $attendee = Attendee::factory()->for(Event::factory()->create())->create(['email_address' => 'staff@example.com']);
+        $user = User::factory()->checker()->unverified()->create([
+            'email' => 'staff@example.com',
+            'invite_token' => User::generateUniqueInviteToken(),
+            'invited_at' => now(),
+        ]);
+
+        $this->postJson('/api/v1/auth/accept-invite', [
+            'token' => $user->invite_token,
+            'email' => 'staff@example.com',
+            'first_name' => 'Sam',
+            'last_name' => 'Staff',
+            'password' => 'newpassword123',
+            'password_confirmation' => 'newpassword123',
+        ])->assertCreated();
+
+        $this->assertSame($user->id, $attendee->fresh()->user_id);
+        $this->assertSame(UserRole::Checker, $user->fresh()->role);
     }
 
     public function test_org_admin_can_invite_user_by_email(): void

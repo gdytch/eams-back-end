@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Union;
@@ -16,14 +17,14 @@ class SloppySsoTerritoryTest extends TestCase
 {
     use LazilyRefreshDatabase;
 
-    public function test_matching_existing_attendee_updates_territory_fields(): void
+    public function test_sso_territory_fields_are_ignored_and_the_linked_attendee_keeps_its_territory(): void
     {
         $organization = Organization::factory()->create();
         $oldUnion = Union::factory()->for($organization)->create();
         $newUnion = Union::factory()->for($organization)->create();
         $mission = Mission::factory()->for($organization)->for($newUnion)->create();
         $user = User::factory()->create(['email' => 'linked@example.com', 'organization_id' => $organization->id]);
-        $attendee = Attendee::factory()->for($organization)->create([
+        $attendee = Attendee::factory()->for(Event::factory()->for($organization)->create())->create([
             'email_address' => $user->email,
             'user_id' => null,
             'organization_level' => 'union',
@@ -41,12 +42,12 @@ class SloppySsoTerritoryTest extends TestCase
         ])->assertOk();
 
         $this->assertSame($user->id, $attendee->fresh()->user_id);
-        $this->assertSame('mission', $attendee->fresh()->organization_level->value);
-        $this->assertSame($newUnion->id, $attendee->fresh()->union_id);
-        $this->assertSame($mission->id, $attendee->fresh()->mission_id);
+        $this->assertSame('union', $attendee->fresh()->organization_level->value);
+        $this->assertSame($oldUnion->id, $attendee->fresh()->union_id);
+        $this->assertNull($attendee->fresh()->mission_id);
     }
 
-    public function test_territory_from_a_different_organization_does_not_overwrite_attendee(): void
+    public function test_territory_from_a_different_organization_does_not_overwrite_attendee_or_set_the_user_organization(): void
     {
         $attendeeOrganization = Organization::factory()->create();
         $requestOrganization = Organization::factory()->create();
@@ -54,7 +55,7 @@ class SloppySsoTerritoryTest extends TestCase
         $requestUnion = Union::factory()->for($requestOrganization)->create();
         $requestMission = Mission::factory()->for($requestOrganization)->for($requestUnion)->create();
         $user = User::factory()->create(['email' => 'linked@example.com', 'organization_id' => null]);
-        $attendee = Attendee::factory()->for($attendeeOrganization)->create([
+        $attendee = Attendee::factory()->for(Event::factory()->for($attendeeOrganization)->create())->create([
             'email_address' => $user->email,
             'user_id' => null,
             'organization_level' => 'union',
@@ -72,7 +73,7 @@ class SloppySsoTerritoryTest extends TestCase
         ])->assertOk();
 
         $this->assertSame($user->id, $attendee->fresh()->user_id);
-        $this->assertSame($attendeeOrganization->id, $user->fresh()->organization_id);
+        $this->assertNull($user->fresh()->organization_id);
         $this->assertSame('union', $attendee->fresh()->organization_level->value);
         $this->assertSame($attendeeUnion->id, $attendee->fresh()->union_id);
         $this->assertNull($attendee->fresh()->mission_id);

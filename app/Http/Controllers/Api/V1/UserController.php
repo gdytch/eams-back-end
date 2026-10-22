@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\InviteUserRequest;
 use App\Http\Requests\StoreUserRequest;
@@ -31,7 +32,7 @@ class UserController extends Controller
     {
         $this->authorize('viewAny', User::class);
 
-        $query = User::query();
+        $query = User::query()->where('role', '!=', UserRole::Attendee);
 
         if (! $request->user()->isSuperAdmin()) {
             $query->where('organization_id', $request->user()->organization_id);

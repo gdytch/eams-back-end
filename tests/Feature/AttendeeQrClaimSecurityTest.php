@@ -68,6 +68,7 @@ class AttendeeQrClaimSecurityTest extends TestCase
             'first_name' => 'Jamie',
             'last_name' => 'Rivera',
             'mission_id' => null,
+            'email_address' => null,
         ]);
         $registration = $this->registerInEvent(Event::factory()->for($organization), $attendee);
 

@@ -149,16 +149,13 @@ class AttendeeInvitationTest extends TestCase
     public function test_register_with_valid_invite_token_links_to_attendee(): void
     {
         $org = Organization::factory()->create();
-        $attendee = Attendee::factory()->for($org)->create([
+        $attendee = Attendee::factory()->for(Event::factory()->for($org)->create())->create([
             'email_address' => 'invite@example.com',
             'invite_token' => Attendee::generateUniqueInviteToken(),
             'invited_at' => now(),
         ]);
 
         $response = $this->postJson('/api/v1/auth/register', [
-            'organization_id' => $org->id,
-            'organization_level' => 'union',
-            'union_id' => Union::factory()->for($org)->create()->id,
             'first_name' => 'Test',
             'last_name' => 'User',
             'email' => 'invite@example.com',
@@ -171,7 +168,7 @@ class AttendeeInvitationTest extends TestCase
 
         $user = User::where('email', 'invite@example.com')->first();
         $this->assertNotNull($user);
-        $this->assertEquals($org->id, $user->organization_id);
+        $this->assertNull($user->organization_id);
         $this->assertNotNull($user->email_verified_at);
 
         $attendee->refresh();
@@ -229,7 +226,7 @@ class AttendeeInvitationTest extends TestCase
             'invite_token' => 'invalid_token',
         ]);
 
-        $response->assertUnprocessable()->assertJsonValidationErrors('email');
+        $response->assertUnprocessable()->assertJsonValidationErrors('invite_token');
     }
 
     public function test_public_event_self_registration_does_not_send_invite(): void

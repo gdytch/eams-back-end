@@ -307,4 +307,19 @@ class UserTest extends TestCase
         $attendee->refresh();
         $this->assertEquals('Alexander', $attendee->middle_name);
     }
+
+    public function test_users_list_never_contains_attendee_role_users(): void
+    {
+        $admin = User::factory()->superAdmin()->create();
+        $attendee = User::factory()->attendee()->create();
+        $checker = User::factory()->checker()->create();
+
+        $ids = collect($this->actingAs($admin, 'sanctum')->getJson('/api/v1/users')->assertOk()->json('data'))->pluck('id');
+        $this->assertTrue($ids->contains($checker->id));
+        $this->assertFalse($ids->contains($attendee->id));
+
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/users?role=attendee')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+    }
 }

@@ -23,6 +23,14 @@ class PublicEventController extends Controller
             404
         );
 
+        // Breakouts follow the event program's public setting.
+        if ($event->program?->is_public) {
+            $event->load(['breakouts' => fn ($query) => $query->withoutGlobalScopes()->orderBy('date')->orderBy('start_time')]);
+            if ($event->speakers_public) {
+                $event->breakouts->load('speakers');
+            }
+        }
+
         return PublicEventResource::make($event);
     }
 
@@ -34,13 +42,6 @@ class PublicEventController extends Controller
         $event = $this->resolveEventByInviteToken($inviteToken);
 
         abort_unless($event->status === EventStatus::Published, 404);
-
-        if ($event->program?->is_public) {
-            $event->load(['breakouts' => fn ($query) => $query->withoutGlobalScopes()->orderBy('date')->orderBy('start_time')]);
-            if ($event->speakers_public) {
-                $event->breakouts->load('speakers');
-            }
-        }
 
         return $event;
     }

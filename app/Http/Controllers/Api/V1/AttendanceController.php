@@ -139,7 +139,7 @@ class AttendanceController extends Controller
     }
 
     /**
-     * List every registration for a session with its attendance status (present/absent), sorted by check-in.
+     * List Expected Attendees plus walk-ins for a session with their status (Present / Absent / Upcoming), sorted by check-in.
      */
     public function roster(Request $request, Event $event, EventSession $session)
     {
@@ -148,19 +148,14 @@ class AttendanceController extends Controller
         $status = strtolower((string) $request->query('status', 'all'));
         $search = $request->query('search', '');
 
-        if (! in_array($status, ['all', 'present', 'absent'], true)) {
+        if (! in_array($status, ['all', 'present', 'not_checked_in'], true)) {
             throw ValidationException::withMessages([
-                'status' => 'The status must be one of: all, present, absent.',
+                'status' => 'The status must be one of: all, present, not_checked_in.',
             ]);
         }
 
-        $checkedInAttendeeIds = AttendanceRecord::where('event_session_id', $session->id)
-            ->whereNotNull('check_in_at')
-            ->select('attendee_id');
-
-        $sessionHasStarted = now()->greaterThanOrEqualTo($session->startsAt());
-
         $registrations = $event->attendees()
+            ->inAttendanceOf($session)
             ->with(['union', 'mission'])
             ->addSelect([
                 'session_check_in_at' => AttendanceRecord::select('check_in_at')
@@ -176,17 +171,19 @@ class AttendanceController extends Controller
                 'session_check_in_at' => 'datetime',
                 'session_check_out_at' => 'datetime',
             ])
-            ->when($status === 'present', fn ($q) => $q->whereIn('attendees.id', $checkedInAttendeeIds))
-            ->when($status === 'absent', fn ($q) => $q->whereNotIn('attendees.id', $checkedInAttendeeIds))
+            ->when($status === 'present', fn ($q) => $q->presentAt($session))
+            ->when($status === 'not_checked_in', fn ($q) => $q->notCheckedInAt($session))
             ->when($search !== '', fn ($q) => $q->where(function ($query) use ($search) {
                 $query->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
             }))
-            ->when($status === 'absent', fn ($q) => $q->orderBy('last_name')->orderBy('first_name'), fn ($q) => $q->orderByRaw('session_check_in_at is null, session_check_in_at asc'))
+            ->when($status === 'not_checked_in', fn ($q) => $q->orderBy('last_name')->orderBy('first_name'), fn ($q) => $q->orderByRaw('session_check_in_at is null, session_check_in_at asc'))
             ->paginate($request->input('per_page', 15));
 
-        // Attach session status information to each registration
-        $registrations->each(fn ($reg) => $reg->setAttribute('session_has_started', $sessionHasStarted));
+        $registrations->each(fn ($reg) => $reg->setAttribute(
+            'attendance_status',
+            $session->attendanceStatus($reg->session_check_in_at !== null, $reg->first_registered_at),
+        ));
 
         return EventSessionRosterEntryResource::collection($registrations)->additional([
             'event_id' => $event->id,

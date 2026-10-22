@@ -19,7 +19,11 @@ class EventSessionRosterTest extends TestCase
     private function setUpRoster(Organization $org): array
     {
         $event = Event::factory()->for($org)->create();
-        $session = EventSession::factory()->for($event)->create();
+        $session = EventSession::factory()->for($event)->create([
+            'session_date' => now()->subDay()->toDateString(),
+            'start_time' => '09:00:00',
+            'end_time' => '11:00:00',
+        ]);
         $union = Union::factory()->for($org)->create();
         $mission = Mission::factory()->for($org)->for($union)->create();
 
@@ -27,7 +31,7 @@ class EventSessionRosterTest extends TestCase
             'first_name' => 'Ana',
             'last_name' => 'Cruz',
         ]);
-        $earlyRegistration = $this->registerInEvent($event, $earlyCheckIn);
+        $earlyRegistration = $this->registerInEvent($event, $earlyCheckIn, ['first_registered_at' => now()->subDays(2)]);
         $earlyRegistration->attendanceRecords()->create([
             'event_session_id' => $session->id,
             'check_in_at' => now()->subMinutes(30),
@@ -39,7 +43,7 @@ class EventSessionRosterTest extends TestCase
             'first_name' => 'Ben',
             'last_name' => 'Reyes',
         ]);
-        $lateRegistration = $this->registerInEvent($event, $lateCheckIn);
+        $lateRegistration = $this->registerInEvent($event, $lateCheckIn, ['first_registered_at' => now()->subDays(2)]);
         $lateRegistration->attendanceRecords()->create([
             'event_session_id' => $session->id,
             'check_in_at' => now()->subMinutes(5),
@@ -51,7 +55,7 @@ class EventSessionRosterTest extends TestCase
             'first_name' => 'Cara',
             'last_name' => 'Diaz',
         ]);
-        $absentRegistration = $this->registerInEvent($event, $absentee);
+        $absentRegistration = $this->registerInEvent($event, $absentee, ['first_registered_at' => now()->subDays(2)]);
 
         return compact('event', 'session', 'earlyRegistration', 'lateRegistration', 'absentRegistration');
     }
@@ -105,14 +109,14 @@ class EventSessionRosterTest extends TestCase
         $response->assertJsonPath('data.1.attendance_status', 'Present');
     }
 
-    public function test_roster_filters_absent_only(): void
+    public function test_roster_filters_not_checked_in_only(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
         ['event' => $event, 'session' => $session] = $this->setUpRoster($org);
 
         $response = $this->actingAs($checker, 'sanctum')
-            ->getJson("/api/v1/events/{$event->id}/sessions/{$session->id}/roster?status=Absent");
+            ->getJson("/api/v1/events/{$event->id}/sessions/{$session->id}/roster?status=not_checked_in");
 
         $response->assertOk();
         $response->assertJsonCount(1, 'data');

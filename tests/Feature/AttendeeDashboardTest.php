@@ -615,7 +615,7 @@ class AttendeeDashboardTest extends TestCase
         $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
         $attendee = Attendee::factory()->for($organization)->for($user)->create();
         $event = Event::factory()->for($organization)->create();
-        $registration = $this->registerInEvent($event, $attendee);
+        $registration = $this->registerInEvent($event, $attendee, ['first_registered_at' => now()->subYear()]);
         $sessions = EventSession::factory()->for($event)->count(3)->create();
         AttendanceRecord::factory()
             ->for($registration)

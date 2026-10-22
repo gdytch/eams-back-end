@@ -21,6 +21,7 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
     public function collection(): Collection
     {
         return $this->event->attendees()
+            ->inAttendanceOf($this->session)
             ->with('union', 'mission', 'attendanceRecords')
             ->get()
             ->map(function ($registration) {
@@ -31,7 +32,7 @@ class EventSessionAttendanceSheetExport extends AttendanceSheetExport
                 $status = match (true) {
                     $checkOutAt !== null => 'Checked Out',
                     $checkInAt !== null => 'Checked In',
-                    default => 'Absent',
+                    default => $this->session->attendanceStatus(false, $registration->first_registered_at)?->label(),
                 };
 
                 return [

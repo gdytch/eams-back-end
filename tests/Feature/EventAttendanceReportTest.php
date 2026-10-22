@@ -29,6 +29,7 @@ class EventAttendanceReportTest extends TestCase
             'remarks' => '=1+1',
         ]);
         $this->registerInEvent($event, $attendee);
+        EventSession::factory()->for($event)->create(['session_date' => today()->addDay()->toDateString()]);
 
         $xlsx = Excel::raw(new EventAttendanceExport($event), \Maatwebsite\Excel\Excel::XLSX);
         $path = tempnam(sys_get_temp_dir(), 'ams-export-');
@@ -124,8 +125,9 @@ class EventAttendanceReportTest extends TestCase
                 'total_registered' => 4,
                 'attendance' => [
                     'present' => 3,
-                    'absent' => 1,
-                    'attendance_rate' => 75,
+                    'absent' => 0,
+                    'upcoming' => 1,
+                    'attendance_rate' => 0,
                 ],
             ]);
     }
@@ -187,7 +189,7 @@ class EventAttendanceReportTest extends TestCase
         $this->assertStringContainsString('pdf', $response->headers->get('Content-Type'));
     }
 
-    public function test_pdf_exports_count_attendance_for_all_sessions_in_one_query(): void
+    public function test_pdf_exports_count_attendance_with_a_fixed_number_of_queries_per_session(): void
     {
         $org = Organization::factory()->create();
         $checker = User::factory()->checker()->for($org)->create();
@@ -216,7 +218,8 @@ class EventAttendanceReportTest extends TestCase
 
             $response->assertOk();
             $this->assertStringContainsString('pdf', $response->headers->get('Content-Type'));
-            $this->assertSame(1, $countQueries);
+            // One loadCount for check-in/out totals plus three counts (present, not checked in, expected present) per session.
+            $this->assertSame(1 + 3 * ($sessionId === null ? 3 : 1), $countQueries);
             $summary = collect($pdfViewData[$index]['sessionSummaries'])->firstWhere('name', $session->name);
             $this->assertSame(3, $summary['checked_in']);
             $this->assertSame(1, $summary['checked_out']);

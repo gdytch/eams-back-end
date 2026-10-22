@@ -213,11 +213,11 @@ class AttendeeDashboardData
     {
         $attendanceBySession = $registration->attendanceRecords->keyBy('event_session_id');
 
-        return $sessions->map(function (EventSession $session) use ($attendanceBySession): array {
+        return $sessions->map(function (EventSession $session) use ($attendanceBySession, $registration): array {
             $attendance = $attendanceBySession->get($session->id);
 
             return ['id' => $session->id] + $this->sessionDetails($session) + [
-                'status' => $attendance === null ? 'absent' : 'present',
+                'status' => $session->attendanceStatus($attendance?->check_in_at !== null, $registration->first_registered_at)?->value,
                 'attendance_record_id' => $attendance?->id,
                 'check_in_at' => $attendance?->check_in_at,
                 'check_out_at' => $attendance?->check_out_at,
@@ -228,13 +228,13 @@ class AttendeeDashboardData
     private function eventAttendanceStats(Collection $sessionRows): array
     {
         $present = $sessionRows->where('status', 'present')->count();
-        $total = $sessionRows->count();
+        $absent = $sessionRows->where('status', 'absent')->count();
 
         return [
-            'total_sessions' => $total,
+            'total_sessions' => $sessionRows->count(),
             'sessions_present' => $present,
-            'sessions_absent' => $total - $present,
-            'attendance_rate' => $total > 0 ? round(($present / $total) * 100, 1) : 0,
+            'sessions_absent' => $absent,
+            'attendance_rate' => $present + $absent > 0 ? round(($present / ($present + $absent)) * 100, 1) : 0,
         ];
     }
 
@@ -242,7 +242,7 @@ class AttendeeDashboardData
     {
         $event = $registration->event;
         $completedSessionIds = $event->sessions
-            ->filter(fn (EventSession $session): bool => $session->endsAt()->isPast())
+            ->filter(fn (EventSession $session): bool => $session->hasEnded() && $session->isExpected($registration->first_registered_at))
             ->pluck('id');
         $attendedSessions = $registration->attendanceRecords
             ->whereNotNull('check_in_at')
@@ -284,13 +284,11 @@ class AttendeeDashboardData
         return $registration->event->sessions
             ->sortBy(fn (EventSession $session): string => $session->session_date->toDateString().' '.$session->start_time)
             ->values()
-            ->map(function (EventSession $session) use ($attendanceBySession): array {
+            ->map(function (EventSession $session) use ($attendanceBySession, $registration): array {
                 $attendance = $attendanceBySession->get($session->id);
 
                 return ['id' => $session->id] + $this->sessionDetails($session) + [
-                    'status' => $attendance?->check_in_at !== null
-                        ? 'present'
-                        : ($session->endsAt()->isPast() ? 'absent' : 'upcoming'),
+                    'status' => $session->attendanceStatus($attendance?->check_in_at !== null, $registration->first_registered_at)?->value,
                     'check_in_at' => $attendance?->check_in_at,
                     'check_out_at' => $attendance?->check_out_at,
                     'method' => $attendance?->method,

@@ -148,6 +148,48 @@ class Attendee extends Model
         };
     }
 
+    /**
+     * Expected at a slot: fully registered for the first time before it ended.
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeExpectedAt(Builder $query, EventSession $slot): void
+    {
+        $query->where('attendees.first_registered_at', '<', $slot->endsAt());
+    }
+
+    /**
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopePresentAt(Builder $query, EventSession $slot): void
+    {
+        $query->whereHas('attendanceRecords', fn ($records) => $records
+            ->where('event_session_id', $slot->id)
+            ->whereNotNull('check_in_at'));
+    }
+
+    /**
+     * Expected at a slot with no check-in: Absent once it ended, Upcoming before.
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeNotCheckedInAt(Builder $query, EventSession $slot): void
+    {
+        $query->expectedAt($slot)->whereDoesntHave('attendanceRecords', fn ($records) => $records
+            ->where('event_session_id', $slot->id)
+            ->whereNotNull('check_in_at'));
+    }
+
+    /**
+     * Who attendance reports list for a slot: Expected Attendees plus anyone checked in (walk-ins).
+     *
+     * @param  Builder<Attendee>  $query
+     */
+    public function scopeInAttendanceOf(Builder $query, EventSession $slot): void
+    {
+        $query->where(fn ($q) => $q->expectedAt($slot)->orWhere(fn ($p) => $p->presentAt($slot)));
+    }
+
     public function registrationStatus(): ?string
     {
         return match (true) {

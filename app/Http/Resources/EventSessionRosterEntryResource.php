@@ -36,6 +36,10 @@ class EventSessionRosterEntryResource extends JsonResource
             'attendance_status' => $this->attendance_status?->label(),
             'check_in_at' => $this->session_check_in_at,
             'check_out_at' => $this->session_check_out_at,
+            'via_breakout' => $this->session_via_breakout_id === null ? null : [
+                'id' => $this->session_via_breakout_id,
+                'title' => $this->via_breakout_title,
+            ],
         ];
     }
 }

@@ -172,6 +172,10 @@ class AttendanceController extends Controller
                     ->whereColumn('attendee_id', 'attendees.id')
                     ->where('event_session_id', $session->id)
                     ->limit(1),
+                'session_via_breakout_id' => AttendanceRecord::select('via_breakout_id')
+                    ->whereColumn('attendee_id', 'attendees.id')
+                    ->where('event_session_id', $session->id)
+                    ->limit(1),
             ])
             ->withCasts([
                 'session_check_in_at' => 'datetime',
@@ -186,10 +190,11 @@ class AttendanceController extends Controller
             ->when($status === 'not_checked_in', fn ($q) => $q->orderBy('last_name')->orderBy('first_name'), fn ($q) => $q->orderByRaw('session_check_in_at is null, session_check_in_at asc'))
             ->paginate($request->input('per_page', 15));
 
-        $registrations->each(fn ($reg) => $reg->setAttribute(
-            'attendance_status',
-            $session->attendanceStatus($reg->session_check_in_at !== null, $reg->first_registered_at),
-        ));
+        $breakoutTitles = Breakout::whereIn('id', $registrations->pluck('session_via_breakout_id')->filter())->pluck('title', 'id');
+        $registrations->each(function ($reg) use ($session, $breakoutTitles) {
+            $reg->setAttribute('attendance_status', $session->attendanceStatus($reg->session_check_in_at !== null, $reg->first_registered_at));
+            $reg->setAttribute('via_breakout_title', $breakoutTitles[$reg->session_via_breakout_id] ?? null);
+        });
 
         return EventSessionRosterEntryResource::collection($registrations)->additional([
             'event_id' => $event->id,

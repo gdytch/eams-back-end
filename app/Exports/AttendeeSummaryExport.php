@@ -15,7 +15,7 @@ use PhpOffice\PhpSpreadsheet\Style\Fill;
 class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadings, WithStyles
 {
     /** @param  Collection<int, array<string, mixed>>  $rows */
-    public function __construct(private Collection $rows) {}
+    public function __construct(private Collection $rows, private bool $withBreakouts = false) {}
 
     public function collection(): Collection
     {
@@ -26,12 +26,13 @@ class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadi
             $row['absent'],
             ...($this->hasRemaining() ? [$row['remaining']] : []),
             $row['attendance_rating'] . '%',
+            ...($this->withBreakouts ? [$row['breakout_present'], $row['breakout_absent']] : []),
         ]);
     }
 
     public function headings(): array
     {
-        return ['Attendee', 'Organization Level', 'Present', 'Absent', ...($this->hasRemaining() ? ['Sessions Remaining'] : []), 'Attendance Rating'];
+        return ['Attendee', 'Organization Level', 'Present', 'Absent', ...($this->hasRemaining() ? ['Sessions Remaining'] : []), 'Attendance Rating', ...($this->withBreakouts ? ['Breakout Present', 'Breakout Absent'] : [])];
     }
 
     private function hasRemaining(): bool
@@ -42,7 +43,8 @@ class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadi
     public function styles($sheet): array
     {
         $lastRow = $sheet->getHighestRow();
-        $lastCol = $this->hasRemaining() ? 'F' : 'E';
+        $ratingCol = $this->hasRemaining() ? 'F' : 'E';
+        $lastCol = $this->withBreakouts ? ($this->hasRemaining() ? 'H' : 'G') : $ratingCol;
         $border = ['allBorders' => ['borderStyle' => Border::BORDER_THIN, 'color' => ['rgb' => 'CCCCCC']]];
 
         $sheet->freezePane('A2');
@@ -56,9 +58,9 @@ class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadi
 
         // Rating colour: green >= 80, amber >= 50, red below
         for ($row = 2; $row <= $lastRow; $row++) {
-            $rate = (float) $sheet->getCell("{$lastCol}{$row}")->getValue();
+            $rate = (float) $sheet->getCell("{$ratingCol}{$row}")->getValue();
             $color = $rate >= 80 ? 'C6EFCE' : ($rate >= 50 ? 'FFEB9C' : 'FFC7CE');
-            $sheet->getStyle("{$lastCol}{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($color);
+            $sheet->getStyle("{$ratingCol}{$row}")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB($color);
         }
 
         return [

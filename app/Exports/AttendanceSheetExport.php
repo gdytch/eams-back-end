@@ -12,6 +12,7 @@ use Maatwebsite\Excel\Concerns\WithStyles;
 use Maatwebsite\Excel\Concerns\WithTitle;
 use Maatwebsite\Excel\Events\AfterSheet;
 use PhpOffice\PhpSpreadsheet\Cell\Cell;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\Cell\DefaultValueBinder;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
@@ -26,6 +27,8 @@ abstract class AttendanceSheetExport extends DefaultValueBinder implements FromC
     protected const STATUS_CHECKED_OUT_COLOR = 'BDECEC';
 
     protected const STATUS_NO_SHOW_COLOR = 'FFC7CE';
+
+    protected const STATUS_WALK_IN_COLOR = 'FFEB9C';
 
     abstract public function collection(): Collection;
 
@@ -79,7 +82,7 @@ abstract class AttendanceSheetExport extends DefaultValueBinder implements FromC
                 // Apply borders to all cells and style header row
                 if ($data->count() > 0) {
                     $lastRow = $data->count() + 1;
-                    $range = "A1:I{$lastRow}";
+                    $range = 'A1:'.Coordinate::stringFromColumnIndex(count($this->headings()))."{$lastRow}";
                     $sheet->getStyle($range)->getBorders()->getBottom()->setBorderStyle(Border::BORDER_THIN);
                     $sheet->getStyle($range)->getBorders()->getTop()->setBorderStyle(Border::BORDER_THIN);
                     $sheet->getStyle($range)->getBorders()->getLeft()->setBorderStyle(Border::BORDER_THIN);
@@ -98,7 +101,8 @@ abstract class AttendanceSheetExport extends DefaultValueBinder implements FromC
                     $status = $statusCell->getValue();
 
                     $bgColor = match ($status) {
-                        'Checked In' => self::STATUS_CHECKED_IN_COLOR,
+                        'Checked In', 'Present' => self::STATUS_CHECKED_IN_COLOR,
+                        'Walk-in' => self::STATUS_WALK_IN_COLOR,
                         'Checked Out' => self::STATUS_CHECKED_OUT_COLOR,
                         'Absent' => self::STATUS_NO_SHOW_COLOR,
                         default => null,

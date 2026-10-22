@@ -198,6 +198,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('events/{event}/reports/attendance-summary', [ReportController::class, 'eventAttendanceSummary']);
         Route::get('events/{event}/reports/attendance-summary/export', [ReportController::class, 'exportEventAttendance'])->middleware('throttle:6,1');
+        Route::get('events/{event}/reports/breakouts', [ReportController::class, 'breakoutReport']);
+        Route::get('events/{event}/reports/breakouts/{breakout}', [ReportController::class, 'breakoutRoster'])->scopeBindings();
         Route::get('events/{event}/reports/attendee-summary', [ReportController::class, 'attendeeSummary']);
         Route::get('events/{event}/reports/attendee-summary/export', [ReportController::class, 'exportAttendeeSummary'])->middleware('throttle:6,1');
         Route::get('events/{event}/reports/dashboard', [ReportController::class, 'eventDashboard']);

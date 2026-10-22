@@ -46,6 +46,12 @@ class AttendanceRecord extends Model
         return $this->belongsTo(Breakout::class);
     }
 
+    public function viaBreakout(): BelongsTo
+    {
+        return $this->belongsTo(Breakout::class, 'via_breakout_id');
+    }
+
+    /** @return BelongsTo<User, $this> */
     public function recordedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'recorded_by');

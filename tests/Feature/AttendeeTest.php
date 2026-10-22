@@ -303,6 +303,9 @@ class AttendeeTest extends TestCase
         $church = Church::factory()->for($org)->for($union)->for($mission)->create();
 
         $response = $this->actingAs($user, 'sanctum')->putJson("/api/v1/attendees/{$attendee->id}", [
+            'organization_level' => 'mission',
+            'union_id' => $union->id,
+            'mission_id' => $mission->id,
             'church_id' => $church->id,
         ]);
 
@@ -587,6 +590,8 @@ class AttendeeTest extends TestCase
             'union_id' => Union::factory()->create(['organization_id' => $checker->organization_id])->id,
             'first_name' => 'John',
             'last_name' => 'Doe',
+            'email_address' => 'john@example.com',
+            'mobile_no' => '09171234567',
             'event_id' => $event->id,
         ]);
 

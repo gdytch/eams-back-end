@@ -189,7 +189,7 @@ class EventSelfRegistrationTest extends TestCase
         $this->assertSame($orgA->id, $user->fresh()->organization_id);
     }
 
-    public function test_self_registration_returns_qr_token(): void
+    public function test_self_registration_creates_a_draft_without_qr_token(): void
     {
         Bus::fake();
 
@@ -201,7 +201,8 @@ class EventSelfRegistrationTest extends TestCase
             ->postJson("/api/v1/public/event/{$event->invite_token}/register");
 
         $response->assertCreated();
-        $this->assertNotEmpty($response->json('data.qr_token'));
+        $this->assertNull($response->json('data.qr_token'));
+        $response->assertJsonPath('data.attendee.registration_status', 'draft');
     }
 
     public function test_unverified_user_cannot_register_over_an_attendee_with_their_email(): void

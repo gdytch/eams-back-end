@@ -116,6 +116,7 @@ class EventAttendeeController extends Controller
                     'last_name' => $data['last_name'],
                     'email_address' => $data['email_address'] ?? null,
                     'registered_by' => $request->user()->id,
+                    'registration_confirmed_at' => now(),
                     'created_by' => $request->user()->id,
                 ]);
 

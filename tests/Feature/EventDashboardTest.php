@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\Mission;
@@ -36,10 +37,12 @@ class EventDashboardTest extends TestCase
             'organization_level' => 'union',
             'union_id' => $union->id,
         ]);
+        $church = Church::factory()->for($organization)->for($union)->for($mission)->create();
         $missionAttendee = Attendee::factory()->for($organization)->create([
             'organization_level' => 'mission',
             'union_id' => $union->id,
             'mission_id' => $mission->id,
+            'church_id' => $church->id,
         ]);
 
         $firstUnionRegistration = null;

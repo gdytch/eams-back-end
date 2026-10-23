@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventProgram;
 use App\Models\EventProgramDay;
@@ -11,6 +12,7 @@ use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
 use App\Models\Organization;
+use App\Models\Speaker;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
@@ -752,5 +754,114 @@ class AttendeeDashboardTest extends TestCase
         $this->assertNotEmpty(
             $response->json('data.days.0.sections.0.items.0.participant_photo_urls.0')
         );
+    }
+
+    /** @return array{0: User, 1: Organization} */
+    private function pickAttendeeUser(): array
+    {
+        $org = Organization::factory()->create();
+
+        return [User::factory()->attendee()->create(['organization_id' => $org->id]), $org];
+    }
+
+    private function registerWithPicks(User $user, Organization $org, array $eventState, array $registration, int $pickCount = 1): array
+    {
+        $event = Event::factory()->for($org)->create($eventState);
+        $attendee = Attendee::factory()->for($org)->for($user)->create();
+        $attendee = $this->registerInEvent($event, $attendee);
+        $breakouts = Breakout::factory()->count($pickCount + 1)->for($event)->create();
+        $speaker = Speaker::factory()->for($event)->create();
+        $breakouts[0]->speakers()->attach($speaker->id, ['sort_order' => 1]);
+        $attendee->breakouts()->attach($breakouts->take($pickCount)->pluck('id')->all(), ['overbooked' => true]);
+        $attendee->forceFill($registration)->saveQuietly();
+
+        return [$event, $attendee, $breakouts, $speaker];
+    }
+
+    public function test_dashboard_returns_own_picks_for_upcoming_and_past_events_without_public_program(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        [$upcoming, , $upcomingBreakouts, $speaker] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => now()]);
+        [$past, , $pastBreakouts] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->subDays(6), 'end_date' => now()->subDays(5),
+        ], ['registration_completed_at' => now()]);
+
+        $data = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data') ?? [];
+
+        $this->assertNull($data['upcoming_events'][0]['breakouts']);
+        $picks = $data['upcoming_events'][0]['picks'];
+        $this->assertCount(1, $picks);
+        $this->assertSame($upcomingBreakouts[0]->id, $picks[0]['id']);
+        $this->assertSame($upcomingBreakouts[0]->title, $picks[0]['title']);
+        $this->assertSame($upcomingBreakouts[0]->room, $picks[0]['room']);
+        $this->assertSame($speaker->name, $picks[0]['speakers'][0]['name']);
+        $this->assertFalse($picks[0]['draft']);
+        $this->assertSame([$pastBreakouts[0]->id], array_column($data['past_events'][0]['picks'], 'id'));
+        $this->assertStringNotContainsString('overbooked', json_encode($data));
+    }
+
+    public function test_dashboard_flags_picks_of_an_unfinished_registration_as_draft(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => null]);
+
+        $picks = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data.upcoming_events.0.picks');
+
+        $this->assertTrue($picks[0]['draft']);
+    }
+
+    public function test_dashboard_returns_no_breakout_data_when_pick_mode_is_null(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        $this->registerWithPicks($user, $org, [
+            'pick_mode' => null, 'pick_min' => null, 'pick_max' => null,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => now()]);
+
+        $event = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data.upcoming_events.0');
+
+        $this->assertNull($event['picks']);
+        $this->assertNull($event['breakouts']);
+    }
+
+    public function test_dashboard_full_breakout_list_still_requires_public_program(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        [$event, , $breakouts] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => now()]);
+        EventProgram::factory()->for($event)->create(['is_public' => true]);
+
+        $data = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data');
+
+        $this->assertCount($breakouts->count(), $data['upcoming_events'][0]['breakouts']);
+        $this->assertCount(1, $data['upcoming_events'][0]['picks']);
+        $this->assertStringNotContainsString('overbooked', json_encode($data));
+    }
+
+    public function test_registrations_include_own_picks_with_draft_flag_and_no_overbooked(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        [, , $breakouts] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+        ], ['registration_completed_at' => null]);
+        $this->registerWithPicks($user, $org, ['pick_mode' => null, 'pick_min' => null, 'pick_max' => null], ['registration_completed_at' => now()]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/registrations')->assertOk();
+        $rows = collect($response->json('data'));
+
+        $withPicks = $rows->first(fn ($row) => $row['picks'] !== null);
+        $this->assertSame([$breakouts[0]->id], array_column($withPicks['picks'], 'id'));
+        $this->assertTrue($withPicks['picks'][0]['draft']);
+        $this->assertNotNull($rows->first(fn ($row) => $row['picks'] === null));
+        $this->assertStringNotContainsString('overbooked', $response->getContent());
     }
 }

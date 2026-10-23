@@ -245,6 +245,16 @@ class Attendee extends Model
         return $this->belongsTo(Event::class);
     }
 
+    /**
+     * The Attendee's own picks without pivot data, safe to load for Attendee-facing payloads (no `overbooked`).
+     *
+     * @return BelongsToMany<Breakout, $this>
+     */
+    public function pickedBreakouts(): BelongsToMany
+    {
+        return $this->belongsToMany(Breakout::class, 'breakout_picks');
+    }
+
     /** @return BelongsToMany<Breakout, $this> */
     public function breakouts(): BelongsToMany
     {

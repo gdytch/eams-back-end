@@ -15,6 +15,7 @@ use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class AttendeeDashboardTest extends TestCase
@@ -643,6 +644,50 @@ class AttendeeDashboardTest extends TestCase
         $this->assertNotNull($sessionsById[$sessions[0]->id]['check_in_at']);
         $this->assertSame('absent', $sessionsById[$sessions[1]->id]['status']);
         $this->assertSame('absent', $sessionsById[$sessions[2]->id]['status']);
+    }
+
+    public function test_attendance_lists_breakouts_apart_from_sessions_with_each_status(): void
+    {
+        Carbon::setTestNow('2026-06-25 12:00:00');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $event = Event::factory()->for($organization)->create(['pick_mode' => 'multiple', 'pick_min' => 1, 'pick_max' => null]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->for($event)->create(['first_registered_at' => now()->subYear()]);
+        $make = fn (string $start, string $end, int $capacity = 1) => Breakout::factory()->for($event)->create(['date' => '2026-06-25', 'start_time' => $start, 'end_time' => $end, 'capacity' => $capacity]);
+        $checkedIn = $make('08:00', '09:00');
+        $missed = $make('09:00', '10:00');
+        $pending = $make('14:00', '15:00');
+        $walkIn = $make('10:00', '11:00');
+        $attendee->breakouts()->attach([$checkedIn->id, $missed->id, $pending->id], ['overbooked' => true]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $checkedIn->id, 'check_in_at' => now()->subHours(3)]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $walkIn->id, 'check_in_at' => now()->subHour(), 'is_walk_in' => true]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson("/api/v1/attendee/events/{$event->id}/attendance")->assertOk();
+
+        $rows = collect($response->json('breakouts'))->keyBy('id');
+        $this->assertSame('checked_in', $rows[$checkedIn->id]['status']);
+        $this->assertSame('missed', $rows[$missed->id]['status']);
+        $this->assertSame('pending', $rows[$pending->id]['status']);
+        $this->assertSame('walk_in', $rows[$walkIn->id]['status']);
+        $this->assertSame([$checkedIn->id, $missed->id, $walkIn->id, $pending->id], $response->json('breakouts.*.id'));
+        $this->assertSame($missed->title, $rows[$missed->id]['title']);
+        $this->assertSame($missed->room, $rows[$missed->id]['room']);
+        $this->assertArrayNotHasKey('overbooked', $rows[$missed->id]);
+        $this->assertSame([], $response->json('sessions'));
+        $this->assertSame(0, $response->json('stats.total_sessions'));
+    }
+
+    public function test_attendance_breakouts_is_empty_when_event_has_no_pick_mode(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $event = Event::factory()->for($organization)->create(['pick_mode' => null]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->for($event)->create();
+        $breakout = Breakout::factory()->for($event)->create();
+        $attendee->breakouts()->attach($breakout->id);
+
+        $this->actingAs($user, 'sanctum')->getJson("/api/v1/attendee/events/{$event->id}/attendance")
+            ->assertOk()->assertJsonPath('breakouts', []);
     }
 
     public function test_attendee_cannot_view_attendance_for_an_event_they_are_not_registered_for(): void

@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventProgram;
 use App\Models\EventProgramDay;
@@ -11,6 +12,7 @@ use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
 use App\Models\Organization;
+use App\Models\Speaker;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
@@ -752,5 +754,83 @@ class AttendeeDashboardTest extends TestCase
         $this->assertNotEmpty(
             $response->json('data.days.0.sections.0.items.0.participant_photo_urls.0')
         );
+    }
+
+    /** @return array{0: User, 1: Attendee, 2: Event} */
+    private function breakoutProgramSetup(?string $pickMode, bool $public): array
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->create();
+        $event = Event::factory()->for($organization)->create([
+            'pick_mode' => $pickMode, 'pick_min' => $pickMode ? 1 : null, 'pick_max' => null,
+        ]);
+        $this->registerInEvent($event, $attendee);
+        EventProgram::factory()->for($event)->create(['is_public' => $public]);
+
+        return [$user, $attendee, $event];
+    }
+
+    public function test_program_lists_all_breakouts_flat_with_picked_flag_when_program_is_public(): void
+    {
+        [$user, $attendee, $event] = $this->breakoutProgramSetup('multiple', true);
+        $mine = Breakout::factory()->for($event)->create(['title' => 'Mine', 'date' => '2026-06-25', 'start_time' => '09:00:00', 'end_time' => '10:00:00', 'room' => 'A1']);
+        $other = Breakout::factory()->for($event)->create(['title' => 'Other', 'date' => '2026-06-25', 'start_time' => '11:00:00', 'end_time' => '12:00:00']);
+        $mine->speakers()->attach(Speaker::factory()->for($event)->create(['name' => 'Jo Speaker'])->id);
+        $attendee->breakouts()->attach($mine->id);
+
+        $response = $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertOk()
+            ->assertJsonCount(2, 'data.breakouts')
+            ->assertJsonPath('data.breakouts.0.title', 'Mine')
+            ->assertJsonPath('data.breakouts.0.picked', true)
+            ->assertJsonPath('data.breakouts.0.start_time', '09:00')
+            ->assertJsonPath('data.breakouts.0.room', 'A1')
+            ->assertJsonPath('data.breakouts.0.speakers.0.name', 'Jo Speaker')
+            ->assertJsonPath('data.breakouts.1.title', 'Other')
+            ->assertJsonPath('data.breakouts.1.picked', false)
+            ->assertJsonMissingPath('data.breakouts.0.program');
+
+        $this->assertStringNotContainsString('overbooked', $response->getContent());
+        $this->assertStringNotContainsString('picks_count', $response->getContent());
+    }
+
+    public function test_program_lists_only_own_picks_when_program_is_not_public(): void
+    {
+        [$user, $attendee, $event] = $this->breakoutProgramSetup('multiple', false);
+        $mine = Breakout::factory()->for($event)->create(['title' => 'Mine']);
+        Breakout::factory()->for($event)->create(['title' => 'Other']);
+        $attendee->breakouts()->attach($mine->id);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.breakouts')
+            ->assertJsonPath('data.breakouts.0.title', 'Mine')
+            ->assertJsonPath('data.breakouts.0.picked', true);
+    }
+
+    public function test_program_ignores_other_attendees_picks(): void
+    {
+        [$user, , $event] = $this->breakoutProgramSetup('multiple', false);
+        $breakout = Breakout::factory()->for($event)->create();
+        Attendee::factory()->for($event->organization)->create(['event_id' => $event->id])->breakouts()->attach($breakout->id);
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertOk()
+            ->assertJsonPath('data.breakouts', []);
+    }
+
+    public function test_program_returns_no_breakouts_when_pick_mode_is_null(): void
+    {
+        [$user, , $event] = $this->breakoutProgramSetup(null, true);
+        Breakout::factory()->for($event)->create();
+
+        $this->actingAs($user, 'sanctum')
+            ->getJson("/api/v1/attendee/events/{$event->id}/program")
+            ->assertOk()
+            ->assertJsonPath('data.breakouts', []);
     }
 }

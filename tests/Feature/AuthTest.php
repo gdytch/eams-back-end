@@ -89,4 +89,17 @@ class AuthTest extends TestCase
             ->assertOk()
             ->assertJsonPath('user.pending_registration', null);
     }
+
+    public function test_opening_the_wizard_before_the_first_save_marks_the_registration_pending(): void
+    {
+        $event = Event::factory()->create();
+        $user = User::factory()->attendee()->create();
+        $token = $user->createToken('api')->plainTextToken;
+
+        $this->withToken($token)->getJson("/api/v1/public/event/{$event->invite_token}/registration")->assertOk();
+
+        $this->withToken($token)->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertJsonPath('user.pending_registration', $event->invite_token);
+    }
 }

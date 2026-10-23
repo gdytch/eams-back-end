@@ -38,7 +38,11 @@ class AttendeeResource extends JsonResource
             'completeness' => $this->when($this->event_id !== null, fn () => collect(app(RegistrationCompleteness::class)->steps($this->resource))
                 ->map(fn (array $missing) => ['complete' => $missing === [], 'missing' => $missing])),
             'picks_released_at' => $this->picks_released_at,
-            'breakouts' => $this->whenLoaded('breakouts', fn () => $this->breakouts->map(fn ($b) => ['id' => $b->id, 'title' => $b->title, 'overbooked' => (bool) $b->pivot->overbooked])),
+            // `overbooked` is an admin signal: attendees never see it.
+            'breakouts' => $this->whenLoaded('breakouts', fn () => $this->breakouts->map(fn ($b) => [
+                'id' => $b->id,
+                'title' => $b->title,
+            ] + ($request->user()?->isAttendee() ? [] : ['overbooked' => (bool) $b->pivot->overbooked]))),
             'union' => UnionResource::make($this->whenLoaded('union')),
             'mission' => MissionResource::make($this->whenLoaded('mission')),
             'church' => ChurchResource::make($this->whenLoaded('church')),

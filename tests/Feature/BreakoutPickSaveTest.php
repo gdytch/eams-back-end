@@ -117,12 +117,14 @@ class BreakoutPickSaveTest extends TestCase
         $mine = $this->attendee($this->user);
 
         $res = $this->save($this->user, [$only->id])->assertOk()
-            ->assertJsonPath('data.attendee.breakouts.0.overbooked', true)
+            ->assertJsonMissingPath('data.attendee.breakouts.0.overbooked')
             ->assertJsonPath('steps.breakouts', []);
+        $this->assertStringNotContainsString('overbooked', $res->getContent());
+        $this->assertTrue((bool) $mine->breakouts()->first()->pivot->overbooked);
         $this->assertStringContainsString($only->title, $res->json('note'));
         $this->assertSame(2, $only->picks()->count());
         // A later save keeps the held pick and its flag, and shows no new note.
-        $this->save($this->user, [$only->id])->assertOk()->assertJsonPath('note', null)->assertJsonPath('data.attendee.breakouts.0.overbooked', true);
+        $this->save($this->user, [$only->id])->assertOk()->assertJsonPath('note', null)->assertJsonMissingPath('data.attendee.breakouts.0.overbooked');
     }
 
     public function test_attendee_with_a_choice_is_not_overbooked(): void
@@ -144,7 +146,7 @@ class BreakoutPickSaveTest extends TestCase
 
         // Only 1 reachable non-overlapping slot besides the full one, shortfall is 1: the full one is let in once.
         $this->breakout('11:00', '12:00');
-        $this->save($this->user, [$full->id])->assertOk()->assertJsonPath('data.attendee.breakouts.0.overbooked', true);
+        $this->save($this->user, [$full->id])->assertOk()->assertJsonMissingPath('data.attendee.breakouts.0.overbooked');
     }
 
     public function test_picks_are_final_once_fully_registered_but_an_admin_can_change_them_audited(): void
@@ -168,6 +170,18 @@ class BreakoutPickSaveTest extends TestCase
         $this->actingAs($admin, 'sanctum')->putJson("/api/v1/attendees/{$attendee->id}/breakouts", ['breakout_ids' => [$b->id, $a->id]])->assertOk();
         $this->assertSame(2, $attendee->breakouts()->count());
         $this->assertDatabaseHas('audit_logs', ['action' => 'attendee.breakout_picks_changed', 'user_id' => $admin->id]);
+    }
+
+    public function test_admin_pick_response_keeps_overbooked_while_attendee_response_hides_it(): void
+    {
+        $full = $this->breakout('09:00', '10:00', 1);
+        $this->attendee()->breakouts()->attach($full->id);
+        $draft = $this->attendee($this->user);
+        $admin = User::factory()->orgAdmin()->for($this->org)->create();
+
+        $this->save($this->user, [$full->id])->assertOk()->assertJsonMissingPath('data.attendee.breakouts.0.overbooked');
+        $this->actingAs($admin, 'sanctum')->putJson("/api/v1/attendees/{$draft->id}/breakouts", ['breakout_ids' => [$full->id]])
+            ->assertOk()->assertJsonPath('data.breakouts.0.overbooked', true);
     }
 
     public function test_admin_may_exceed_capacity_on_a_draft_and_other_orgs_are_denied(): void

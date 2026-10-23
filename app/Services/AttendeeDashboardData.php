@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Http\Resources\BreakoutResource;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\User;
@@ -89,7 +90,55 @@ class AttendeeDashboardData
             'registration_id' => $registration->id,
             'stats' => $this->eventAttendanceStats($sessionRows),
             'sessions' => $sessionRows->values(),
+            'breakouts' => $this->breakoutAttendance($event, $registration),
         ];
+    }
+
+    /**
+     * Breakout attendance, kept apart from the session rows (ADR 0003). Empty while the event has no pick mode.
+     * Status: checked_in, walk_in, missed (ended without a check-in) or pending. Never exposes `overbooked`.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function breakoutAttendance(Event $event, Attendee $registration): array
+    {
+        if ($event->pick_mode === null) {
+            return [];
+        }
+
+        $records = $registration->attendanceRecords()
+            ->whereNotNull('breakout_id')
+            ->whereNotNull('check_in_at')
+            ->get()
+            ->keyBy('breakout_id');
+
+        $ids = $registration->breakouts()->withoutGlobalScopes()->pluck('breakouts.id')->merge($records->keys())->unique();
+
+        return Breakout::withoutGlobalScopes()
+            ->whereIn('id', $ids)
+            ->get()
+            ->sortBy(fn (Breakout $breakout): string => $breakout->date->toDateString().' '.$breakout->start_time)
+            ->values()
+            ->map(function (Breakout $breakout) use ($records): array {
+                $record = $records->get($breakout->id);
+
+                return [
+                    'id' => $breakout->id,
+                    'title' => $breakout->title,
+                    'date' => $breakout->date->toDateString(),
+                    'start_time' => $breakout->start_time,
+                    'end_time' => $breakout->end_time,
+                    'room' => $breakout->room,
+                    'status' => match (true) {
+                        $record?->is_walk_in => 'walk_in',
+                        $record !== null => 'checked_in',
+                        $breakout->endsAt()->isPast() => 'missed',
+                        default => 'pending',
+                    },
+                    'check_in_at' => $record?->check_in_at,
+                ];
+            })
+            ->all();
     }
 
     /**

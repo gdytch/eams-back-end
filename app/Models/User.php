@@ -20,7 +20,7 @@ use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'email_verified_at', 'organization_id', 'role', 'first_name', 'middle_name', 'last_name', 'photo_paths', 'invite_token', 'invited_at'])]
+#[Fillable(['name', 'email', 'password', 'email_verified_at', 'organization_id', 'role', 'first_name', 'middle_name', 'last_name', 'photo_paths', 'invite_token', 'invited_at', 'pending_registration_event_id'])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable implements MustVerifyEmail
 {
@@ -69,22 +69,37 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
-     * The newest unfinished (Draft or Incomplete) registration on an open event: the Attendee has not completed it, so the app
-     * sends them back to its wizard.
+     * Invite token of the open event whose registration the Attendee has not completed, or null.
+     * Covers an unfinished registration, and a wizard opened before its first save (no Attendee yet).
      */
-    public function pendingRegistration(): ?Attendee
+    public function pendingRegistrationToken(): ?string
     {
         if (! $this->isAttendee()) {
             return null;
         }
 
-        return $this->attendees()
+        $unfinished = $this->attendees()
             ->withoutGlobalScopes()
             ->whereNull('registration_completed_at')
             ->whereHas('event', fn ($q) => $q->withoutGlobalScopes()->whereNull('archived_at')->whereNotNull('invite_token'))
             ->with(['event' => fn ($q) => $q->withoutGlobalScopes()])
             ->latest('id')
             ->first();
+
+        if ($unfinished !== null) {
+            return $unfinished->event->invite_token;
+        }
+
+        $event = $this->pending_registration_event_id === null ? null : Event::withoutGlobalScopes()
+            ->whereKey($this->pending_registration_event_id)
+            ->whereNull('archived_at')
+            ->whereNotNull('invite_token')
+            ->first();
+
+        $registered = $event !== null && $this->attendees()->withoutGlobalScopes()
+            ->where('event_id', $event->id)->whereNotNull('registration_completed_at')->exists();
+
+        return $event === null || $registered ? null : $event->invite_token;
     }
 
     public function identities(): HasMany

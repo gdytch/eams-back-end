@@ -15,6 +15,7 @@ use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class AttendeeDashboardTest extends TestCase
@@ -645,6 +646,50 @@ class AttendeeDashboardTest extends TestCase
         $this->assertSame('absent', $sessionsById[$sessions[2]->id]['status']);
     }
 
+    public function test_attendance_lists_breakouts_apart_from_sessions_with_each_status(): void
+    {
+        Carbon::setTestNow('2026-06-25 12:00:00');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $event = Event::factory()->for($organization)->create(['pick_mode' => 'multiple', 'pick_min' => 1, 'pick_max' => null]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->for($event)->create(['first_registered_at' => now()->subYear()]);
+        $make = fn (string $start, string $end, int $capacity = 1) => Breakout::factory()->for($event)->create(['date' => '2026-06-25', 'start_time' => $start, 'end_time' => $end, 'capacity' => $capacity]);
+        $checkedIn = $make('08:00', '09:00');
+        $missed = $make('09:00', '10:00');
+        $pending = $make('14:00', '15:00');
+        $walkIn = $make('10:00', '11:00');
+        $attendee->breakouts()->attach([$checkedIn->id, $missed->id, $pending->id], ['overbooked' => true]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $checkedIn->id, 'check_in_at' => now()->subHours(3)]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $walkIn->id, 'check_in_at' => now()->subHour(), 'is_walk_in' => true]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson("/api/v1/attendee/events/{$event->id}/attendance")->assertOk();
+
+        $rows = collect($response->json('breakouts'))->keyBy('id');
+        $this->assertSame('checked_in', $rows[$checkedIn->id]['status']);
+        $this->assertSame('missed', $rows[$missed->id]['status']);
+        $this->assertSame('pending', $rows[$pending->id]['status']);
+        $this->assertSame('walk_in', $rows[$walkIn->id]['status']);
+        $this->assertSame([$checkedIn->id, $missed->id, $walkIn->id, $pending->id], $response->json('breakouts.*.id'));
+        $this->assertSame($missed->title, $rows[$missed->id]['title']);
+        $this->assertSame($missed->room, $rows[$missed->id]['room']);
+        $this->assertArrayNotHasKey('overbooked', $rows[$missed->id]);
+        $this->assertSame([], $response->json('sessions'));
+        $this->assertSame(0, $response->json('stats.total_sessions'));
+    }
+
+    public function test_attendance_breakouts_is_empty_when_event_has_no_pick_mode(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $event = Event::factory()->for($organization)->create(['pick_mode' => null]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->for($event)->create();
+        $breakout = Breakout::factory()->for($event)->create();
+        $attendee->breakouts()->attach($breakout->id);
+
+        $this->actingAs($user, 'sanctum')->getJson("/api/v1/attendee/events/{$event->id}/attendance")
+            ->assertOk()->assertJsonPath('breakouts', []);
+    }
+
     public function test_attendee_cannot_view_attendance_for_an_event_they_are_not_registered_for(): void
     {
         $organization = Organization::factory()->create();
@@ -832,5 +877,114 @@ class AttendeeDashboardTest extends TestCase
             ->getJson("/api/v1/attendee/events/{$event->id}/program")
             ->assertOk()
             ->assertJsonPath('data.breakouts', []);
+    }
+
+    /** @return array{0: User, 1: Organization} */
+    private function pickAttendeeUser(): array
+    {
+        $org = Organization::factory()->create();
+
+        return [User::factory()->attendee()->create(['organization_id' => $org->id]), $org];
+    }
+
+    private function registerWithPicks(User $user, Organization $org, array $eventState, array $registration, int $pickCount = 1): array
+    {
+        $event = Event::factory()->for($org)->create($eventState);
+        $attendee = Attendee::factory()->for($org)->for($user)->create();
+        $attendee = $this->registerInEvent($event, $attendee);
+        $breakouts = Breakout::factory()->count($pickCount + 1)->for($event)->create();
+        $speaker = Speaker::factory()->for($event)->create();
+        $breakouts[0]->speakers()->attach($speaker->id, ['sort_order' => 1]);
+        $attendee->breakouts()->attach($breakouts->take($pickCount)->pluck('id')->all(), ['overbooked' => true]);
+        $attendee->forceFill($registration)->saveQuietly();
+
+        return [$event, $attendee, $breakouts, $speaker];
+    }
+
+    public function test_dashboard_returns_own_picks_for_upcoming_and_past_events_without_public_program(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        [$upcoming, , $upcomingBreakouts, $speaker] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => now()]);
+        [$past, , $pastBreakouts] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->subDays(6), 'end_date' => now()->subDays(5),
+        ], ['registration_completed_at' => now()]);
+
+        $data = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data') ?? [];
+
+        $this->assertNull($data['upcoming_events'][0]['breakouts']);
+        $picks = $data['upcoming_events'][0]['picks'];
+        $this->assertCount(1, $picks);
+        $this->assertSame($upcomingBreakouts[0]->id, $picks[0]['id']);
+        $this->assertSame($upcomingBreakouts[0]->title, $picks[0]['title']);
+        $this->assertSame($upcomingBreakouts[0]->room, $picks[0]['room']);
+        $this->assertSame($speaker->name, $picks[0]['speakers'][0]['name']);
+        $this->assertFalse($picks[0]['draft']);
+        $this->assertSame([$pastBreakouts[0]->id], array_column($data['past_events'][0]['picks'], 'id'));
+        $this->assertStringNotContainsString('overbooked', json_encode($data));
+    }
+
+    public function test_dashboard_flags_picks_of_an_unfinished_registration_as_draft(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => null]);
+
+        $picks = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data.upcoming_events.0.picks');
+
+        $this->assertTrue($picks[0]['draft']);
+    }
+
+    public function test_dashboard_returns_no_breakout_data_when_pick_mode_is_null(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        $this->registerWithPicks($user, $org, [
+            'pick_mode' => null, 'pick_min' => null, 'pick_max' => null,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => now()]);
+
+        $event = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data.upcoming_events.0');
+
+        $this->assertNull($event['picks']);
+        $this->assertNull($event['breakouts']);
+    }
+
+    public function test_dashboard_full_breakout_list_still_requires_public_program(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        [$event, , $breakouts] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+            'start_date' => now()->addDays(5), 'end_date' => now()->addDays(6),
+        ], ['registration_completed_at' => now()]);
+        EventProgram::factory()->for($event)->create(['is_public' => true]);
+
+        $data = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json('data');
+
+        $this->assertCount($breakouts->count(), $data['upcoming_events'][0]['breakouts']);
+        $this->assertCount(1, $data['upcoming_events'][0]['picks']);
+        $this->assertStringNotContainsString('overbooked', json_encode($data));
+    }
+
+    public function test_registrations_include_own_picks_with_draft_flag_and_no_overbooked(): void
+    {
+        [$user, $org] = $this->pickAttendeeUser();
+        [, , $breakouts] = $this->registerWithPicks($user, $org, [
+            'pick_mode' => 'one', 'pick_min' => 1, 'pick_max' => 1,
+        ], ['registration_completed_at' => null]);
+        $this->registerWithPicks($user, $org, ['pick_mode' => null, 'pick_min' => null, 'pick_max' => null], ['registration_completed_at' => now()]);
+
+        $response = $this->actingAs($user, 'sanctum')->getJson('/api/v1/attendee/registrations')->assertOk();
+        $rows = collect($response->json('data'));
+
+        $withPicks = $rows->first(fn ($row) => $row['picks'] !== null);
+        $this->assertSame([$breakouts[0]->id], array_column($withPicks['picks'], 'id'));
+        $this->assertTrue($withPicks['picks'][0]['draft']);
+        $this->assertNotNull($rows->first(fn ($row) => $row['picks'] === null));
+        $this->assertStringNotContainsString('overbooked', $response->getContent());
     }
 }

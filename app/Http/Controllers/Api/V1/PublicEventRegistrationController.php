@@ -51,6 +51,11 @@ class PublicEventRegistrationController extends Controller
 
             $attendee = $this->registration->userAttendeeIn($request->user(), $event);
 
+            if ($attendee === null && $request->user()->isAttendee()) {
+                // Opening the wizard commits the account to finishing it, even before the first save.
+                $request->user()->update(['pending_registration_event_id' => $event->id]);
+            }
+
             return $attendee === null
                 ? response()->json(['status' => 'ready', 'data' => null, 'steps' => $this->completeness->steps(new Attendee)])
                 : $this->respond($attendee);

@@ -110,6 +110,7 @@ class AttendeeDashboardResource extends JsonResource
                 'qr_token' => $eventData['qr_token'],
                 'id_card_ready' => $eventData['id_card_ready'],
                 'id_card_url' => $eventData['id_card_url'],
+                'picks' => $eventData['picks'],
             ];
 
             if (! $includeAttendance) {

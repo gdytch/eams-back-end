@@ -11,6 +11,7 @@ use App\Http\Resources\SpeakerResource;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Services\AttendeeDashboardData;
+use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -35,7 +36,7 @@ class AttendeeDashboardController extends Controller
         $registrations = $user->attendees()
             ->withoutGlobalScopes()
             ->whereHas('event')
-            ->with(['event.sessions', 'event.program', 'attendanceRecords'])
+            ->with(['event.sessions', 'event.program', 'attendanceRecords', 'pickedBreakouts' => $this->ownPickRelation()])
             ->get();
 
         return AttendeeDashboardResource::make($dashboardData->attendeeDashboard($user, $attendee, $registrations))->response();
@@ -44,7 +45,7 @@ class AttendeeDashboardController extends Controller
     /**
      * List all registrations for the authenticated attendee.
      */
-    public function registrations(Request $request): AnonymousResourceCollection
+    public function registrations(Request $request, AttendeeDashboardData $dashboardData): AnonymousResourceCollection
     {
         abort_unless($request->user()->isAttendee() || $request->user()->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
@@ -53,9 +54,10 @@ class AttendeeDashboardController extends Controller
 
         $registrations = $user->attendees()
             ->withoutGlobalScopes()
-            ->with(['event' => fn ($query) => $query->withoutGlobalScopes(), 'attendanceRecords'])
+            ->with(['event' => fn ($query) => $query->withoutGlobalScopes(), 'attendanceRecords', 'pickedBreakouts' => $this->ownPickRelation()])
             ->orderBy('created_at', 'desc')
-            ->get();
+            ->get()
+            ->each(fn (Attendee $registration) => $registration->setAttribute('own_picks', $dashboardData->ownPicks($registration)));
 
         return EventAttendeeResource::collection($registrations);
     }
@@ -134,5 +136,11 @@ class AttendeeDashboardController extends Controller
         abort_unless($user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->exists(), 404, 'Registration not found.');
 
         return SpeakerResource::collection($event->speakers()->with('programItems')->get());
+    }
+
+    /** Eager-load constraint for an Attendee's own picks. */
+    private function ownPickRelation(): Closure
+    {
+        return fn ($query) => $query->withoutGlobalScopes()->with(['speakers' => fn ($speakers) => $speakers->withoutGlobalScopes()]);
     }
 }

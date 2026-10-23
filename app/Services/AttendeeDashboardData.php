@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Http\Resources\BreakoutResource;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\User;
@@ -89,7 +90,55 @@ class AttendeeDashboardData
             'registration_id' => $registration->id,
             'stats' => $this->eventAttendanceStats($sessionRows),
             'sessions' => $sessionRows->values(),
+            'breakouts' => $this->breakoutAttendance($event, $registration),
         ];
+    }
+
+    /**
+     * Breakout attendance, kept apart from the session rows (ADR 0003). Empty while the event has no pick mode.
+     * Status: checked_in, walk_in, missed (ended without a check-in) or pending. Never exposes `overbooked`.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function breakoutAttendance(Event $event, Attendee $registration): array
+    {
+        if ($event->pick_mode === null) {
+            return [];
+        }
+
+        $records = $registration->attendanceRecords()
+            ->whereNotNull('breakout_id')
+            ->whereNotNull('check_in_at')
+            ->get()
+            ->keyBy('breakout_id');
+
+        $ids = $registration->breakouts()->withoutGlobalScopes()->pluck('breakouts.id')->merge($records->keys())->unique();
+
+        return Breakout::withoutGlobalScopes()
+            ->whereIn('id', $ids)
+            ->get()
+            ->sortBy(fn (Breakout $breakout): string => $breakout->date->toDateString().' '.$breakout->start_time)
+            ->values()
+            ->map(function (Breakout $breakout) use ($records): array {
+                $record = $records->get($breakout->id);
+
+                return [
+                    'id' => $breakout->id,
+                    'title' => $breakout->title,
+                    'date' => $breakout->date->toDateString(),
+                    'start_time' => $breakout->start_time,
+                    'end_time' => $breakout->end_time,
+                    'room' => $breakout->room,
+                    'status' => match (true) {
+                        $record?->is_walk_in => 'walk_in',
+                        $record !== null => 'checked_in',
+                        $breakout->endsAt()->isPast() => 'missed',
+                        default => 'pending',
+                    },
+                    'check_in_at' => $record?->check_in_at,
+                ];
+            })
+            ->all();
     }
 
     /**
@@ -131,6 +180,27 @@ class AttendeeDashboardData
         )->resolve();
     }
 
+    /**
+     * The Attendee's own picks, returned whatever the program's public setting. Null while the event has no pick mode.
+     * Never exposes `overbooked`: BreakoutResource only shows it when picks are counted.
+     *
+     * @return array<int, array<string, mixed>>|null
+     */
+    public function ownPicks(Attendee $registration): ?array
+    {
+        if ($registration->event?->pick_mode === null) {
+            return null;
+        }
+
+        $draft = $registration->registration_completed_at === null;
+
+        return $registration->pickedBreakouts
+            ->sortBy(fn (Breakout $breakout): string => $breakout->date->toDateString().' '.$breakout->start_time)
+            ->values()
+            ->map(fn (Breakout $breakout): array => BreakoutResource::make($breakout)->resolve() + ['draft' => $draft])
+            ->all();
+    }
+
     /** @return array{status: string, missing: array<int, string>, qr_and_id_card_work: bool}|null */
     private function banner(Attendee $registration): ?array
     {
@@ -164,7 +234,7 @@ class AttendeeDashboardData
     /**
      * Fields shared by upcoming and past entries, including what the ID card view and download need.
      *
-     * @return array{registration_id: int, event: Event, archived: bool, qr_token: string|null, id_card_ready: bool, id_card_url: string}
+     * @return array{registration_id: int, event: Event, archived: bool, qr_token: string|null, id_card_ready: bool, picks: array<int, array<string, mixed>>|null, id_card_url: string|null}
      */
     private function registrationEntry(Attendee $registration): array
     {
@@ -174,6 +244,7 @@ class AttendeeDashboardData
             'archived' => $registration->event->isArchived(),
             'qr_token' => $registration->qr_token,
             'id_card_ready' => $registration->id_card_generated_at !== null,
+            'picks' => $this->ownPicks($registration),
             'id_card_url' => $registration->first_registered_at === null
                 ? null
                 : "/api/v1/events/{$registration->event->id}/registrations/{$registration->id}/id-card",

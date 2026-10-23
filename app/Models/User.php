@@ -68,6 +68,25 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(Attendee::class);
     }
 
+    /**
+     * The newest unfinished (Draft or Incomplete) registration on an open event: the Attendee has not completed it, so the app
+     * sends them back to its wizard.
+     */
+    public function pendingRegistration(): ?Attendee
+    {
+        if (! $this->isAttendee()) {
+            return null;
+        }
+
+        return $this->attendees()
+            ->withoutGlobalScopes()
+            ->whereNull('registration_completed_at')
+            ->whereHas('event', fn ($q) => $q->withoutGlobalScopes()->whereNull('archived_at')->whereNotNull('invite_token'))
+            ->with(['event' => fn ($q) => $q->withoutGlobalScopes()])
+            ->latest('id')
+            ->first();
+    }
+
     public function identities(): HasMany
     {
         return $this->hasMany(UserIdentity::class);

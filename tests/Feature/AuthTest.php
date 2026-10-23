@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Attendee;
+use App\Models\Event;
 use App\Models\Organization;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -53,5 +55,38 @@ class AuthTest extends TestCase
 
         $response->assertOk();
         $this->assertCount(0, $user->fresh()->tokens);
+    }
+
+    public function test_user_payload_points_to_unfinished_registration(): void
+    {
+        $event = Event::factory()->create();
+        $user = User::factory()->attendee()->create();
+        Attendee::factory()->draft()->for($event)->create(['user_id' => $user->id]);
+
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('user.pending_registration', $event->invite_token);
+    }
+
+    public function test_user_payload_points_to_incomplete_registration(): void
+    {
+        $event = Event::factory()->create();
+        $user = User::factory()->attendee()->create();
+        Attendee::factory()->draft()->for($event)->create(['user_id' => $user->id, 'first_registered_at' => now()]);
+
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('user.pending_registration', $event->invite_token);
+    }
+
+    public function test_user_payload_has_no_pending_registration_once_finished(): void
+    {
+        $event = Event::factory()->create();
+        $user = User::factory()->attendee()->create();
+        Attendee::factory()->for($event)->create(['user_id' => $user->id, 'registration_completed_at' => now()]);
+
+        $this->postJson('/api/v1/auth/login', ['email' => $user->email, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonPath('user.pending_registration', null);
     }
 }

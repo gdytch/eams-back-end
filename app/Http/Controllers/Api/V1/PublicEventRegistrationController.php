@@ -62,6 +62,47 @@ class PublicEventRegistrationController extends Controller
         });
     }
 
+    /**
+     * Whether the account already has Attendee records from other events (archived ones too).
+     * The wizard locks the name fields for such accounts, so a shared computer cannot overwrite them.
+     */
+    public function accountStatus(Request $request, string $eventInviteToken): JsonResponse
+    {
+        $event = $this->resolvePublishedEvent($eventInviteToken);
+
+        $hasPreviousRecords = $request->user()->attendees()
+            ->withoutGlobalScopes()
+            ->where('event_id', '!=', $event->id)
+            ->exists();
+
+        return response()->json(['data' => ['has_previous_records' => $hasPreviousRecords]]);
+    }
+
+    /**
+     * Abandon an unfinished self-registration: drop the Draft and release the wizard lock.
+     */
+    public function cancel(Request $request, string $eventInviteToken): JsonResponse
+    {
+        $event = $this->resolvePublishedEvent($eventInviteToken);
+        $user = $request->user();
+
+        return DB::transaction(function () use ($user, $event) {
+            $attendee = $this->registration->userAttendeeIn($user, $event);
+
+            if ($attendee !== null) {
+                abort_if($attendee->first_registered_at !== null || $attendee->registration_completed_at !== null, 422, 'This registration is already submitted and cannot be cancelled.');
+                abort_unless($attendee->created_by === $user->id, 422, 'This registration was set up for you by an organizer and cannot be cancelled here.');
+
+                AuditLog::record('event_registration.cancelled', $attendee, ['attendee_id' => $attendee->id]);
+                $attendee->delete();
+            }
+
+            $user->update(['pending_registration_event_id' => null]);
+
+            return response()->json(['message' => 'Registration cancelled.']);
+        });
+    }
+
     public function saveBasicInfo(Request $request, string $eventInviteToken): JsonResponse
     {
         $event = $this->resolveWritableEvent($eventInviteToken);
@@ -72,7 +113,16 @@ class PublicEventRegistrationController extends Controller
             'mobile_no' => ['required', 'string', 'max:20'],
         ], [], ['mobile_no' => 'mobile number']);
 
-        return $this->save($request->user(), $event, $data, ['first_name', 'middle_name', 'last_name'], creates: true);
+        $response = $this->save($request->user(), $event, $data, ['first_name', 'middle_name', 'last_name'], creates: true);
+
+        // Account Info owns the account's name; keep the User in step with the Attendee.
+        $user = $request->user();
+        $attendee = $this->registration->userAttendeeIn($user, $event);
+        if ($attendee !== null) {
+            $user->syncNameFrom($attendee);
+        }
+
+        return $response;
     }
 
     public function saveTerritory(SaveWizardTerritoryRequest $request, string $eventInviteToken): JsonResponse

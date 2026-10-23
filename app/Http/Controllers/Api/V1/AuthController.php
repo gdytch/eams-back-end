@@ -57,17 +57,11 @@ class AuthController extends Controller
             // Using an Attendee invite link for the invited address verifies that address.
             $inviteVerifiesEmail = $linking->inviteVouchesForEmail($data['invite_token'] ?? null, $data['email']);
 
-            $name = trim(collect([$data['first_name'], $data['middle_name'] ?? null, $data['last_name']])
-                ->filter()
-                ->implode(' '));
-
+            // Names are collected in the registration wizard's Account Info step; until then show the email handle.
             $user = User::create([
-                'name' => $name,
+                'name' => Str::before($data['email'], '@'),
                 'email' => $data['email'],
                 'password' => $data['password'],
-                'first_name' => $data['first_name'],
-                'middle_name' => $data['middle_name'] ?? null,
-                'last_name' => $data['last_name'],
                 'role' => UserRole::Attendee,
                 'email_verified_at' => $inviteVerifiesEmail ? now() : null,
             ]);
@@ -217,12 +211,7 @@ class AuthController extends Controller
             return;
         }
 
-        $user->update([
-            'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
-            'first_name' => $attendee->first_name,
-            'middle_name' => $attendee->middle_name,
-            'last_name' => $attendee->last_name,
-        ]);
+        $user->syncNameFrom($attendee);
     }
 
     private function claimWithSso(string $claimToken, $socialiteUser, SsoProvider $provider, AttendeeQrClaimService $claims, AttendeeLinkingService $linking): JsonResponse

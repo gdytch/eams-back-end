@@ -71,6 +71,8 @@ Route::get('public/event/{eventInviteToken}', [PublicEventController::class, 'sh
 Route::get('public/programs/{publicSlug}', [PublicEventProgramController::class, 'show']);
 Route::middleware('auth:sanctum')->prefix('public/event/{eventInviteToken}/registration')->group(function () {
     Route::get('/', [PublicEventRegistrationController::class, 'show']);
+    Route::delete('/', [PublicEventRegistrationController::class, 'cancel']);
+    Route::get('account-status', [PublicEventRegistrationController::class, 'accountStatus']);
     Route::put('basic-info', [PublicEventRegistrationController::class, 'saveBasicInfo']);
     Route::put('territory', [PublicEventRegistrationController::class, 'saveTerritory']);
     Route::put('breakouts', [PublicEventRegistrationController::class, 'saveBreakouts']);
@@ -166,6 +168,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/forms/copy', [FormController::class, 'copy']);
         Route::get('events/{event}/forms/export', [FormController::class, 'export'])->middleware('throttle:6,1');
         Route::apiResource('events.forms', FormController::class)->scoped();
+        Route::get('events/{event}/forms/{form}/answers', [FormController::class, 'answers'])->scopeBindings()->middleware('throttle:60,1')->name('forms.answers');
         Route::post('events/{event}/forms/{form}/publish', [FormController::class, 'publish'])->scopeBindings();
         Route::post('events/{event}/forms/{form}/unpublish', [FormController::class, 'unpublish'])->scopeBindings();
 

@@ -2,8 +2,8 @@
 
 namespace App\Notifications;
 
-use Illuminate\Auth\Notifications\VerifyEmail;
 use App\Concerns\SendsRateLimitedMail;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -43,7 +43,7 @@ class VerifyEmailNotification extends VerifyEmail implements ShouldQueue
         $query = $urlParts['query'] ?? '';
 
         // Rewrite to frontend URL, including id and hash in the query string
-        $frontendUrl = config('app.frontend_url') . '/verify-email?id=' . $id . '&hash=' . $hash . '&' . $query;
+        $frontendUrl = config('app.frontend_url').'/verify-email?id='.$id.'&hash='.$hash.'&'.$query;
 
         return (new MailMessage)
             ->view(['emails.verify-email', 'emails.verify-email-text'], [

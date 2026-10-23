@@ -33,7 +33,7 @@ class EventProgramSeeder extends Seeder
             'Edward Rodriguez' => 'Assistant Communication Director, SSD Communication - News and Media',
             'Anthony Stanyer' => 'Assistant Communication Director, SSD Communication - Social Media',
             'Pr. Jaffet Legario' => 'Communication Director',
-        ])->mapWithKeys(fn(string $designation, string $sampleName) => [
+        ])->mapWithKeys(fn (string $designation, string $sampleName) => [
             $sampleName => $speakers->get($designation),
         ]);
 

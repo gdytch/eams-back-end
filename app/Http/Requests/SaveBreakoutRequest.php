@@ -39,4 +39,10 @@ class SaveBreakoutRequest extends FormRequest
             'speaker_ids.*' => ['integer', 'distinct', Rule::exists('speakers', 'id')->where('event_id', $this->route('event')->id)],
         ];
     }
+
+    /** @return array<string, string> */
+    public function attributes(): array
+    {
+        return ['room' => 'venue'];
+    }
 }

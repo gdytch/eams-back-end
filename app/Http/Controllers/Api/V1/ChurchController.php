@@ -13,6 +13,7 @@ use App\Models\Event;
 use App\Services\ChurchDuplicateService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -142,7 +143,7 @@ class ChurchController extends Controller
     }
 
     /**
-     * @param  array{exact: ?Church, same_name: \Illuminate\Support\Collection<int, Church>, similar: \Illuminate\Support\Collection<int, Church>}  $found
+     * @param  array{exact: ?Church, same_name: Collection<int, Church>, similar: Collection<int, Church>}  $found
      */
     private function duplicateResponse(array $found, bool $confirmed): ?JsonResponse
     {

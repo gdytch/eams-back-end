@@ -2,8 +2,8 @@
 
 namespace App\Mail;
 
-use App\Models\User;
 use App\Concerns\SendsRateLimitedMail;
+use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;
@@ -33,7 +33,7 @@ class UserAccountInviteMail extends Mailable implements ShouldQueue
     {
         $this->user->loadMissing('organization');
 
-        $inviteUrl = config('app.frontend_url') . '/accept-invite?token=' . $this->user->invite_token . '&email=' . urlencode($this->user->email);
+        $inviteUrl = config('app.frontend_url').'/accept-invite?token='.$this->user->invite_token.'&email='.urlencode($this->user->email);
 
         return new Content(
             view: 'emails.user-account-invite',

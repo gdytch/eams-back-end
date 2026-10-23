@@ -3,9 +3,9 @@
 namespace App\Exports;
 
 use App\Models\Form;
-use App\Models\FormAnswer;
 use App\Models\FormField;
 use App\Models\FormSubmission;
+use App\Services\FormAnswersTable;
 use Illuminate\Support\Collection;
 use Maatwebsite\Excel\Concerns\FromArray;
 use Maatwebsite\Excel\Concerns\ShouldAutoSize;
@@ -32,13 +32,15 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
 
     public const DELETED_FILE_TEXT = 'File deleted (event archived)';
 
-    /** @var Collection<int, FormField>|null */
-    private ?Collection $columns = null;
-
     /** @var array<int, array<int, string>> row number => [column index => download url] */
     private array $links = [];
 
-    public function __construct(private ?Form $form, private string $title) {}
+    private ?FormAnswersTable $table;
+
+    public function __construct(private ?Form $form, private string $title)
+    {
+        $this->table = $form === null ? null : new FormAnswersTable($form);
+    }
 
     public function title(): string
     {
@@ -56,24 +58,16 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
         return parent::bindValue($cell, $value);
     }
 
-    /** Active fields in form order, then archived fields that hold answers. */
     private function columns(): Collection
     {
-        if ($this->form === null) {
-            return $this->columns = collect();
-        }
-
-        return $this->columns ??= $this->form->fields()->withExists('answers')->get()
-            ->filter(fn (FormField $field) => $field->archived_at === null || $field->getAttribute('answers_exists'))
-            ->sortBy(fn (FormField $field) => [$field->archived_at !== null ? 1 : 0, $field->sort_order, $field->id])
-            ->values();
+        return $this->table?->columns() ?? collect();
     }
 
     public function headings(): array
     {
         return [
             'Name', 'Email', 'Territory', 'Registration status',
-            ...$this->columns()->map(fn (FormField $field) => $field->archived_at !== null ? "{$field->label} (removed)" : $field->label)->all(),
+            ...$this->columns()->map(fn (FormField $field) => $this->table->columnLabel($field))->all(),
         ];
     }
 
@@ -87,11 +81,7 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
         $columns = $this->columns();
         $rows = [];
 
-        FormSubmission::query()->where('form_id', $this->form->id)
-            ->with(['attendee' => fn ($q) => $q->with(['union', 'mission', 'church']), 'answers.options'])
-            ->get()
-            ->filter(fn (FormSubmission $submission) => $submission->attendee !== null)
-            ->sortBy(fn (FormSubmission $submission) => mb_strtolower($submission->attendee->last_name.' '.$submission->attendee->first_name))
+        $this->table->submissions()->get()
             ->each(function (FormSubmission $submission) use ($columns, &$rows) {
                 $attendee = $submission->attendee;
                 $answers = $submission->answers->keyBy('form_field_id');
@@ -100,26 +90,15 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
                 foreach ($columns as $index => $field) {
                     /** @var FormAnswer|null $answer */
                     $answer = $answers->get($field->id);
-                    $row[] = $this->cell($answer);
-                    if ($answer !== null && $answer->file_path !== null && $answer->file_deleted_at === null) {
-                        $this->links[count($rows) + 2][self::FIXED_COLUMNS + $index + 1] = route('form-answers.file', $answer);
+                    $row[] = $this->table->cell($answer);
+                    if ($url = $this->table->fileUrl($answer)) {
+                        $this->links[count($rows) + 2][self::FIXED_COLUMNS + $index + 1] = $url;
                     }
                 }
                 $rows[] = $row;
             });
 
         return $rows;
-    }
-
-    private function cell(?FormAnswer $answer): string
-    {
-        return match (true) {
-            $answer === null => '',
-            $answer->file_deleted_at !== null => self::DELETED_FILE_TEXT,
-            $answer->file_path !== null => (string) $answer->file_name,
-            $answer->options->isNotEmpty() => $answer->options->sortBy(['sort_order', 'id'])->pluck('label')->implode('; '),
-            default => (string) $answer->value,
-        };
     }
 
     public function styles($sheet): array

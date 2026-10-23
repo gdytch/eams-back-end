@@ -3,23 +3,27 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\FormStatus;
-use App\Http\Controllers\Controller;
 use App\Exports\FormAnswersExport;
+use App\Http\Controllers\Controller;
 use App\Http\Requests\CopyFormRequest;
+use App\Http\Requests\FormAnswersIndexRequest;
 use App\Http\Requests\ReorderFormsRequest;
 use App\Http\Requests\SaveFormRequest;
 use App\Http\Resources\FormResource;
+use App\Http\Resources\MissionResource;
+use App\Http\Resources\UnionResource;
 use App\Jobs\RecomputeEventCompletenessJob;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\Form;
+use App\Services\FormAnswersTable;
 use App\Services\FormAuthoring;
 use App\Services\RegistrationCompleteness;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Maatwebsite\Excel\Facades\Excel;
 use Illuminate\Validation\ValidationException;
+use Maatwebsite\Excel\Facades\Excel;
 
 class FormController extends Controller
 {
@@ -37,6 +41,46 @@ class FormController extends Controller
         AuditLog::record('form_answers.exported', $event);
 
         return Excel::download(new FormAnswersExport($event), "event-{$event->id}-form-answers.xlsx");
+    }
+
+    /** One page of a form's answers: a row per Attendee with a submission, a column per field. */
+    public function answers(FormAnswersIndexRequest $request, Event $event, Form $form)
+    {
+        $this->authorize('export', [Form::class, $event]);
+
+        $table = new FormAnswersTable($form);
+        $columns = $table->columns();
+        $perPage = min(100, max(1, (int) ($request->validated('per_page') ?? 25)));
+        $page = $table->submissions($request->validated('search'))->paginate($perPage);
+
+        return response()->json([
+            'columns' => $columns->map(fn ($field) => ['id' => $field->id, 'label' => $field->label, 'removed' => $field->archived_at !== null])->all(),
+            'data' => $page->getCollection()->map(function ($submission) use ($table, $columns) {
+                $attendee = $submission->attendee;
+                $answers = $submission->answers->keyBy('form_field_id');
+
+                return [
+                    'attendee' => [
+                        'id' => $attendee->id,
+                        'name' => preg_replace('/\s+/', ' ', $attendee->full_name),
+                        'email' => $attendee->email_address,
+                        'organization_level' => $attendee->organization_level?->value,
+                        'union' => $attendee->union ? UnionResource::make($attendee->union) : null,
+                        'mission' => $attendee->mission ? MissionResource::make($attendee->mission) : null,
+                        'registration_status' => (string) $attendee->registrationStatus(),
+                    ],
+                    'cells' => $columns->mapWithKeys(fn ($field) => [
+                        $field->id => ['text' => $table->cell($answers->get($field->id)), 'file_url' => $table->fileUrl($answers->get($field->id))],
+                    ])->all(),
+                ];
+            })->values()->all(),
+            'meta' => [
+                'current_page' => $page->currentPage(),
+                'last_page' => $page->lastPage(),
+                'per_page' => $page->perPage(),
+                'total' => $page->total(),
+            ],
+        ]);
     }
 
     public function store(SaveFormRequest $request, Event $event, FormAuthoring $authoring)

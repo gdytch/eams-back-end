@@ -102,6 +102,16 @@ class User extends Authenticatable implements MustVerifyEmail
         return $event === null || $registered ? null : $event->invite_token;
     }
 
+    public function syncNameFrom(Attendee $attendee): void
+    {
+        $this->update([
+            'name' => trim(collect([$attendee->first_name, $attendee->middle_name, $attendee->last_name])->filter()->implode(' ')),
+            'first_name' => $attendee->first_name,
+            'middle_name' => $attendee->middle_name,
+            'last_name' => $attendee->last_name,
+        ]);
+    }
+
     public function identities(): HasMany
     {
         return $this->hasMany(UserIdentity::class);

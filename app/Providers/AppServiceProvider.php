@@ -26,6 +26,6 @@ class AppServiceProvider extends ServiceProvider
         // One bucket for all queued mail (Mailables and Notifications).
         RateLimiter::for('mail', fn () => Limit::perMinute((int) config('mail.rate_limit_per_minute'))->by('mail'));
 
-        $this->app['events']->listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class . '@handle');
+        $this->app['events']->listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class.'@handle');
     }
 }

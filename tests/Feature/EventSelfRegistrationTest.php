@@ -70,6 +70,29 @@ class EventSelfRegistrationTest extends TestCase
         $this->postJson($this->url('/finish'))->assertUnauthorized();
     }
 
+    public function test_account_status_is_false_for_a_fresh_account(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->getJson($this->url('/account-status'))
+            ->assertOk()->assertJsonPath('data.has_previous_records', false);
+    }
+
+    public function test_account_status_ignores_the_current_events_own_record(): void
+    {
+        $this->completeAll();
+
+        $this->getJson($this->url('/account-status'))
+            ->assertOk()->assertJsonPath('data.has_previous_records', false);
+    }
+
+    public function test_account_status_is_true_with_a_record_from_an_archived_event(): void
+    {
+        $old = Event::factory()->for($this->org)->state(['status' => EventStatus::Published, 'archived_at' => now()])->create();
+        Attendee::factory()->for($this->org)->create(['event_id' => $old->id, 'user_id' => $this->user->id]);
+
+        $this->actingAs($this->user, 'sanctum')->getJson($this->url('/account-status'))
+            ->assertOk()->assertJsonPath('data.has_previous_records', true);
+    }
+
     public function test_unpublished_event_is_not_found(): void
     {
         $draft = Event::factory()->for($this->org)->state(['status' => EventStatus::Draft])->create();
@@ -104,6 +127,56 @@ class EventSelfRegistrationTest extends TestCase
         $this->assertNull($attendee->qr_token);
         $this->assertNull($attendee->registration_completed_at);
         $this->assertNull($attendee->first_registered_at);
+    }
+
+    public function test_basic_info_save_syncs_the_name_to_the_user(): void
+    {
+        $this->actingAs($this->user, 'sanctum')
+            ->putJson($this->url('/basic-info'), $this->basicInfo(['first_name' => 'Jane', 'middle_name' => 'Q', 'last_name' => 'Roe']))
+            ->assertOk();
+
+        $this->assertDatabaseHas('users', [
+            'id' => $this->user->id,
+            'name' => 'Jane Q Roe',
+            'first_name' => 'Jane',
+            'middle_name' => 'Q',
+            'last_name' => 'Roe',
+        ]);
+    }
+
+    public function test_cancel_deletes_the_draft_and_clears_pending(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->putJson($this->url('/basic-info'), $this->basicInfo())->assertOk();
+        $this->assertSame($this->event->invite_token, $this->user->fresh()->pendingRegistrationToken());
+
+        $this->actingAs($this->user, 'sanctum')->deleteJson($this->url())->assertOk();
+
+        $this->assertDatabaseCount('attendees', 0);
+        $this->assertNull($this->user->fresh()->pending_registration_event_id);
+        $this->assertNull($this->user->fresh()->pendingRegistrationToken());
+    }
+
+    public function test_cancel_before_first_save_clears_pending(): void
+    {
+        $this->actingAs($this->user, 'sanctum')->getJson($this->url())->assertOk();
+        $this->assertNotNull($this->user->fresh()->pending_registration_event_id);
+
+        $this->actingAs($this->user, 'sanctum')->deleteJson($this->url())->assertOk();
+
+        $this->assertNull($this->user->fresh()->pendingRegistrationToken());
+    }
+
+    public function test_cancel_is_refused_once_registration_is_complete(): void
+    {
+        $this->completeAll();
+
+        $this->actingAs($this->user, 'sanctum')->deleteJson($this->url())->assertUnprocessable();
+        $this->assertDatabaseCount('attendees', 1);
+    }
+
+    public function test_cancel_requires_authentication(): void
+    {
+        $this->deleteJson($this->url())->assertUnauthorized();
     }
 
     public function test_basic_info_does_not_accept_a_client_email(): void

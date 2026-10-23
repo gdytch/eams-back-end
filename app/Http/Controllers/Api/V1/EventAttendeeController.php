@@ -39,7 +39,13 @@ class EventAttendeeController extends Controller
     {
         $this->authorize('viewStaffData', $event);
 
+        $request->validate(['registration_status' => ['nullable', 'in:draft,incomplete,registered']]);
+
         $query = $event->attendees()->with(['union', 'mission']);
+
+        // Drafts (never completed registration) are listed apart; they are only returned when asked for.
+        $status = $request->input('registration_status');
+        $status ? $query->withRegistrationStatus($status) : $query->whereNotNull('first_registered_at');
 
         if ($search = trim((string) $request->string('search'))) {
             $query->where(function ($q) use ($search) {

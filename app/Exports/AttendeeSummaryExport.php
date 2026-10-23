@@ -11,7 +11,6 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 
-
 class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadings, WithStyles
 {
     /** @param  Collection<int, array<string, mixed>>  $rows */
@@ -19,13 +18,13 @@ class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadi
 
     public function collection(): Collection
     {
-        return $this->rows->map(fn($row) => [
+        return $this->rows->map(fn ($row) => [
             $row['attendee_name'],
             $row['organization_name'] ?? '',
             $row['present'],
             $row['absent'],
             ...($this->hasRemaining() ? [$row['remaining']] : []),
-            $row['attendance_rating'] . '%',
+            $row['attendance_rating'].'%',
             ...($this->withBreakouts ? [$row['breakout_present'], $row['breakout_absent']] : []),
         ]);
     }
@@ -37,7 +36,7 @@ class AttendeeSummaryExport implements FromCollection, ShouldAutoSize, WithHeadi
 
     private function hasRemaining(): bool
     {
-        return $this->rows->contains(fn($row) => $row['remaining'] > 0);
+        return $this->rows->contains(fn ($row) => $row['remaining'] > 0);
     }
 
     public function styles($sheet): array

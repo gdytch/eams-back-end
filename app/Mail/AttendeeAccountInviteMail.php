@@ -2,8 +2,8 @@
 
 namespace App\Mail;
 
-use App\Models\Attendee;
 use App\Concerns\SendsRateLimitedMail;
+use App\Models\Attendee;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Mail\Mailable;

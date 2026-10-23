@@ -114,8 +114,6 @@ class AuthRegisterTest extends TestCase
     private function validRegistrationPayload(array $overrides = []): array
     {
         return array_merge([
-            'first_name' => 'John',
-            'last_name' => 'Smith',
             'email' => 'john@example.com',
             'password' => 'password123',
             'password_confirmation' => 'password123',
@@ -124,9 +122,7 @@ class AuthRegisterTest extends TestCase
 
     public function test_user_can_register_with_valid_data(): void
     {
-        $payload = $this->validRegistrationPayload([
-            'middle_name' => 'Paul',
-        ]);
+        $payload = $this->validRegistrationPayload();
 
         $response = $this->postJson('/api/v1/auth/register', $payload);
 
@@ -138,8 +134,6 @@ class AuthRegisterTest extends TestCase
     {
         $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
             'email' => 'jane@example.com',
-            'first_name' => 'Jane',
-            'last_name' => 'Doe',
         ]));
 
         $this->assertSame(UserRole::Attendee->value, $response->json('user.role'));
@@ -153,8 +147,6 @@ class AuthRegisterTest extends TestCase
     {
         $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
             'email' => 'hacker@example.com',
-            'first_name' => 'Admin',
-            'last_name' => 'Hacker',
             'role' => 'super_admin',
         ]));
 
@@ -168,8 +160,6 @@ class AuthRegisterTest extends TestCase
 
         $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
             'email' => 'existing@example.com',
-            'first_name' => 'Duplicate',
-            'last_name' => 'User',
         ]));
 
         $response->assertUnprocessable();
@@ -197,8 +187,6 @@ class AuthRegisterTest extends TestCase
     {
         $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
             'email' => 'maria@example.com',
-            'first_name' => 'Maria',
-            'last_name' => 'Santos',
         ]));
 
         $token = $response->json('token');
@@ -211,27 +199,26 @@ class AuthRegisterTest extends TestCase
         $this->assertSame('maria@example.com', $meResponse->json('user.email'));
     }
 
-    public function test_registration_stores_name_parts(): void
+    public function test_registration_does_not_collect_names(): void
     {
         $response = $this->postJson('/api/v1/auth/register', $this->validRegistrationPayload([
-            'email' => 'john.m.johnson@example.com',
-            'first_name' => 'John',
-            'middle_name' => 'Michael',
-            'last_name' => 'Johnson',
+            'email' => 'handle@example.com',
+            'first_name' => 'Ignored',
+            'last_name' => 'Name',
         ]));
 
         $response->assertCreated();
         $this->assertDatabaseHas('users', [
-            'email' => 'john.m.johnson@example.com',
-            'first_name' => 'John',
-            'middle_name' => 'Michael',
-            'last_name' => 'Johnson',
+            'email' => 'handle@example.com',
+            'name' => 'handle',
+            'first_name' => null,
+            'last_name' => null,
         ]);
     }
 
     public function test_sign_up_creates_the_user_only(): void
     {
-        $payload = $this->validRegistrationPayload(['middle_name' => 'Alexander']);
+        $payload = $this->validRegistrationPayload();
 
         $response = $this->postJson('/api/v1/auth/register', $payload);
 

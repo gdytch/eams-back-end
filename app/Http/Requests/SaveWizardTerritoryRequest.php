@@ -45,4 +45,12 @@ class SaveWizardTerritoryRequest extends FormRequest
             'church_id' => ['nullable', Rule::exists('churches', 'id')->where('organization_id', $organizationId)],
         ];
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        return ['union_id' => 'union', 'mission_id' => 'mission', 'church_id' => 'church'];
+    }
 }

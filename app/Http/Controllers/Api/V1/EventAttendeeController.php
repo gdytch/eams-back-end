@@ -45,6 +45,15 @@ class EventAttendeeController extends Controller
             $query->where(function ($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
                     ->orWhere('last_name', 'like', "%{$search}%");
+
+                // Every term must hit one of the name columns, so a full name finds the Attendee in either order.
+                $q->orWhere(function ($terms) use ($search) {
+                    foreach (preg_split('/\s+/', $search) as $term) {
+                        $terms->where(fn ($t) => $t->where('first_name', 'like', "%{$term}%")
+                            ->orWhere('middle_name', 'like', "%{$term}%")
+                            ->orWhere('last_name', 'like', "%{$term}%"));
+                    }
+                });
             });
         }
 

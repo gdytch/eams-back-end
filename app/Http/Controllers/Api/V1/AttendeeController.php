@@ -313,7 +313,6 @@ class AttendeeController extends Controller
                 $attendee->setAttribute('duplicate_registration_count', 1);
                 $attendee->setAttribute('duplicate_attendance_count', $attendee->attendanceRecords->count());
                 $attendee->setAttribute('duplicate_event_names', array_filter([$attendee->event?->name]));
-                $attendee->setAttribute('duplicate_has_linked_account', $attendee->user_id !== null);
 
                 return (new AttendeeResource($attendee))->resolve($request);
             });

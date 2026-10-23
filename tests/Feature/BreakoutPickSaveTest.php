@@ -210,4 +210,17 @@ class BreakoutPickSaveTest extends TestCase
     {
         $this->assertContains('Pick your breakouts', app(RegistrationCompleteness::class)->missingLabels($this->attendee()));
     }
+
+    public function test_user_without_organization_linked_to_an_existing_attendee_can_use_the_wizard(): void
+    {
+        $b = $this->breakout();
+        $user = User::factory()->attendee()->create(['organization_id' => null]);
+        $this->attendee($user);
+        $base = "/api/v1/public/event/{$this->event->invite_token}/registration";
+
+        $this->save($user, [$b->id])->assertOk()->assertJsonPath('data.attendee.breakouts.0.id', $b->id);
+        $this->actingAs($user, 'sanctum')->getJson($base)->assertOk()->assertJsonPath('data.attendee.breakouts.0.id', $b->id);
+        $this->actingAs($user, 'sanctum')->getJson("{$base}/forms")->assertOk();
+        $this->assertSame($this->org->id, $user->fresh()->organization_id);
+    }
 }

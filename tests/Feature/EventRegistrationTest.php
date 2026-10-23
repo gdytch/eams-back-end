@@ -113,4 +113,18 @@ class EventRegistrationTest extends TestCase
 
         $response->assertNotFound();
     }
+
+    public function test_registrations_search_matches_a_full_name_in_either_order(): void
+    {
+        $org = Organization::factory()->create();
+        $checker = User::factory()->checker()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $target = Attendee::factory()->for($event)->create(['first_name' => 'Scan', 'middle_name' => 'Q', 'last_name' => 'Target']);
+        Attendee::factory()->for($event)->create(['first_name' => 'Other', 'last_name' => 'Person']);
+
+        foreach (['Scan Target', 'Target Scan', 'scan q target', 'Scan'] as $search) {
+            $ids = collect($this->actingAs($checker, 'sanctum')->getJson("/api/v1/events/{$event->id}/registrations?search=".rawurlencode($search))->assertOk()->json('data'))->pluck('attendee_id');
+            $this->assertSame([$target->id], $ids->all(), $search);
+        }
+    }
 }

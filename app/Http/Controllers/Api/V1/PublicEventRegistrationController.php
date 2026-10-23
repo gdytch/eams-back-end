@@ -22,6 +22,7 @@ use App\Services\FormAnswerService;
 use App\Services\RegistrationCompleteness;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -64,7 +65,7 @@ class PublicEventRegistrationController extends Controller
             'middle_name' => ['nullable', 'string', 'max:100'],
             'last_name' => ['required', 'string', 'max:100'],
             'mobile_no' => ['required', 'string', 'max:20'],
-        ]);
+        ], [], ['mobile_no' => 'mobile number']);
 
         return $this->save($request->user(), $event, $data, ['first_name', 'middle_name', 'last_name'], creates: true);
     }
@@ -94,7 +95,7 @@ class PublicEventRegistrationController extends Controller
         });
     }
 
-    public function forms(Request $request, string $eventInviteToken): JsonResponse|\Illuminate\Http\Resources\Json\AnonymousResourceCollection
+    public function forms(Request $request, string $eventInviteToken): JsonResponse|AnonymousResourceCollection
     {
         $event = $this->resolvePublishedEvent($eventInviteToken);
 
@@ -236,6 +237,11 @@ class PublicEventRegistrationController extends Controller
         User::withoutGlobalScopes()->whereKey($user->id)->lockForUpdate()->first();
 
         $this->linking->linkVerifiedEmail($user);
+
+        // An Attendee linked by email leaves the user without an organization, which hides the event's scoped relations.
+        if ($user->organization_id === null && $this->registration->userAttendeeIn($user, $event) !== null) {
+            $user->update(['organization_id' => $event->organization_id]);
+        }
 
         return $this->registration->userAttendeeIn($user, $event) === null
             && $this->linking->hasUnlinkedAttendeeIn($user, $event->id);

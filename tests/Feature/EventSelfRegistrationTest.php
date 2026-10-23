@@ -304,4 +304,15 @@ class EventSelfRegistrationTest extends TestCase
         $this->actingAs($this->user, 'sanctum')
             ->postJson("/api/v1/public/event/{$this->event->invite_token}/register")->assertStatus(404);
     }
+
+    public function test_basic_info_validation_names_the_mobile_number_readably(): void
+    {
+        $org = Organization::factory()->create();
+        $event = Event::factory()->for($org)->create(['status' => 'published']);
+        $user = User::factory()->attendee()->create(['organization_id' => $org->id]);
+
+        $this->actingAs($user, 'sanctum')->putJson("/api/v1/public/event/{$event->invite_token}/registration/basic-info", ['first_name' => 'A', 'last_name' => 'B'])
+            ->assertUnprocessable()
+            ->assertJsonPath('errors.mobile_no.0', 'The mobile number field is required.');
+    }
 }

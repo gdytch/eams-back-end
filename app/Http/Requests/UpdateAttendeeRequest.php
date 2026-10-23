@@ -78,4 +78,12 @@ class UpdateAttendeeRequest extends FormRequest
             'email_address.unique' => 'This email address is already in use by another attendee or account.',
         ];
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        return ['mobile_no' => 'mobile number'];
+    }
 }

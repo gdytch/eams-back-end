@@ -652,4 +652,19 @@ class AttendeeTest extends TestCase
         $response->assertForbidden();
         $this->assertDatabaseCount('attendees', 0);
     }
+
+    public function test_attendee_payloads_always_include_has_linked_account(): void
+    {
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $linked = Attendee::factory()->for($event)->create(['user_id' => User::factory()->attendee()->create(['organization_id' => $org->id])->id]);
+        $unlinked = Attendee::factory()->for($event)->create(['user_id' => null]);
+
+        $this->actingAs($admin, 'sanctum')->getJson("/api/v1/attendees/{$linked->id}")->assertOk()->assertJsonPath('data.has_linked_account', true);
+        $this->actingAs($admin, 'sanctum')->getJson("/api/v1/attendees/{$unlinked->id}")->assertOk()->assertJsonPath('data.has_linked_account', false);
+
+        $list = $this->actingAs($admin, 'sanctum')->getJson("/api/v1/attendees?event_id={$event->id}")->assertOk()->json('data');
+        $this->assertSame([true, false], collect($list)->sortByDesc('has_linked_account')->pluck('has_linked_account')->values()->all());
+    }
 }

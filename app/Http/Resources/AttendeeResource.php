@@ -47,7 +47,7 @@ class AttendeeResource extends JsonResource
             'registration_count' => $this->when(isset($this->duplicate_registration_count), $this->duplicate_registration_count),
             'attendance_count' => $this->when(isset($this->duplicate_attendance_count), $this->duplicate_attendance_count),
             'event_names' => $this->when(isset($this->duplicate_event_names), $this->duplicate_event_names),
-            'has_linked_account' => $this->when(isset($this->duplicate_has_linked_account), $this->duplicate_has_linked_account),
+            'has_linked_account' => $this->user_id !== null,
         ];
     }
 }

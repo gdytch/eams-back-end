@@ -92,7 +92,7 @@ class AttendeeDashboardController extends Controller
 
         $event = Event::withoutGlobalScopes()->findOrFail($event);
         $attendee = $user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->first();
-        abort_unless($attendee, 404, 'Registration not found.');
+        abort_unless($attendee !== null, 404, 'Registration not found.');
 
         $program = $event->program()->with('days.sections.items.speaker')->firstOrFail();
 

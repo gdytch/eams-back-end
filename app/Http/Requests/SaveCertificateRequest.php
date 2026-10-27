@@ -51,6 +51,7 @@ class SaveCertificateRequest extends FormRequest
             'orientation' => ['sometimes', Rule::enum(CertificateOrientation::class)],
             'release_rule' => ['sometimes', Rule::enum(CertificateReleaseRule::class)],
             'include_breakouts' => ['sometimes', 'boolean'],
+            'email_enabled' => ['sometimes', 'boolean'],
             'release_at' => ['sometimes', 'nullable', 'date'],
             'audience' => ['sometimes', 'array'],
             'audience.union_ids' => ['sometimes', 'array'],

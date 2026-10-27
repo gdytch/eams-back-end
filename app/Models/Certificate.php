@@ -22,7 +22,7 @@ use Illuminate\Support\Carbon;
     'name_x', 'name_y', 'name_font_size', 'font', 'google_font_family', 'google_font_path', 'color',
     'page_size', 'orientation', 'status', 'published_at',
     'audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids',
-    'release_rule', 'include_breakouts', 'release_at', 'generation_run',
+    'release_rule', 'include_breakouts', 'release_at', 'generation_run', 'email_enabled',
 ])]
 class Certificate extends Model
 {
@@ -45,6 +45,7 @@ class Certificate extends Model
             'audience_attendee_ids' => 'array',
             'release_rule' => CertificateReleaseRule::class,
             'include_breakouts' => 'boolean',
+            'email_enabled' => 'boolean',
             'release_at' => 'datetime',
         ];
     }
@@ -72,7 +73,7 @@ class Certificate extends Model
     /**
      * Generation progress over the Issued certificates.
      *
-     * @return array{total: int, generated: int, failed: int, name_too_long: int}
+     * @return array{total: int, generated: int, failed: int, name_too_long: int, emailed: int, files_deleted_at: ?string}
      */
     public function generationCounts(): array
     {
@@ -81,6 +82,7 @@ class Certificate extends Model
             .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as generated, '
             .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as failed, '
             .'coalesce(sum(case when name_too_long then 1 else 0 end), 0) as name_too_long, '
+            .'coalesce(sum(case when emailed_at is not null then 1 else 0 end), 0) as emailed, '
             .'max(file_deleted_at) as files_deleted_at',
             [IssuedCertificateStatus::Generated->value, IssuedCertificateStatus::Failed->value],
         )->first();
@@ -90,6 +92,7 @@ class Certificate extends Model
             'generated' => (int) $row->generated,
             'failed' => (int) $row->failed,
             'name_too_long' => (int) $row->name_too_long,
+            'emailed' => (int) $row->emailed,
             // Set once the retention purge removed the files; Regenerate clears it again.
             'files_deleted_at' => $row->files_deleted_at ? Carbon::parse($row->files_deleted_at)->toJSON() : null,
         ];

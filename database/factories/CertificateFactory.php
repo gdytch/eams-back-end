@@ -25,6 +25,7 @@ class CertificateFactory extends Factory
             'page_size' => 'a4',
             'orientation' => 'landscape',
             'status' => 'draft',
+            'release_at' => now()->subDay(),
         ];
     }
 }

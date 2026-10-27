@@ -12,6 +12,7 @@ use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Tests\TestCase;
 
 class CertificateAudienceTest extends TestCase
@@ -73,6 +74,8 @@ class CertificateAudienceTest extends TestCase
 
     public function test_release_settings_default_and_round_trip(): void
     {
+        $this->certificate->update(['release_at' => null]);
+
         $this->getJson($this->url())
             ->assertJsonPath('data.release_rule', 'everyone')
             ->assertJsonPath('data.include_breakouts', false)
@@ -98,6 +101,26 @@ class CertificateAudienceTest extends TestCase
         $this->assertSame('2027-01-05 09:30:00', $this->certificate->fresh()->release_at->utc()->format('Y-m-d H:i:s'));
 
         $this->putJson($this->url(), ['release_at' => null])->assertOk()->assertJsonPath('data.release_at', null);
+    }
+
+    public function test_publishing_requires_a_release_time(): void
+    {
+        $this->postJson($this->url('/template'), ['template' => UploadedFile::fake()->image('t.png', 600, 400)])->assertOk();
+        $this->certificate->update(['release_at' => null]);
+
+        $this->postJson($this->url('/publish'))->assertUnprocessable()->assertJsonValidationErrors('release_at');
+        $this->assertFalse($this->certificate->fresh()->isPublished());
+
+        $this->putJson($this->url(), ['release_at' => '2027-01-05T09:30:00Z'])->assertOk();
+        $this->postJson($this->url('/publish'))->assertOk();
+    }
+
+    public function test_a_published_certificate_keeps_its_release_time(): void
+    {
+        $this->postJson($this->url('/template'), ['template' => UploadedFile::fake()->image('t.png', 600, 400)])->assertOk();
+        $this->postJson($this->url('/publish'))->assertOk();
+
+        $this->putJson($this->url(), ['release_at' => null])->assertUnprocessable()->assertJsonValidationErrors('release_at');
     }
 
     public function test_every_release_rule_is_accepted_and_unknown_ones_rejected(): void

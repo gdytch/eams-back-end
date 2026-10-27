@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\IssuedCertificateStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\CertificateAttendeeRowResource;
 use App\Http\Resources\CertificateRunStatusResource;
 use App\Http\Resources\IssuedCertificateResource;
 use App\Jobs\GenerateCertificateJob;
@@ -12,6 +13,7 @@ use App\Models\AuditLog;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\IssuedCertificate;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -28,6 +30,27 @@ class CertificateRunController extends Controller
         $certificate->setRelation('issuedCertificates', $certificate->issuedCertificates()->visible()->with('attendee')->orderBy('id')->get());
 
         return CertificateRunStatusResource::make($certificate);
+    }
+
+    /** Paginated list of the visible Attendees with their file state, searchable by name or email. */
+    public function attendees(Request $request, Event $event, Certificate $certificate)
+    {
+        $this->authorize('view', $certificate);
+
+        $search = trim((string) $request->query('search', ''));
+        $perPage = min(max((int) $request->query('per_page', 15), 1), 100);
+
+        $rows = $certificate->issuedCertificates()->visible()->with('attendee')
+            ->when($search !== '', fn ($query) => $query->whereHas('attendee', fn ($attendee) => $attendee
+                ->where(fn ($match) => $match
+                    ->where('first_name', 'like', "%{$search}%")
+                    ->orWhere('middle_name', 'like', "%{$search}%")
+                    ->orWhere('last_name', 'like', "%{$search}%")
+                    ->orWhere('email_address', 'like', "%{$search}%"))))
+            ->orderBy('id')
+            ->paginate($perPage);
+
+        return CertificateAttendeeRowResource::collection($rows);
     }
 
     public function retryFailed(Event $event, Certificate $certificate)

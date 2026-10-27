@@ -100,29 +100,57 @@ class CertificateEligibility
 
         $ids = $attendees->pluck('id');
         $sessions = EventSession::query()->where('event_id', $certificate->event_id)->get()->filter->hasEnded();
-        $breakouts = $certificate->include_breakouts
+        $breakouts = $this->endedBreakouts($certificate);
+        $records = $this->countedRecords($certificate, $ids)->get()->groupBy('attendee_id');
+        $picks = $this->picksByAttendee($ids, $breakouts);
+
+        return $attendees->filter(fn (Attendee $attendee) => $this->meetsRate(
+            $attendee, $sessions, $breakouts, $records->get($attendee->id, collect()), $picks->get($attendee->id, collect()), $percent,
+        ))->pluck('id')->map(fn ($id) => (int) $id)->values();
+    }
+
+    /** @return Collection<int, Breakout> */
+    private function endedBreakouts(Certificate $certificate): Collection
+    {
+        return $certificate->include_breakouts
             ? Breakout::withoutGlobalScopes()->where('event_id', $certificate->event_id)->get()->filter->hasEnded()
             : collect();
+    }
 
-        $records = $this->countedRecords($certificate, $ids)->get()->groupBy('attendee_id');
-        $picks = $breakouts->isEmpty() ? collect() : DB::table('breakout_picks')
-            ->whereIn('attendee_id', $ids)->whereIn('breakout_id', $breakouts->modelKeys())
+    /**
+     * @param  Collection<int, int>  $attendeeIds
+     * @param  Collection<int, Breakout>  $breakouts
+     * @return Collection<int, Collection<int, int>> breakout ids per Attendee id
+     */
+    private function picksByAttendee(Collection $attendeeIds, Collection $breakouts): Collection
+    {
+        if ($breakouts->isEmpty()) {
+            return collect();
+        }
+
+        return DB::table('breakout_picks')
+            ->whereIn('attendee_id', $attendeeIds)->whereIn('breakout_id', $breakouts->modelKeys())
             ->get()->groupBy('attendee_id')->map(fn ($rows) => $rows->pluck('breakout_id')->map(fn ($id) => (int) $id));
+    }
 
-        return $attendees->filter(function (Attendee $attendee) use ($sessions, $breakouts, $records, $picks, $percent): bool {
-            $mine = $records->get($attendee->id, collect());
-            $presentSessions = $mine->pluck('event_session_id')->filter()->all();
-            $presentBreakouts = $mine->pluck('breakout_id')->filter()->all();
-            $picked = $picks->get($attendee->id, collect());
+    /**
+     * @param  Collection<int, EventSession>  $sessions  ended sessions
+     * @param  Collection<int, Breakout>  $breakouts  ended breakouts (empty unless included)
+     * @param  Collection<int, AttendanceRecord>  $records  the Attendee's counted check-ins
+     * @param  Collection<int, int>  $picked  the Attendee's breakout picks
+     */
+    private function meetsRate(Attendee $attendee, Collection $sessions, Collection $breakouts, Collection $records, Collection $picked, int $percent): bool
+    {
+        $presentSessions = $records->pluck('event_session_id')->filter()->all();
+        $presentBreakouts = $records->pluck('breakout_id')->filter()->all();
 
-            $expectedSessions = $sessions->filter(fn (EventSession $s) => $s->isExpected($attendee->first_registered_at));
-            $expectedBreakouts = $breakouts->filter(fn (Breakout $b) => $b->isExpected($attendee->first_registered_at) && $picked->contains($b->id));
+        $expectedSessions = $sessions->filter(fn (EventSession $s) => $s->isExpected($attendee->first_registered_at));
+        $expectedBreakouts = $breakouts->filter(fn (Breakout $b) => $b->isExpected($attendee->first_registered_at) && $picked->contains($b->id));
 
-            $expected = $expectedSessions->count() + $expectedBreakouts->count();
-            $present = $sessions->whereIn('id', $presentSessions)->count() + $breakouts->whereIn('id', $presentBreakouts)->count();
+        $expected = $expectedSessions->count() + $expectedBreakouts->count();
+        $present = $sessions->whereIn('id', $presentSessions)->count() + $breakouts->whereIn('id', $presentBreakouts)->count();
 
-            // present/expected (capped at 100%) >= percent/100, in integers.
-            return $expected > 0 && min($present, $expected) * 100 >= $percent * $expected;
-        })->pluck('id')->map(fn ($id) => (int) $id)->values();
+        // present/expected (capped at 100%) >= percent/100, in integers.
+        return $expected > 0 && min($present, $expected) * 100 >= $percent * $expected;
     }
 }

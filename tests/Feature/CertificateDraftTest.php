@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Enums\CertificateOrientation;
+use App\Enums\CertificatePageSize;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\Organization;
@@ -161,6 +163,39 @@ class CertificateDraftTest extends TestCase
         $this->assertStringContainsString('larger than', $response->json('errors.template.0'));
 
         $this->assertNull($certificate->refresh()->template_path);
+    }
+
+    public function test_template_may_not_exceed_300_dpi_for_the_page(): void
+    {
+        $this->asOrgAdmin();
+        $certificate = Certificate::factory()->for($this->event)->create(['page_size' => 'a4', 'orientation' => 'landscape']);
+        $endpoint = "$this->url/$certificate->id/template";
+
+        $this->postJson($endpoint, ['template' => UploadedFile::fake()->image('t.png', 3509, 2480)])
+            ->assertUnprocessable()->assertJsonValidationErrors('template');
+        $this->postJson($endpoint, ['template' => UploadedFile::fake()->image('t.png', 3508, 2481)])
+            ->assertUnprocessable()->assertJsonValidationErrors('template');
+        $this->assertNull($certificate->refresh()->template_path);
+
+        $this->postJson($endpoint, ['template' => UploadedFile::fake()->image('t.png', 3508, 2480)])->assertOk();
+
+        // Portrait swaps the limits, so the same image no longer fits.
+        $this->putJson("$this->url/$certificate->id", ['orientation' => 'portrait'])
+            ->assertUnprocessable()->assertJsonValidationErrors('orientation');
+        $this->putJson("$this->url/$certificate->id", ['page_size' => 'long'])->assertOk();
+    }
+
+    public function test_page_limits_in_pixels_at_300_dpi(): void
+    {
+        $this->assertSame([3508, 2480], CertificatePageSize::A4->maxPixels(CertificateOrientation::Landscape));
+        $this->assertSame([2480, 3508], CertificatePageSize::A4->maxPixels(CertificateOrientation::Portrait));
+        $this->assertSame([2550, 3300], CertificatePageSize::Short->maxPixels(CertificateOrientation::Portrait));
+        $this->assertSame([3900, 2550], CertificatePageSize::Long->maxPixels(CertificateOrientation::Landscape));
+    }
+
+    public function test_template_upload_limit_is_2_mb(): void
+    {
+        $this->assertSame(2 * 1024 * 1024, config('certificates.template_max_bytes'));
     }
 
     public function test_checkers_are_denied(): void

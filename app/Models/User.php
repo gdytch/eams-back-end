@@ -55,11 +55,12 @@ class User extends Authenticatable implements MustVerifyEmail
 
     /**
      * The user's most recent per-event Attendee, the source for prefilling a new registration.
+     * Attendee accounts have no organization, so the organization scope must not apply.
      */
     /** @return HasOne<Attendee, $this> */
     public function attendee(): HasOne
     {
-        return $this->hasOne(Attendee::class)->latestOfMany();
+        return $this->hasOne(Attendee::class)->withoutGlobalScope('organization')->latestOfMany();
     }
 
     /** @return HasMany<Attendee, $this> */

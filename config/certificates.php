@@ -2,7 +2,10 @@
 
 return [
     // Largest accepted Template image.
-    'template_max_bytes' => 10 * 1024 * 1024,
+    'template_max_bytes' => 2 * 1024 * 1024,
+
+    // Largest accepted original Template PDF.
+    'template_pdf_max_bytes' => 25 * 1024 * 1024,
 
     // Messages the app may send per day before certificate email pauses until tomorrow. Counts all app mail
     // (see DailyMailBudget); keep it under the provider's daily limit (500) to leave room for other mail.

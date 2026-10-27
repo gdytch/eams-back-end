@@ -174,6 +174,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/certificates/{certificate}/publish', [CertificateController::class, 'publish'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/unpublish', [CertificateController::class, 'unpublish'])->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/attendees/{attendee}/download', [CertificateController::class, 'download'])->whereNumber('attendee')->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/attendees', [CertificateRunController::class, 'attendees'])->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/status', [CertificateRunController::class, 'status'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/retry-failed', [CertificateRunController::class, 'retryFailed'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/regenerate-missing', [CertificateRunController::class, 'regenerateMissing'])->scopeBindings();

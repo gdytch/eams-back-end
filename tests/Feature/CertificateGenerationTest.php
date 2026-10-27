@@ -100,6 +100,51 @@ class CertificateGenerationTest extends TestCase
         $this->assertDatabaseHas('audit_logs', ['action' => 'certificate.published', 'auditable_id' => $this->certificate->id]);
     }
 
+    public function test_a_pdf_template_keeps_its_text_in_the_generated_pdf(): void
+    {
+        $source = new \FPDF('L', 'pt', 'A4');
+        $source->SetCompression(false);
+        $source->AddPage();
+        $source->SetFont('Helvetica', '', 20);
+        $source->Text(100, 100, 'ORIGINAL TEMPLATE TEXT');
+        $pdf = UploadedFile::fake()->createWithContent('t.pdf', $source->Output('S'));
+
+        $this->postJson($this->url('/template'), [
+            'template' => UploadedFile::fake()->image('t.jpg', 600, 400),
+            'template_pdf' => $pdf,
+        ])->assertOk();
+        $attendee = Attendee::factory()->for($this->event)->create();
+        $this->publish()->assertOk()->assertJsonPath('data.generation.generated', 1);
+
+        $output = $this->download($attendee)->assertOk()->streamedContent();
+        $this->assertPageSize($output, 841.89, 595.28);
+        $this->assertStringContainsString('ORIGINAL TEMPLATE TEXT', $output);
+
+        // A new image-only upload drops the old PDF.
+        $this->postJson($this->url('/unpublish'))->assertOk();
+        $this->uploadTemplate();
+        $this->assertNull($this->certificate->fresh()->template_pdf_path);
+    }
+
+    public function test_the_original_template_pdf_is_stored_privately_and_must_be_a_real_pdf(): void
+    {
+        $this->postJson($this->url('/template'), [
+            'template' => UploadedFile::fake()->image('t.jpg', 600, 400),
+            'template_pdf' => UploadedFile::fake()->createWithContent('t.pdf', '<html>not a pdf</html>'),
+        ])->assertUnprocessable()->assertJsonValidationErrors('template_pdf');
+
+        $source = new \FPDF('L', 'pt', 'A4');
+        $source->AddPage();
+        $this->postJson($this->url('/template'), [
+            'template' => UploadedFile::fake()->image('t.jpg', 600, 400),
+            'template_pdf' => UploadedFile::fake()->createWithContent('t.pdf', $source->Output('S')),
+        ])->assertOk();
+
+        $path = $this->certificate->fresh()->template_pdf_path;
+        Storage::disk('local')->assertExists($path);
+        Storage::disk('public')->assertMissing($path);
+    }
+
     public function test_attendees_who_are_not_yet_eligible_also_get_a_file(): void
     {
         $this->uploadTemplate();

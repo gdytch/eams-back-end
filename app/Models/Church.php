@@ -13,6 +13,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['organization_id', 'union_id', 'mission_id', 'name', 'address', 'verified_at', 'verified_by'])]
 class Church extends Model
 {
+    /** Attendee accounts have no organization but read these across all of them. */
+    public const VISIBLE_TO_ATTENDEES = true;
+
     /** @use HasFactory<ChurchFactory> */
     use BelongsToOrganization, HasFactory;
 

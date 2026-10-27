@@ -51,6 +51,22 @@ class CertificateAdminRunTest extends TestCase
         return $people->values();
     }
 
+    public function test_attendees_lists_rows_with_file_state_and_filters_by_search(): void
+    {
+        $people = $this->publishWith(3);
+        $people[0]->update(['first_name' => 'Zebulon']);
+
+        $this->getJson($this->url('/attendees'))
+            ->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonStructure(['data' => [['attendee_id', 'full_name', 'email_address', 'status', 'name_too_long', 'has_file']], 'meta']);
+
+        $this->getJson($this->url('/attendees?search=Zebulon'))
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.attendee_id', $people[0]->id);
+    }
+
     public function test_status_reports_counts_failures_and_the_name_too_long_list_with_identity(): void
     {
         $people = $this->publishWith(3);

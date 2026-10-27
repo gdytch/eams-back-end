@@ -80,9 +80,8 @@ class CertificateController extends Controller
             throw ValidationException::withMessages(['status' => 'Unpublish the certificate before deleting it.']);
         }
 
-        if ($certificate->template_path) {
-            Storage::disk('public')->delete($certificate->template_path);
-        }
+        Storage::disk('public')->delete(array_filter([$certificate->template_path]));
+        Storage::disk('local')->delete(array_filter([$certificate->template_pdf_path]));
         Storage::disk('local')->deleteDirectory("events/{$event->id}/certificates/{$certificate->id}");
         $certificate->delete();
         AuditLog::record('certificate.deleted', $certificate);
@@ -116,11 +115,12 @@ class CertificateController extends Controller
         $this->ensureDesignUnlocked($certificate, 'template');
         $previous = $certificate->template_path;
         $path = $request->file('template')->store("events/{$event->id}/certificates", 'public');
-        $certificate->update(['template_path' => $path]);
+        $previousPdf = $certificate->template_pdf_path;
+        $pdfPath = $request->file('template_pdf')?->store("events/{$event->id}/certificates", 'local');
+        $certificate->update(['template_path' => $path, 'template_pdf_path' => $pdfPath]);
 
-        if ($previous) {
-            Storage::disk('public')->delete($previous);
-        }
+        Storage::disk('public')->delete(array_filter([$previous]));
+        Storage::disk('local')->delete(array_filter([$previousPdf]));
         AuditLog::record('certificate.template_updated', $certificate);
 
         return CertificateResource::make($certificate);

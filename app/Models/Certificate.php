@@ -19,7 +19,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
 #[Fillable([
-    'organization_id', 'event_id', 'title', 'template_path',
+    'organization_id', 'event_id', 'title', 'template_path', 'template_pdf_path',
     'name_x', 'name_y', 'name_font_size', 'font', 'google_font_family', 'google_font_path', 'color',
     'page_size', 'orientation', 'status', 'published_at',
     'audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids',
@@ -71,6 +71,22 @@ class Certificate extends Model
         return $this->status === CertificateStatus::Published;
     }
 
+    /**
+     * Why a Template of this size is refused on the given page (the stored one by default), or null when it fits.
+     * A Template may not exceed 300 dpi: it is only ever printed at page size.
+     */
+    public function templateTooLargeMessage(int $width, int $height, ?CertificatePageSize $size = null, ?CertificateOrientation $orientation = null): ?string
+    {
+        $size ??= $this->page_size;
+        $orientation ??= $this->orientation;
+        [$maxWidth, $maxHeight] = $size->maxPixels($orientation);
+        if ($width <= $maxWidth && $height <= $maxHeight) {
+            return null;
+        }
+
+        return "The template is {$width}x{$height} px; a {$orientation->value} {$size->value} page allows at most {$maxWidth}x{$maxHeight} px (300 dpi).";
+    }
+
     /** Counts loaded for a whole list by generationCountsFor(), so a list needs one query, not one per row. */
     private ?array $loadedCounts = null;
 
@@ -97,7 +113,7 @@ class Certificate extends Model
             ->groupBy('certificate_id')
             ->selectRaw(
                 'certificate_id, count(*) as total, '
-                .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as generated, '
+                .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as `generated`, '
                 .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as failed, '
                 .'coalesce(sum(case when name_too_long then 1 else 0 end), 0) as name_too_long, '
                 .'coalesce(sum(case when emailed_at is not null then 1 else 0 end), 0) as emailed, '

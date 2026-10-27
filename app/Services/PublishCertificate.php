@@ -19,7 +19,7 @@ class PublishCertificate
 {
     public function __construct(private CertificateAudience $audience, private CertificateAudienceSync $sync) {}
 
-    /** @throws ValidationException When already published or without a Template. */
+    /** @throws ValidationException When already published, or without a Template or release time. */
     public function __invoke(Certificate $certificate): Certificate
     {
         $count = DB::transaction(function () use ($certificate) {
@@ -30,6 +30,10 @@ class PublishCertificate
             }
             if (! $locked->template_path) {
                 throw ValidationException::withMessages(['template' => 'Upload a Template before publishing.']);
+            }
+
+            if (! $locked->release_at) {
+                throw ValidationException::withMessages(['release_at' => 'Set a release date and time before publishing.']);
             }
 
             $locked->update([

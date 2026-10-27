@@ -14,6 +14,7 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
@@ -67,8 +68,18 @@ class SaveCertificateRequest extends FormRequest
     {
         return [function (Validator $validator) {
             $certificate = $this->route('certificate');
-            if (! $certificate instanceof Certificate || ! $certificate->isPublished()) {
+            if (! $certificate instanceof Certificate) {
                 return;
+            }
+
+            $this->validateTemplateFitsPage($validator, $certificate);
+
+            if (! $certificate->isPublished()) {
+                return;
+            }
+
+            if ($this->has('release_at') && blank($this->input('release_at'))) {
+                $validator->errors()->add('release_at', 'A published certificate needs a release date and time.');
             }
 
             foreach (Certificate::DESIGN_FIELDS as $field) {
@@ -77,6 +88,32 @@ class SaveCertificateRequest extends FormRequest
                 }
             }
         }];
+    }
+
+    /** Changing the page must not leave the stored Template above 300 dpi. */
+    private function validateTemplateFitsPage(Validator $validator, Certificate $certificate): void
+    {
+        if (! $certificate->template_path || $validator->errors()->hasAny(['page_size', 'orientation'])) {
+            return;
+        }
+        if (! $this->has('page_size') && ! $this->has('orientation')) {
+            return;
+        }
+
+        $binary = Storage::disk('public')->get($certificate->template_path);
+        $dimensions = $binary ? @getimagesizefromstring($binary) : false;
+        if (! $dimensions) {
+            return;
+        }
+
+        $message = $certificate->templateTooLargeMessage(
+            $dimensions[0], $dimensions[1],
+            CertificatePageSize::tryFrom((string) $this->input('page_size')) ?? $certificate->page_size,
+            CertificateOrientation::tryFrom((string) $this->input('orientation')) ?? $certificate->orientation,
+        );
+        if ($message) {
+            $validator->errors()->add($this->has('page_size') ? 'page_size' : 'orientation', $message.' Upload a smaller template first.');
+        }
     }
 
     private function sameAsStored(Certificate $certificate, string $field): bool

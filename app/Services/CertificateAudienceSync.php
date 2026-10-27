@@ -45,12 +45,21 @@ class CertificateAudienceSync
     public function reconcile(Certificate $certificate): void
     {
         $this->hideLeavers($certificate);
+        $this->unhideReturners($certificate);
+        $this->createMissingRows($certificate);
+        $this->dispatchPending($certificate);
+    }
 
+    private function unhideReturners(Certificate $certificate): void
+    {
         $inAudience = $this->audience->query($certificate)->select('attendees.id');
         IssuedCertificate::query()->where('certificate_id', $certificate->id)
             ->whereNotNull('hidden_at')->whereIn('attendee_id', $inAudience)
             ->update(['hidden_at' => null]);
+    }
 
+    private function createMissingRows(Certificate $certificate): void
+    {
         $existing = IssuedCertificate::query()->where('certificate_id', $certificate->id)->select('attendee_id');
         $this->audience->query($certificate)->select('attendees.id')->whereNotIn('attendees.id', $existing)
             ->orderBy('attendees.id')->chunkById(500, function ($attendees) use ($certificate) {
@@ -60,7 +69,10 @@ class CertificateAudienceSync
                     'created_at' => now(), 'updated_at' => now(),
                 ])->all());
             }, 'attendees.id', 'id');
+    }
 
+    private function dispatchPending(Certificate $certificate): void
+    {
         IssuedCertificate::query()->where('certificate_id', $certificate->id)->visible()
             ->where('status', IssuedCertificateStatus::Pending)->orderBy('id')->pluck('id')->chunk(25)
             ->each(fn ($ids) => GenerateIssuedCertificatesBatchJob::dispatch($certificate->id, $certificate->generation_run, $ids->values()->all())->afterCommit());

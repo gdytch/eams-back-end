@@ -11,6 +11,8 @@ use Dompdf\Dompdf;
 use Dompdf\FontMetrics;
 use Dompdf\Options;
 use Illuminate\Support\Facades\Storage;
+use setasign\Fpdi\Fpdi;
+use setasign\Fpdi\PdfParser\StreamReader;
 use Throwable;
 
 /**
@@ -28,30 +30,23 @@ class CertificateRenderer
     /** @throws CertificateRenderException */
     public function render(Certificate $certificate, Attendee $attendee): RenderedCertificate
     {
+        // An original PDF Template is the page itself, so its text and vectors survive; the image is the fallback.
+        if ($certificate->template_pdf_path) {
+            try {
+                return $this->renderOnPdf($certificate, $attendee);
+            } catch (Throwable $e) {
+                // Unreadable to the PDF importer (encrypted, newer compression): use the Template image.
+                report($e);
+            }
+        }
+
         $template = $this->template($certificate);
-        $fontFile = null;
 
         try {
             [$width, $height] = $this->pageSize($certificate);
             $dompdf = $this->blankPage($width, $height);
-            $metrics = $dompdf->getFontMetrics();
-            $canvas = $dompdf->getCanvas();
-            $font = $this->font($certificate, $metrics);
-
-            $this->drawTemplate($canvas, $template, $width, $height);
-
-            $name = trim(preg_replace('/\s+/', ' ', (string) $attendee->full_name));
-            [$size, $tooLong] = $this->fit($metrics, $name, $font, $certificate->name_font_size * $width, $this->availableWidth($certificate, $width));
-            $textWidth = $metrics->getTextWidth($name, $font, $size);
-            $lineHeight = $metrics->getFontHeight($font, $size);
-            $canvas->text(
-                $certificate->name_x * $width - $textWidth / 2,
-                $certificate->name_y * $height - $lineHeight / 2,
-                $name,
-                $font,
-                $size,
-                $this->color($certificate->color),
-            );
+            $this->drawTemplate($dompdf->getCanvas(), $template, $width, $height);
+            $tooLong = $this->stampName($dompdf, $certificate, $attendee, $width, $height);
 
             return new RenderedCertificate($dompdf->output(), $tooLong);
         } catch (CertificateRenderException $e) {
@@ -61,6 +56,66 @@ class CertificateRenderer
         } finally {
             @unlink($template['file']);
         }
+    }
+
+    /** Page 1 of the original PDF, scaled to cover the page like the image, with the name PDF laid over it. */
+    private function renderOnPdf(Certificate $certificate, Attendee $attendee): RenderedCertificate
+    {
+        $disk = Storage::disk('local');
+        if (! $disk->exists($certificate->template_pdf_path)) {
+            throw new CertificateRenderException('The Template PDF is missing.');
+        }
+
+        [$width, $height] = $this->pageSize($certificate);
+        $dompdf = $this->blankPage($width, $height);
+        $tooLong = $this->stampName($dompdf, $certificate, $attendee, $width, $height);
+
+        $fpdi = new class('P', 'pt', [$width, $height]) extends Fpdi
+        {
+            public function out(string $operators): void
+            {
+                $this->_out($operators);
+            }
+        };
+        $fpdi->SetAutoPageBreak(false);
+        $fpdi->AddPage($width > $height ? 'L' : 'P', [$width, $height]);
+
+        $fpdi->setSourceFile(StreamReader::createByString($disk->get($certificate->template_pdf_path)));
+        $source = $fpdi->importPage(1);
+        $size = $fpdi->getTemplateSize($source);
+        $scale = max($width / $size['width'], $height / $size['height']);
+        $drawWidth = $size['width'] * $scale;
+        $drawHeight = $size['height'] * $scale;
+        $fpdi->out(sprintf('q 0 0 %.2F %.2F re W n', $width, $height));
+        $fpdi->useTemplate($source, ($width - $drawWidth) / 2, ($height - $drawHeight) / 2, $drawWidth, $drawHeight);
+        $fpdi->out('Q');
+
+        $fpdi->setSourceFile(StreamReader::createByString($dompdf->output()));
+        $fpdi->useTemplate($fpdi->importPage(1), 0, 0, $width, $height);
+
+        return new RenderedCertificate($fpdi->Output('S'), $tooLong);
+    }
+
+    /** Draws the Attendee's name on the page. Returns whether it is too long even at the minimum size. */
+    private function stampName(Dompdf $dompdf, Certificate $certificate, Attendee $attendee, float $width, float $height): bool
+    {
+        $metrics = $dompdf->getFontMetrics();
+        $font = $this->font($certificate, $metrics);
+
+        $name = trim(preg_replace('/\s+/', ' ', (string) $attendee->full_name));
+        [$size, $tooLong] = $this->fit($metrics, $name, $font, $certificate->name_font_size * $width, $this->availableWidth($certificate, $width));
+        $textWidth = $metrics->getTextWidth($name, $font, $size);
+        $lineHeight = $metrics->getFontHeight($font, $size);
+        $dompdf->getCanvas()->text(
+            $certificate->name_x * $width - $textWidth / 2,
+            $certificate->name_y * $height - $lineHeight / 2,
+            $name,
+            $font,
+            $size,
+            $this->color($certificate->color),
+        );
+
+        return $tooLong;
     }
 
     /** @return array{file: string, width: int, height: int} */

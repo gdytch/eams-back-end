@@ -10,7 +10,6 @@ use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\User;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 
 class AttendeeDashboardData
 {
@@ -125,7 +124,7 @@ class AttendeeDashboardData
             ->whereNotNull('check_in_at')
             ->get()
             ->keyBy('breakout_id');
-        $pickedIds = DB::table('breakout_picks')->where('attendee_id', $registration->id)->pluck('breakout_id')->map(fn ($id) => (int) $id);
+        $pickedIds = $registration->pickedBreakouts()->withoutGlobalScopes()->pluck('breakouts.id')->map(fn ($id) => (int) $id);
         $ownIds = $pickedIds->merge($records->keys())->unique();
 
         return $event->breakouts()->withoutGlobalScopes()

@@ -36,6 +36,7 @@ class CertificateResource extends JsonResource
             ],
             'release_rule' => $this->release_rule->value,
             'include_breakouts' => $this->include_breakouts,
+            'email_enabled' => $this->email_enabled,
             'release_at' => $this->release_at,
             'created_at' => $this->created_at,
             'updated_at' => $this->updated_at,

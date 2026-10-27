@@ -2,15 +2,20 @@
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\CertificateFont;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\SaveCertificateRequest;
+use App\Http\Requests\SetCertificateGoogleFontRequest;
 use App\Http\Requests\UploadCertificateTemplateRequest;
 use App\Http\Resources\CertificateResource;
 use App\Models\AuditLog;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Services\CertificateAudience;
+use App\Services\GoogleFontException;
+use App\Services\GoogleFontService;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 
 class CertificateController extends Controller
 {
@@ -64,6 +69,26 @@ class CertificateController extends Controller
         AuditLog::record('certificate.deleted', $certificate);
 
         return response()->noContent();
+    }
+
+    public function setGoogleFont(SetCertificateGoogleFontRequest $request, Event $event, Certificate $certificate, GoogleFontService $fonts)
+    {
+        $family = $request->family();
+
+        try {
+            $path = $fonts->cachedFont($family);
+        } catch (GoogleFontException $e) {
+            throw ValidationException::withMessages(['url' => $e->getMessage()]);
+        }
+
+        $certificate->update([
+            'font' => CertificateFont::Google,
+            'google_font_family' => $family,
+            'google_font_path' => $path,
+        ]);
+        AuditLog::record('certificate.google_font_set', $certificate);
+
+        return CertificateResource::make($certificate);
     }
 
     public function uploadTemplate(UploadCertificateTemplateRequest $request, Event $event, Certificate $certificate)

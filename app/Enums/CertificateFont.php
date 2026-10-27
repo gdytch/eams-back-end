@@ -9,4 +9,6 @@ enum CertificateFont: string
     case SansSerif = 'sans-serif';
     case DejaVuSerif = 'dejavu-serif';
     case DejaVuSans = 'dejavu-sans';
+    /** A cached Google Font; only selectable once the Certificate has one. */
+    case Google = 'google';
 }

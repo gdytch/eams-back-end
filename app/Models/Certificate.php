@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'organization_id', 'event_id', 'title', 'template_path',
-    'name_x', 'name_y', 'name_font_size', 'font', 'color',
+    'name_x', 'name_y', 'name_font_size', 'font', 'google_font_family', 'google_font_path', 'color',
     'page_size', 'orientation', 'status', 'published_at',
     'audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids',
     'release_rule', 'include_breakouts', 'release_at',

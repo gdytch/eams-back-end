@@ -22,6 +22,7 @@ class CertificateResource extends JsonResource
             'name_y' => $this->name_y,
             'name_font_size' => $this->name_font_size,
             'font' => $this->font->value,
+            'google_font_family' => $this->google_font_family,
             'color' => $this->color,
             'page_size' => $this->page_size->value,
             'orientation' => $this->orientation->value,

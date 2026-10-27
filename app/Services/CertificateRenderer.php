@@ -6,6 +6,7 @@ use App\Enums\CertificateFont;
 use App\Enums\CertificateOrientation;
 use App\Models\Attendee;
 use App\Models\Certificate;
+use Dompdf\Canvas;
 use Dompdf\Dompdf;
 use Dompdf\FontMetrics;
 use Dompdf\Options;
@@ -120,12 +121,7 @@ class CertificateRenderer
             return $this->googleFont($certificate, $metrics);
         }
 
-        return $metrics->getFont(match ($certificate->font) {
-            CertificateFont::Serif => 'times',
-            CertificateFont::DejaVuSerif => 'dejavu serif',
-            CertificateFont::DejaVuSans => 'dejavu sans',
-            default => 'helvetica',
-        }, 'normal');
+        return $metrics->getFont($certificate->font->dompdfFamily() ?? 'helvetica', 'normal');
     }
 
     private function googleFont(Certificate $certificate, FontMetrics $metrics): string
@@ -145,8 +141,12 @@ class CertificateRenderer
         return $font;
     }
 
-    /** The template covers the page: scaled up to the larger ratio, centred, the overflow clipped. */
-    private function drawTemplate(mixed $canvas, array $template, float $width, float $height): void
+    /**
+     * The template covers the page: scaled up to the larger ratio, centred, the overflow clipped.
+     *
+     * @param  array{file: string, width: int, height: int}  $template
+     */
+    private function drawTemplate(Canvas $canvas, array $template, float $width, float $height): void
     {
         $scale = max($width / $template['width'], $height / $template['height']);
         $drawWidth = $template['width'] * $scale;

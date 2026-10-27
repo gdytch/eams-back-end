@@ -8,6 +8,7 @@ use App\Models\Attendee;
 use App\Models\Breakout;
 use App\Models\Certificate;
 use App\Models\EventSession;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -49,8 +50,7 @@ class CertificateEligibility
         $byRule = match ($certificate->release_rule) {
             CertificateReleaseRule::Everyone => $rest->pluck('id'),
             CertificateReleaseRule::CheckedIn => $this->checkedIn($certificate, $rest),
-            CertificateReleaseRule::Rate50 => $this->meetingRate($certificate, $rest, 50),
-            CertificateReleaseRule::Rate75 => $this->meetingRate($certificate, $rest, 75),
+            CertificateReleaseRule::Rate50, CertificateReleaseRule::Rate75 => $this->meetingRate($certificate, $rest, (int) $certificate->release_rule->percent()),
         };
 
         return $handPicked->merge($byRule)->unique()->values();
@@ -66,12 +66,23 @@ class CertificateEligibility
             return collect();
         }
 
-        return AttendanceRecord::query()
-            ->whereIn('attendee_id', $attendees->pluck('id'))
-            ->whereNotNull('check_in_at')
-            // A session check-in made through a breakout is a breakout check-in.
-            ->when(! $certificate->include_breakouts, fn ($q) => $q->whereNull('breakout_id')->whereNull('via_breakout_id'))
+        return $this->countedRecords($certificate, $attendees->pluck('id'))
             ->distinct()->pluck('attendee_id')->map(fn ($id) => (int) $id);
+    }
+
+    /**
+     * The one definition of which check-ins count toward a Certificate. A session check-in made through a breakout
+     * (via_breakout_id) is a session check-in, as in the attendance report; breakout slots count only with the flag.
+     *
+     * @param  Collection<int, int>  $attendeeIds
+     * @return Builder<AttendanceRecord>
+     */
+    private function countedRecords(Certificate $certificate, Collection $attendeeIds): Builder
+    {
+        return AttendanceRecord::query()
+            ->whereIn('attendee_id', $attendeeIds)
+            ->whereNotNull('check_in_at')
+            ->when(! $certificate->include_breakouts, fn (Builder $q) => $q->whereNull('breakout_id'));
     }
 
     /**
@@ -93,7 +104,7 @@ class CertificateEligibility
             ? Breakout::withoutGlobalScopes()->where('event_id', $certificate->event_id)->get()->filter->hasEnded()
             : collect();
 
-        $records = AttendanceRecord::query()->whereIn('attendee_id', $ids)->whereNotNull('check_in_at')->get()->groupBy('attendee_id');
+        $records = $this->countedRecords($certificate, $ids)->get()->groupBy('attendee_id');
         $picks = $breakouts->isEmpty() ? collect() : DB::table('breakout_picks')
             ->whereIn('attendee_id', $ids)->whereIn('breakout_id', $breakouts->modelKeys())
             ->get()->groupBy('attendee_id')->map(fn ($rows) => $rows->pluck('breakout_id')->map(fn ($id) => (int) $id));

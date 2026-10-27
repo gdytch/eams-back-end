@@ -74,9 +74,8 @@ class CertificateAttendeeAccessTest extends TestCase
         $path = "certificates/{$certificate->id}/{$attendee->id}.pdf";
         Storage::disk('local')->put($path, $content);
 
-        return IssuedCertificate::create([
+        return IssuedCertificate::factory()->generated($path)->create([
             'certificate_id' => $certificate->id, 'attendee_id' => $attendee->id,
-            'status' => 'generated', 'file_path' => $path, 'generated_at' => now(),
         ]);
     }
 
@@ -167,13 +166,24 @@ class CertificateAttendeeAccessTest extends TestCase
     {
         $this->rule('checked_in');
         $breakout = $this->breakout('2026-06-09');
-        $session = $this->makeSession('2026-06-09');
         $this->checkIn($this->attendee, $breakout);
-        $this->checkIn($this->attendee, $session, ['via_breakout_id' => $breakout->id]);
         $this->assertAccess(false);
 
         $this->rule('checked_in', true);
         $this->assertAccess(true);
+    }
+
+    public function test_a_session_check_in_made_through_a_breakout_is_session_attendance_for_every_rule(): void
+    {
+        $breakout = $this->breakout('2026-06-09');
+        $session = $this->makeSession('2026-06-09');
+        $this->checkIn($this->attendee, $session, ['via_breakout_id' => $breakout->id]);
+
+        // The attendance report shows it as a present session, so the checked_in and the rate rules agree.
+        foreach (['checked_in', 'rate_50', 'rate_75'] as $rule) {
+            $this->rule($rule);
+            $this->assertAccess(true);
+        }
     }
 
     public function test_access_follows_attendance_immediately(): void

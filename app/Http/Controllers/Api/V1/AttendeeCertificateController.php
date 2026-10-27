@@ -3,13 +3,14 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\AttendeeCertificateResource;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\IssuedCertificate;
 use App\Services\CertificateAudience;
 use App\Services\CertificateEligibility;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -17,17 +18,9 @@ use Illuminate\Support\Str;
 /** The Attendee side of Certificates: own Issued certificates, Released and Eligible right now. */
 class AttendeeCertificateController extends Controller
 {
-    public function index(Request $request, int $event, CertificateEligibility $eligibility, CertificateAudience $audience): JsonResponse
+    public function index(Request $request, int $event, CertificateEligibility $eligibility, CertificateAudience $audience): AnonymousResourceCollection
     {
-        $issued = $this->available($request, $event, $eligibility, $audience);
-
-        return response()->json(['data' => $issued->map(fn (IssuedCertificate $row) => [
-            'id' => $row->certificate->id,
-            'title' => $row->certificate->title,
-            'event_id' => $row->certificate->event_id,
-            'released_at' => $row->certificate->release_at ?? $row->certificate->published_at,
-            'download_url' => "/api/v1/attendee/events/{$row->certificate->event_id}/certificates/{$row->certificate->id}/download",
-        ])->values()]);
+        return AttendeeCertificateResource::collection($this->available($request, $event, $eligibility, $audience)->values());
     }
 
     public function download(Request $request, int $event, int $certificate, CertificateEligibility $eligibility, CertificateAudience $audience)
@@ -43,7 +36,8 @@ class AttendeeCertificateController extends Controller
 
     /**
      * The caller's own Issued certificates of one event they may see now: published, Released, Eligible,
-     * still in the Audience, with a stored file. Only the caller's Linked Attendees are ever consulted.
+     * still in the Audience (a leaver's row is hidden), with a stored file. Only the caller's Linked Attendees
+     * are ever consulted. One query loads every candidate row; the Audience and eligibility checks run once per Certificate.
      *
      * @return Collection<int, IssuedCertificate>
      */
@@ -61,21 +55,24 @@ class AttendeeCertificateController extends Controller
         $certificates = Certificate::withoutGlobalScopes()
             ->where('event_id', $event->id)->orderBy('id')->get()
             ->filter(fn (Certificate $certificate) => $eligibility->isReleased($certificate));
+        $issued = IssuedCertificate::query()->visible()
+            ->whereIn('certificate_id', $certificates->modelKeys())
+            ->whereIn('attendee_id', $attendees->modelKeys())
+            ->get()->filter->hasFile()->groupBy('certificate_id');
 
         $rows = collect();
         foreach ($certificates as $certificate) {
+            $mine = $issued->get($certificate->id, collect())->keyBy('attendee_id');
+            if ($mine->isEmpty()) {
+                continue;
+            }
+
+            // Audience membership stays a live check (one query per Certificate the caller holds a file of).
             $inAudience = $audience->query($certificate)->withoutGlobalScope('organization')
-                ->whereIn('attendees.id', $attendees->modelKeys())->pluck('attendees.id');
-            $candidates = $attendees->whereIn('id', $inAudience->all());
-
-            foreach ($eligibility->eligibleIds($certificate, $candidates) as $attendeeId) {
-                $issued = IssuedCertificate::query()
-                    ->where('certificate_id', $certificate->id)->where('attendee_id', $attendeeId)->first();
-
-                if ($issued?->hasFile()) {
-                    $rows->push($issued->setRelation('certificate', $certificate)->setRelation('attendee', $attendees->firstWhere('id', $attendeeId)));
-                    break;
-                }
+                ->whereIn('attendees.id', $mine->keys()->all())->pluck('attendees.id')->all();
+            $eligibleId = $eligibility->eligibleIds($certificate, $attendees->whereIn('id', $inAudience))->first();
+            if ($eligibleId !== null) {
+                $rows->push($mine[$eligibleId]->setRelation('certificate', $certificate)->setRelation('attendee', $attendees->firstWhere('id', $eligibleId)));
             }
         }
 

@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\CertificateFont;
 use App\Enums\CertificateOrientation;
 use App\Enums\CertificatePageSize;
+use App\Enums\CertificateReleaseRule;
 use App\Enums\CertificateStatus;
 use App\Models\Concerns\BelongsToOrganization;
 use Database\Factories\CertificateFactory;
@@ -17,6 +18,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'organization_id', 'event_id', 'title', 'template_path',
     'name_x', 'name_y', 'name_font_size', 'font', 'google_font_family', 'google_font_path', 'color',
     'page_size', 'orientation', 'status', 'published_at',
+    'audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids',
+    'release_rule', 'include_breakouts', 'release_at',
 ])]
 class Certificate extends Model
 {
@@ -34,6 +37,12 @@ class Certificate extends Model
             'orientation' => CertificateOrientation::class,
             'status' => CertificateStatus::class,
             'published_at' => 'datetime',
+            'audience_union_ids' => 'array',
+            'audience_mission_ids' => 'array',
+            'audience_attendee_ids' => 'array',
+            'release_rule' => CertificateReleaseRule::class,
+            'include_breakouts' => 'boolean',
+            'release_at' => 'datetime',
         ];
     }
 

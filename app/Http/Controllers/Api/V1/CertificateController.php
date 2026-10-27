@@ -11,6 +11,7 @@ use App\Http\Resources\CertificateResource;
 use App\Models\AuditLog;
 use App\Models\Certificate;
 use App\Models\Event;
+use App\Services\CertificateAudience;
 use App\Services\GoogleFontException;
 use App\Services\GoogleFontService;
 use Illuminate\Support\Facades\Storage;
@@ -28,7 +29,7 @@ class CertificateController extends Controller
     public function store(SaveCertificateRequest $request, Event $event)
     {
         $certificate = $event->certificates()
-            ->create([...$request->validated(), 'organization_id' => $event->organization_id])
+            ->create([...$request->certificateAttributes(), 'organization_id' => $event->organization_id])
             ->refresh();
         AuditLog::record('certificate.created', $certificate);
 
@@ -44,10 +45,17 @@ class CertificateController extends Controller
 
     public function update(SaveCertificateRequest $request, Event $event, Certificate $certificate)
     {
-        $certificate->update($request->validated());
+        $certificate->update($request->certificateAttributes());
         AuditLog::record('certificate.updated', $certificate);
 
         return CertificateResource::make($certificate);
+    }
+
+    public function audienceCount(Event $event, Certificate $certificate, CertificateAudience $audience)
+    {
+        $this->authorize('view', $certificate);
+
+        return response()->json(['data' => ['count' => $audience->count($certificate)]]);
     }
 
     public function destroy(Event $event, Certificate $certificate)

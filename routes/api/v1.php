@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BreakoutController;
 use App\Http\Controllers\Api\V1\BreakoutProgramController;
+use App\Http\Controllers\Api\V1\CertificateController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
@@ -163,6 +164,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'store'])->scopeBindings();
         Route::get('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'show'])->scopeBindings();
         Route::delete('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'destroy'])->scopeBindings();
+
+        Route::post('events/{event}/certificates/{certificate}/template', [CertificateController::class, 'uploadTemplate']);
+        Route::apiResource('events.certificates', CertificateController::class)->scoped();
 
         Route::put('events/{event}/forms/order', [FormController::class, 'order']);
         Route::post('events/{event}/forms/copy', [FormController::class, 'copy']);

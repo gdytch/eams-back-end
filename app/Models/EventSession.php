@@ -27,7 +27,8 @@ class EventSession extends Model
     /** @return BelongsTo<Event, $this> */
     public function event(): BelongsTo
     {
-        return $this->belongsTo(Event::class);
+        // Sessions are read through their registration's event, including by Attendee accounts that have no organization.
+        return $this->belongsTo(Event::class)->withoutGlobalScope('organization');
     }
 
     public function attendanceRecords(): HasMany

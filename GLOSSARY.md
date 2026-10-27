@@ -138,3 +138,33 @@ _Avoid_: Pending, not yet occurred
 **Walk-in**:
 An Attendee admitted by an admin to a breakout they did not pick. A walk-in is present but never expected, so never absent.
 _Avoid_: Override, guest, extra
+
+## Certificates
+
+**Certificate**:
+An admin-designed e-certificate of one event, such as a certificate of attendance or participation: a background template, a positioned attendee name, an audience and a release rule. An event can have several. A Certificate is a draft until published.
+_Avoid_: Template (the template is only its background image), diploma, award
+
+**Template**:
+The background image of a Certificate. Fixed in size; only the attendee name is placed on it.
+_Avoid_: Background (alone), design
+
+**Issued certificate**:
+The generated file of one Certificate for one Attendee, carrying that Attendee's name. It exists as soon as its Certificate is published, before the Attendee is eligible to see it.
+_Avoid_: Certificate copy, generated certificate
+
+**Audience**:
+The Fully registered Attendees a Certificate is generated for: those matching the selected unions and missions by Organization level, plus any Attendees the admin picked by name. With nothing selected, every Fully registered Attendee of the event. Selecting a union covers union-level Attendees of that union; selecting a mission covers mission-level Attendees of that mission.
+_Avoid_: Recipients, target group
+
+**Attendance rate**:
+An Attendee's Present slots divided by their Expected slots that have ended, capped at 100%. Sessions always count; breakouts count only when the Certificate says so.
+_Avoid_: Attendance percentage, score
+
+**Eligible**:
+An Audience member who meets the Certificate's release rule right now: Everyone (fully registered), Checked in at least once, or a minimum Attendance rate. Decided live, never stored. Attendees picked by name are always Eligible once Released, whatever the rule.
+_Avoid_: Qualified, entitled
+
+**Released**:
+A Certificate whose release date and time has passed, so Eligible Attendees can see and download their Issued certificate.
+_Avoid_: Live, visible

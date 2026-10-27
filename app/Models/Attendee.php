@@ -17,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 
@@ -234,15 +235,19 @@ class Attendee extends Model
      */
     public function personRegistrations(): Builder
     {
-        return static::query()->where(fn (Builder $query) => $query
-            ->whereKey($this->id)
-            ->when($this->user_id, fn (Builder $query) => $query->orWhere('user_id', $this->user_id)));
+        // An Attendee account has no organization, so its own registrations must bypass the organization scope.
+        return static::query()
+            ->when(Auth::user()?->isAttendee(), fn (Builder $query) => $query->withoutGlobalScope('organization'))
+            ->where(fn (Builder $query) => $query
+                ->whereKey($this->id)
+                ->when($this->user_id, fn (Builder $query) => $query->orWhere('user_id', $this->user_id)));
     }
 
     /** @return BelongsTo<Event, $this> */
     public function event(): BelongsTo
     {
-        return $this->belongsTo(Event::class);
+        // A registration always shows its own event, even to an Attendee account that has no organization.
+        return $this->belongsTo(Event::class)->withoutGlobalScope('organization');
     }
 
     /**

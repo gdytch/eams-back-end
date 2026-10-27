@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AttendanceController;
+use App\Http\Controllers\Api\V1\AttendeeCertificateController;
 use App\Http\Controllers\Api\V1\AttendeeController;
 use App\Http\Controllers\Api\V1\AttendeeDashboardController;
 use App\Http\Controllers\Api\V1\AttendeeQrClaimController;
@@ -8,6 +9,8 @@ use App\Http\Controllers\Api\V1\AuditLogController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BreakoutController;
 use App\Http\Controllers\Api\V1\BreakoutProgramController;
+use App\Http\Controllers\Api\V1\CertificateController;
+use App\Http\Controllers\Api\V1\CertificateRunController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
@@ -95,6 +98,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
     Route::get('attendee/events/{event}/breakouts', [AttendeeDashboardController::class, 'breakouts']);
     Route::get('attendee/events/{event}/program', [AttendeeDashboardController::class, 'program']);
+    Route::get('attendee/events/{event}/certificates', [AttendeeCertificateController::class, 'index'])->whereNumber('event');
+    Route::get('attendee/events/{event}/certificates/{certificate}/download', [AttendeeCertificateController::class, 'download'])->whereNumber(['event', 'certificate'])->name('attendee.events.certificates.download');
     Route::get('attendee/events/{eventId}/speakers', [AttendeeDashboardController::class, 'speakers'])->whereNumber('eventId');
     Route::get('form-answers/{answer}/file', FormAnswerFileController::class)->middleware('throttle:60,1')->name('form-answers.file');
     Route::get('dashboard', [DashboardController::class, 'index']);
@@ -164,6 +169,20 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'store'])->scopeBindings();
         Route::get('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'show'])->scopeBindings();
         Route::delete('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'destroy'])->scopeBindings();
+
+        Route::post('events/{event}/certificates/{certificate}/template', [CertificateController::class, 'uploadTemplate'])->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/audience-count', [CertificateController::class, 'audienceCount'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/publish', [CertificateController::class, 'publish'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/unpublish', [CertificateController::class, 'unpublish'])->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/attendees/{attendee}/download', [CertificateController::class, 'download'])->whereNumber('attendee')->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/attendees', [CertificateRunController::class, 'attendees'])->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/status', [CertificateRunController::class, 'status'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/retry-failed', [CertificateRunController::class, 'retryFailed'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/regenerate-missing', [CertificateRunController::class, 'regenerateMissing'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/attendees/{attendee}/regenerate', [CertificateRunController::class, 'regenerate'])->whereNumber('attendee')->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/download-all', [CertificateRunController::class, 'downloadAll'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont'])->scopeBindings();
+        Route::apiResource('events.certificates', CertificateController::class)->scoped();
 
         Route::put('events/{event}/forms/order', [FormController::class, 'order']);
         Route::post('events/{event}/forms/copy', [FormController::class, 'copy']);

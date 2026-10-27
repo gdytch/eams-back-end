@@ -77,6 +77,24 @@ class AttendeeDashboardTest extends TestCase
         $this->assertEquals(0, $data['stats']['total_sessions_attended']);
     }
 
+    public function test_attendee_account_without_an_organization_still_sees_its_profile(): void
+    {
+        $org = Organization::factory()->create();
+        $attendeeUser = User::factory()->attendee()->create(['organization_id' => null]);
+        $attendee = Attendee::factory()->for($org)->for($attendeeUser)->create();
+
+        $this->actingAs($attendeeUser, 'sanctum')
+            ->getJson('/api/v1/auth/me')
+            ->assertOk()
+            ->assertJsonPath('user.attendee.id', $attendee->id);
+
+        $data = $this->extractResponseData(
+            $this->actingAs($attendeeUser, 'sanctum')->getJson('/api/v1/attendee/dashboard')->assertOk()->json()
+        );
+
+        $this->assertEquals($attendee->id, $data['profile']['id']);
+    }
+
     public function test_attendee_sees_upcoming_event_with_next_session(): void
     {
         $org = Organization::factory()->create();

@@ -51,6 +51,33 @@ services:
     networks:
       - ams_network
     user: www-data
+      # Scheduler
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ams_scheduler
+    environment:
+      - TZ=Asia/Manila
+      - DB_CONNECTION=mysql
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:?Set DB_DATABASE in .env}
+      - DB_USERNAME=${DB_USERNAME:?Set DB_USERNAME in .env}
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-127.0.0.1,::1}
+    command: php artisan schedule:work
+    restart: unless-stopped
+    volumes:
+      - .:/var/www
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_started
+    networks:
+      - ams_network
+    user: www-data
   # Web Server (Nginx)
   webserver:
     image: nginx:alpine

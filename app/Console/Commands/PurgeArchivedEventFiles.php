@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Attendee;
 use App\Models\Event;
 use App\Models\FormAnswer;
+use App\Models\IssuedCertificate;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 #[Signature('app:purge-archived-event-files')]
-#[Description('Delete form upload files and generated ID cards of events archived long enough ago')]
+#[Description('Delete form upload files, generated ID cards and Issued certificate files of events archived long enough ago')]
 class PurgeArchivedEventFiles extends Command
 {
     private const CHUNK = 200;
@@ -24,9 +25,10 @@ class PurgeArchivedEventFiles extends Command
     {
         $answers = 0;
         $cards = 0;
+        $certificates = 0;
         $cutoff = now()->subDays(Event::FILE_RETENTION_DAYS);
 
-        Event::withoutGlobalScopes()->where('archived_at', '<=', $cutoff)->pluck('id')->each(function (int $eventId) use (&$answers, &$cards, $cutoff) {
+        Event::withoutGlobalScopes()->where('archived_at', '<=', $cutoff)->pluck('id')->each(function (int $eventId) use (&$answers, &$cards, &$certificates, $cutoff) {
             $answers += $this->purgeInChunks(
                 $eventId,
                 $cutoff,
@@ -49,9 +51,22 @@ class PurgeArchivedEventFiles extends Command
                     $attendee->forceFill(['id_card_path' => null, 'id_card_images_path' => null, 'id_card_generated_at' => null])->saveQuietly();
                 },
             );
+
+            // The Certificate, its Template and font stay, so Regenerate can rebuild the files.
+            $certificates += $this->purgeInChunks(
+                $eventId,
+                $cutoff,
+                IssuedCertificate::query()->whereNotNull('file_path')
+                    ->whereHas('certificate', fn ($q) => $q->withoutGlobalScopes()->where('event_id', $eventId)),
+                function (IssuedCertificate $issued) {
+                    Storage::disk('local')->delete($issued->file_path);
+                    $issued->forceFill(['file_path' => null, 'file_deleted_at' => now()])->saveQuietly();
+                },
+            );
         });
 
         $this->info("Deleted {$answers} form files and {$cards} ID cards.");
+        $this->info("Deleted {$certificates} issued certificate files.");
 
         return self::SUCCESS;
     }

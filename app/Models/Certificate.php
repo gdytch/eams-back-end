@@ -15,6 +15,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 
 #[Fillable([
     'organization_id', 'event_id', 'title', 'template_path',
@@ -79,7 +80,8 @@ class Certificate extends Model
             'count(*) as total, '
             .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as generated, '
             .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as failed, '
-            .'coalesce(sum(case when name_too_long then 1 else 0 end), 0) as name_too_long',
+            .'coalesce(sum(case when name_too_long then 1 else 0 end), 0) as name_too_long, '
+            .'max(file_deleted_at) as files_deleted_at',
             [IssuedCertificateStatus::Generated->value, IssuedCertificateStatus::Failed->value],
         )->first();
 
@@ -88,6 +90,8 @@ class Certificate extends Model
             'generated' => (int) $row->generated,
             'failed' => (int) $row->failed,
             'name_too_long' => (int) $row->name_too_long,
+            // Set once the retention purge removed the files; Regenerate clears it again.
+            'files_deleted_at' => $row->files_deleted_at ? Carbon::parse($row->files_deleted_at)->toJSON() : null,
         ];
     }
 }

@@ -169,6 +169,7 @@ class CertificateController extends Controller
         $this->authorize('view', $certificate);
 
         $issued = $certificate->issuedCertificates()->visible()->where('attendee_id', $attendee)->with('attendee')->first();
+        abort_if($issued?->file_deleted_at !== null, 410, 'The file of this certificate was deleted after the event was archived. Regenerate it.');
         abort_unless($issued?->hasFile() && Storage::disk('local')->exists($issued->file_path), 404);
 
         $name = Str::slug("{$certificate->title} {$issued->attendee->full_name}") ?: 'certificate';

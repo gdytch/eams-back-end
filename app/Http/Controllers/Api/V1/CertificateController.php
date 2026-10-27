@@ -138,10 +138,10 @@ class CertificateController extends Controller
                     $attendees->map(fn ($attendee) => [
                         'certificate_id' => $certificate->id, 'attendee_id' => $attendee->id,
                         'status' => 'pending', 'failure_reason' => null, 'name_too_long' => false,
-                        'created_at' => now(), 'updated_at' => now(),
+                        'hidden_at' => null, 'created_at' => now(), 'updated_at' => now(),
                     ])->all(),
                     ['certificate_id', 'attendee_id'],
-                    ['status', 'failure_reason', 'name_too_long', 'updated_at'],
+                    ['status', 'failure_reason', 'name_too_long', 'hidden_at', 'updated_at'],
                 );
             }, 'attendees.id', 'id');
 
@@ -168,7 +168,7 @@ class CertificateController extends Controller
     {
         $this->authorize('view', $certificate);
 
-        $issued = $certificate->issuedCertificates()->where('attendee_id', $attendee)->with('attendee')->first();
+        $issued = $certificate->issuedCertificates()->visible()->where('attendee_id', $attendee)->with('attendee')->first();
         abort_if($issued?->file_deleted_at !== null, 410, 'The file of this certificate was deleted after the event was archived. Regenerate it.');
         abort_unless($issued?->hasFile() && Storage::disk('local')->exists($issued->file_path), 404);
 

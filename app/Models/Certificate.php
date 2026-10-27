@@ -76,7 +76,7 @@ class Certificate extends Model
      */
     public function generationCounts(): array
     {
-        $row = $this->issuedCertificates()->toBase()->selectRaw(
+        $row = $this->issuedCertificates()->visible()->toBase()->selectRaw(
             'count(*) as total, '
             .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as generated, '
             .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as failed, '

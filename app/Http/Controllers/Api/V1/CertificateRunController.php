@@ -23,7 +23,7 @@ class CertificateRunController extends Controller
     {
         $this->authorize('view', $certificate);
 
-        $rows = fn () => $certificate->issuedCertificates()->with('attendee')->orderBy('id');
+        $rows = fn () => $certificate->issuedCertificates()->visible()->with('attendee')->orderBy('id');
         $identity = fn (IssuedCertificate $row) => [
             'attendee_id' => $row->attendee_id,
             'full_name' => $row->attendee?->full_name,
@@ -44,7 +44,7 @@ class CertificateRunController extends Controller
         $this->authorize('update', $certificate);
         $this->ensurePublished($certificate);
 
-        $retried = $certificate->issuedCertificates()
+        $retried = $certificate->issuedCertificates()->visible()
             ->where('status', IssuedCertificateStatus::Failed)
             ->update(['status' => IssuedCertificateStatus::Pending, 'failure_reason' => null]);
 
@@ -61,7 +61,7 @@ class CertificateRunController extends Controller
         $this->authorize('update', $certificate);
         $this->ensurePublished($certificate);
 
-        $issued = $certificate->issuedCertificates()->where('attendee_id', $attendee)->firstOrFail();
+        $issued = $certificate->issuedCertificates()->visible()->where('attendee_id', $attendee)->firstOrFail();
         $issued->update(['status' => IssuedCertificateStatus::Pending, 'failure_reason' => null]);
 
         AuditLog::record('certificate.regenerated', $certificate, ['attendee_id' => $attendee]);
@@ -75,7 +75,7 @@ class CertificateRunController extends Controller
         $this->authorize('view', $certificate);
 
         $disk = Storage::disk('local');
-        $files = $certificate->issuedCertificates()->with('attendee')->orderBy('id')->get()
+        $files = $certificate->issuedCertificates()->visible()->with('attendee')->orderBy('id')->get()
             ->filter(fn (IssuedCertificate $row) => $row->hasFile() && $disk->exists($row->file_path));
         abort_if($files->isEmpty(), 404);
 

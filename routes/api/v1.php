@@ -176,6 +176,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('events/{event}/certificates/{certificate}/attendees/{attendee}/download', [CertificateController::class, 'download'])->whereNumber('attendee')->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/status', [CertificateRunController::class, 'status'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/retry-failed', [CertificateRunController::class, 'retryFailed'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/regenerate-missing', [CertificateRunController::class, 'regenerateMissing'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/attendees/{attendee}/regenerate', [CertificateRunController::class, 'regenerate'])->whereNumber('attendee')->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/download-all', [CertificateRunController::class, 'downloadAll'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont'])->scopeBindings();

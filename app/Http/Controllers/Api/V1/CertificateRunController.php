@@ -56,6 +56,37 @@ class CertificateRunController extends Controller
         return response()->json(['data' => ['retried' => $retried]]);
     }
 
+    /** Bulk restore, e.g. after the retention purge and an unarchive: requeues every visible row without a usable file. */
+    public function regenerateMissing(Event $event, Certificate $certificate)
+    {
+        $this->authorize('update', $certificate);
+        $this->ensurePublished($certificate);
+
+        $disk = Storage::disk('local');
+        $ids = [];
+        $certificate->issuedCertificates()->visible()
+            ->whereIn('status', [IssuedCertificateStatus::Generated, IssuedCertificateStatus::Failed])
+            ->chunkById(500, function ($rows) use ($disk, &$ids) {
+                foreach ($rows as $row) {
+                    if ($row->status === IssuedCertificateStatus::Failed || ! $row->hasFile() || ! $disk->exists($row->file_path)) {
+                        $ids[] = $row->id;
+                    }
+                }
+            });
+
+        foreach (array_chunk($ids, 500) as $chunk) {
+            IssuedCertificate::query()->whereIn('id', $chunk)
+                ->update(['status' => IssuedCertificateStatus::Pending, 'failure_reason' => null]);
+        }
+
+        AuditLog::record('certificate.regenerated_missing', $certificate, ['count' => count($ids)]);
+        foreach (array_chunk($ids, 25) as $chunk) {
+            GenerateIssuedCertificatesBatchJob::dispatch($certificate->id, $certificate->generation_run, $chunk);
+        }
+
+        return response()->json(['data' => ['requeued' => count($ids)]]);
+    }
+
     public function regenerate(Event $event, Certificate $certificate, int $attendee)
     {
         $this->authorize('update', $certificate);

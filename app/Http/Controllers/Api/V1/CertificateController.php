@@ -9,15 +9,14 @@ use App\Http\Requests\SaveCertificateRequest;
 use App\Http\Requests\SetCertificateGoogleFontRequest;
 use App\Http\Requests\UploadCertificateTemplateRequest;
 use App\Http\Resources\CertificateResource;
-use App\Jobs\GenerateCertificateJob;
 use App\Models\AuditLog;
 use App\Models\Certificate;
 use App\Models\Event;
-use App\Models\IssuedCertificate;
 use App\Services\CertificateAudience;
+use App\Services\CertificateAudienceSync;
+use App\Services\PublishCertificate;
 use App\Services\GoogleFontException;
 use App\Services\GoogleFontService;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -48,10 +47,16 @@ class CertificateController extends Controller
         return CertificateResource::make($certificate);
     }
 
-    public function update(SaveCertificateRequest $request, Event $event, Certificate $certificate)
+    public function update(SaveCertificateRequest $request, Event $event, Certificate $certificate, CertificateAudienceSync $sync)
     {
-        $certificate->update($request->certificateAttributes());
+        $certificate->fill($request->certificateAttributes());
+        $audienceChanged = $certificate->isDirty(['audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids']);
+        $certificate->save();
         AuditLog::record('certificate.updated', $certificate);
+
+        if ($audienceChanged && $certificate->isPublished()) {
+            $sync->reconcile($certificate);
+        }
 
         return CertificateResource::make($certificate);
     }
@@ -66,6 +71,10 @@ class CertificateController extends Controller
     public function destroy(Event $event, Certificate $certificate)
     {
         $this->authorize('delete', $certificate);
+
+        if ($certificate->isPublished()) {
+            throw ValidationException::withMessages(['status' => 'Unpublish the certificate before deleting it.']);
+        }
 
         if ($certificate->template_path) {
             Storage::disk('public')->delete($certificate->template_path);
@@ -113,45 +122,11 @@ class CertificateController extends Controller
         return CertificateResource::make($certificate);
     }
 
-    public function publish(Event $event, Certificate $certificate, CertificateAudience $audience)
+    public function publish(Event $event, Certificate $certificate, PublishCertificate $publish)
     {
         $this->authorize('update', $certificate);
 
-        if ($certificate->isPublished()) {
-            throw ValidationException::withMessages(['status' => 'This certificate is already published.']);
-        }
-        if (! $certificate->template_path) {
-            throw ValidationException::withMessages(['template' => 'Upload a Template before publishing.']);
-        }
-
-        $count = DB::transaction(function () use ($certificate, $audience) {
-            $certificate->update([
-                'status' => CertificateStatus::Published,
-                'published_at' => now(),
-                'generation_run' => $certificate->generation_run + 1,
-            ]);
-
-            $count = 0;
-            $audience->query($certificate)->select('attendees.id')->orderBy('attendees.id')->chunkById(500, function ($attendees) use ($certificate, &$count) {
-                $count += $attendees->count();
-                IssuedCertificate::upsert(
-                    $attendees->map(fn ($attendee) => [
-                        'certificate_id' => $certificate->id, 'attendee_id' => $attendee->id,
-                        'status' => 'pending', 'failure_reason' => null, 'name_too_long' => false,
-                        'hidden_at' => null, 'created_at' => now(), 'updated_at' => now(),
-                    ])->all(),
-                    ['certificate_id', 'attendee_id'],
-                    ['status', 'failure_reason', 'name_too_long', 'hidden_at', 'updated_at'],
-                );
-            }, 'attendees.id', 'id');
-
-            return $count;
-        });
-
-        AuditLog::record('certificate.published', $certificate, ['audience' => $count]);
-        GenerateCertificateJob::dispatch($certificate->id, $certificate->generation_run);
-
-        return CertificateResource::make($certificate->refresh());
+        return CertificateResource::make($publish($certificate));
     }
 
     public function unpublish(Event $event, Certificate $certificate)

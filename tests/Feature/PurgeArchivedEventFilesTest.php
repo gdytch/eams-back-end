@@ -3,14 +3,19 @@
 namespace Tests\Feature;
 
 use App\Enums\FormFieldType;
+use App\Jobs\GenerateIssuedCertificatesBatchJob;
 use App\Models\Attendee;
+use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\Form;
 use App\Models\FormAnswer;
+use App\Models\IssuedCertificate;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\CertificateRenderer;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -148,6 +153,110 @@ class PurgeArchivedEventFilesTest extends TestCase
         $this->artisan('app:purge-archived-event-files')->expectsOutput('Deleted 0 form files and 0 ID cards.')->assertSuccessful();
 
         $this->assertEquals($deletedAt, $answer->refresh()->file_deleted_at);
+    }
+
+    private function issuedCertificate(Event $event, string $name = 'a'): IssuedCertificate
+    {
+        $certificate = Certificate::query()->where('event_id', $event->id)->first()
+            ?? Certificate::factory()->for($event)->create(['template_path' => 'tpl.png', 'status' => 'published', 'generation_run' => 1]);
+        $attendee = Attendee::factory()->for($event)->create();
+        $path = "events/{$event->id}/certificates/{$certificate->id}/{$name}-{$attendee->id}.pdf";
+        Storage::disk('local')->put($path, 'pdf');
+
+        return IssuedCertificate::create([
+            'certificate_id' => $certificate->id, 'attendee_id' => $attendee->id,
+            'status' => 'generated', 'file_path' => $path, 'generated_at' => now(),
+        ]);
+    }
+
+    public function test_deletes_issued_certificate_files_after_retention_but_keeps_rows_template_and_font(): void
+    {
+        $event = $this->eventWithFiles(now()->subDays(16))['event'];
+        $issued = $this->issuedCertificate($event);
+        $path = $issued->file_path;
+        $certificate = $issued->certificate;
+        Storage::disk('local')->put('fonts/google/x.ttf', 'font');
+        $certificate->forceFill(['google_font_path' => 'fonts/google/x.ttf'])->save();
+
+        $this->artisan('app:purge-archived-event-files')->assertSuccessful();
+
+        Storage::disk('local')->assertMissing($path);
+        Storage::disk('local')->assertExists('fonts/google/x.ttf');
+        $issued->refresh();
+        $this->assertNull($issued->file_path);
+        $this->assertNotNull($issued->file_deleted_at);
+        $this->assertSame('generated', $issued->status->value);
+        $this->assertSame('tpl.png', $certificate->fresh()->template_path);
+        $this->assertSame('fonts/google/x.ttf', $certificate->fresh()->google_font_path);
+    }
+
+    public function test_keeps_issued_certificate_files_of_recently_archived_unarchived_or_live_events(): void
+    {
+        $recent = $this->issuedCertificate($this->eventWithFiles(now()->subDays(14))['event']);
+        $live = $this->issuedCertificate($this->eventWithFiles(null)['event']);
+        $unarchived = $this->eventWithFiles(now()->subDays(20))['event'];
+        $kept = $this->issuedCertificate($unarchived);
+        $admin = User::factory()->superAdmin()->create();
+        $this->actingAs($admin, 'sanctum')->postJson("/api/v1/events/{$unarchived->id}/unarchive")->assertOk();
+
+        $this->artisan('app:purge-archived-event-files')->assertSuccessful();
+
+        foreach ([$recent, $live, $kept] as $issued) {
+            $this->assertNotNull($issued->refresh()->file_path);
+            $this->assertNull($issued->file_deleted_at);
+            Storage::disk('local')->assertExists($issued->file_path);
+        }
+    }
+
+    public function test_purged_issued_certificates_are_not_downloadable_and_regenerate_after_unarchive(): void
+    {
+        $event = $this->eventWithFiles(now()->subDays(16))['event'];
+        $issued = $this->issuedCertificate($event);
+        $certificate = $issued->certificate;
+        $this->artisan('app:purge-archived-event-files')->assertSuccessful();
+        $deletedAt = $issued->refresh()->file_deleted_at;
+
+        $admin = User::factory()->superAdmin()->create();
+        $base = "/api/v1/events/{$event->id}/certificates/{$certificate->id}";
+        $this->actingAs($admin, 'sanctum')->get("{$base}/attendees/{$issued->attendee_id}/download")->assertStatus(410);
+        $this->actingAs($admin, 'sanctum')->getJson($base)->assertJsonPath('data.generation.files_deleted_at', $deletedAt->toJSON());
+
+        $this->postJson("/api/v1/events/{$event->id}/unarchive")->assertOk();
+        $this->postJson("{$base}/unpublish")->assertOk();
+        $this->postJson("{$base}/publish")->assertOk();
+        // The queue is faked here, so run the generation batch the publish queued.
+        Storage::fake('public');
+        $image = UploadedFile::fake()->image('t.png', 600, 400);
+        Storage::disk('public')->put('tpl.png', $image->get());
+        $issued->refresh();
+        $this->assertSame('pending', $issued->status->value);
+        (new GenerateIssuedCertificatesBatchJob($certificate->id, $certificate->fresh()->generation_run, [$issued->id]))->handle(app(CertificateRenderer::class));
+        $this->getJson($base)->assertJsonPath('data.generation.files_deleted_at', null);
+
+        $issued->refresh();
+        $this->assertSame('generated', $issued->status->value);
+        $this->assertNull($issued->file_deleted_at);
+        Storage::disk('local')->assertExists($issued->file_path);
+        $this->actingAs($admin, 'sanctum')->get("{$base}/attendees/{$issued->attendee_id}/download")->assertOk();
+    }
+
+    public function test_every_issued_certificate_is_purged_across_chunk_boundaries(): void
+    {
+        $event = $this->eventWithFiles(now()->subDays(16))['event'];
+        // One Attendee with many Certificates: the Attendee factory cannot make 450 unique rows.
+        $attendee = Attendee::factory()->for($event)->create();
+        foreach (range(1, 450) as $i) {
+            $certificate = Certificate::factory()->for($event)->create(['template_path' => 'tpl.png']);
+            IssuedCertificate::create([
+                'certificate_id' => $certificate->id, 'attendee_id' => $attendee->id,
+                'status' => 'generated', 'file_path' => "events/{$event->id}/certificates/{$certificate->id}/bulk.pdf", 'generated_at' => now(),
+            ]);
+        }
+
+        $this->artisan('app:purge-archived-event-files')->expectsOutput('Deleted 450 issued certificate files.')->assertSuccessful();
+
+        $this->assertSame(0, IssuedCertificate::whereNotNull('file_path')->count());
+        $this->assertSame(450, IssuedCertificate::whereNotNull('file_deleted_at')->count());
     }
 
     public function test_is_scheduled_daily(): void

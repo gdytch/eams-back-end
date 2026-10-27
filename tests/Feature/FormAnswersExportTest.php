@@ -76,7 +76,7 @@ class FormAnswersExportTest extends TestCase
         $ws = $this->sheets()->getSheet(0);
 
         $this->assertSame('Shirt order', $ws->getTitle());
-        $this->assertSame(['Name', 'Email', 'Territory', 'Registration status', 'Size', 'Name on shirt', 'Old question (removed)'], $this->rowOf($ws, 1));
+        $this->assertSame(['Name', 'Email', 'Organization', 'Registration status', 'Size', 'Name on shirt', 'Old question (removed)'], $this->rowOf($ws, 1));
         $row = $this->rowOf($ws, 2);
         $this->assertSame(['Jane Doe', 'jane@example.test'], array_slice($row, 0, 2));
         $this->assertSame('registered', $row[3]);
@@ -122,7 +122,7 @@ class FormAnswersExportTest extends TestCase
         $book = $this->sheets();
 
         $this->assertSame(['Shirt order', 'Waiver'], $book->getSheetNames());
-        $this->assertSame(['Name', 'Email', 'Territory', 'Registration status', 'Signature'], $this->rowOf($book->getSheet(1), 1));
+        $this->assertSame(['Name', 'Email', 'Organization', 'Registration status', 'Signature'], $this->rowOf($book->getSheet(1), 1));
         $this->assertNull($book->getSheet(1)->getCell('A2')->getValue());
     }
 
@@ -133,7 +133,7 @@ class FormAnswersExportTest extends TestCase
         $book = $this->sheets();
 
         $this->assertSame(1, $book->getSheetCount());
-        $this->assertSame(['Name', 'Email', 'Territory', 'Registration status'], $this->rowOf($book->getSheet(0), 1));
+        $this->assertSame(['Name', 'Email', 'Organization', 'Registration status'], $this->rowOf($book->getSheet(0), 1));
     }
 
     public function test_access_is_org_admin_of_the_organization_and_super_admin(): void

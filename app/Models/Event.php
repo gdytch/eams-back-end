@@ -129,6 +129,12 @@ class Event extends Model
         return $this->hasMany(Breakout::class);
     }
 
+    /** @return HasMany<Certificate, $this> */
+    public function certificates(): HasMany
+    {
+        return $this->hasMany(Certificate::class);
+    }
+
     public function program(): HasOne
     {
         return $this->hasOne(EventProgram::class)->whereNull('breakout_id');

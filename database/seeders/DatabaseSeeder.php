@@ -12,6 +12,7 @@ use App\Models\Union;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Mail;
 
 class DatabaseSeeder extends Seeder
 {
@@ -20,6 +21,9 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        // Completing a registration queues the welcome mail; seeding must never send mail.
+        Mail::fake();
+
         $superAdmin = User::factory()->superAdmin()->create([
             'name' => 'Super Admin',
             'email' => 'superadmin@example.com',
@@ -150,6 +154,9 @@ class DatabaseSeeder extends Seeder
             }
         }
 
+        $this->call(BreakoutSeeder::class);
+        $this->call(FormSeeder::class);
+        $this->call(RegistrationSeeder::class);
         $this->call(AttendanceRecordSeeder::class);
     }
 }

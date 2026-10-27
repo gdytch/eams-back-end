@@ -11,3 +11,4 @@ Artisan::command('inspire', function () {
 Schedule::command('app:clear-temporary-id-card-grid-downloads')->daily();
 Schedule::command('app:release-stale-draft-picks')->daily();
 Schedule::command('app:purge-archived-event-files')->daily();
+Schedule::command('app:send-certificate-emails')->everyFiveMinutes()->withoutOverlapping();

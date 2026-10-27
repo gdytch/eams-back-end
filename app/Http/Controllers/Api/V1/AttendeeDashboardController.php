@@ -27,7 +27,7 @@ class AttendeeDashboardController extends Controller
         $user = $request->user();
         abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
 
-        $attendee = Attendee::with(['union', 'mission', 'church'])->where('user_id', $user->id)->latest('id')->first();
+        $attendee = Attendee::withoutGlobalScope('organization')->with(['union', 'mission', 'church'])->where('user_id', $user->id)->latest('id')->first();
 
         if ($attendee === null) {
             return AttendeeDashboardResource::make($dashboardData->emptyDashboard($user))->response();

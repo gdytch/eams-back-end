@@ -18,7 +18,10 @@ trait BelongsToOrganization
         static::addGlobalScope('organization', function (Builder $builder) {
             $user = Auth::user();
 
-            if ($user !== null && ! $user->isSuperAdmin()) {
+            // Attendee accounts belong to no organization; models that opt in stay readable to them (staff access is policy-gated).
+            $readableByAttendees = $user?->isAttendee() && defined(static::class.'::VISIBLE_TO_ATTENDEES');
+
+            if ($user !== null && ! $user->isSuperAdmin() && ! $readableByAttendees) {
                 $builder->where($builder->getModel()->qualifyColumn('organization_id'), $user->organization_id);
             }
         });

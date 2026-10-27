@@ -66,8 +66,11 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
     public function headings(): array
     {
         return [
-            'Name', 'Email', 'Territory', 'Registration status',
-            ...$this->columns()->map(fn (FormField $field) => $this->table->columnLabel($field))->all(),
+            'Name',
+            'Email',
+            'Organization',
+            'Registration status',
+            ...$this->columns()->map(fn(FormField $field) => $this->table->columnLabel($field))->all(),
         ];
     }
 
@@ -85,7 +88,7 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
             ->each(function (FormSubmission $submission) use ($columns, &$rows) {
                 $attendee = $submission->attendee;
                 $answers = $submission->answers->keyBy('form_field_id');
-                $row = [preg_replace('/\s+/', ' ', $attendee->full_name), $attendee->email_address ?? '', $attendee->territory, (string) $attendee->registrationStatus()];
+                $row = [preg_replace('/\s+/', ' ', $attendee->full_name), $attendee->email_address ?? '', $attendee->organization_level_code, (string) $attendee->registrationStatus()];
 
                 foreach ($columns as $index => $field) {
                     /** @var FormAnswer|null $answer */
@@ -121,7 +124,7 @@ class FormAnswersSheetExport extends DefaultValueBinder implements FromArray, Sh
 
                 foreach ($this->links as $row => $cells) {
                     foreach ($cells as $column => $url) {
-                        $cell = $sheet->getCell(Coordinate::stringFromColumnIndex($column).$row);
+                        $cell = $sheet->getCell(Coordinate::stringFromColumnIndex($column) . $row);
                         $cell->getHyperlink()->setUrl($url);
                         $cell->getStyle()->getFont()->getColor()->setRGB('0563C1');
                         $cell->getStyle()->getFont()->setUnderline('single');

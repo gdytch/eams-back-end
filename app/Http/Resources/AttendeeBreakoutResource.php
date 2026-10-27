@@ -29,6 +29,7 @@ class AttendeeBreakoutResource extends JsonResource
                 'id' => $speaker->id,
                 'name' => $speaker->name,
                 'designation' => $speaker->designation,
+                'photo_urls' => $speaker->photo_urls,
             ])->values(),
             'program' => EventProgramResource::make($this->whenLoaded('program')),
             'picked' => (bool) $this->getAttribute('picked'),

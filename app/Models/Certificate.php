@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 #[Fillable([
     'organization_id', 'event_id', 'title', 'template_path',
@@ -70,6 +71,9 @@ class Certificate extends Model
         return $this->status === CertificateStatus::Published;
     }
 
+    /** Counts loaded for a whole list by generationCountsFor(), so a list needs one query, not one per row. */
+    private ?array $loadedCounts = null;
+
     /**
      * Generation progress over the Issued certificates.
      *
@@ -77,24 +81,44 @@ class Certificate extends Model
      */
     public function generationCounts(): array
     {
-        $row = $this->issuedCertificates()->visible()->toBase()->selectRaw(
-            'count(*) as total, '
-            .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as generated, '
-            .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as failed, '
-            .'coalesce(sum(case when name_too_long then 1 else 0 end), 0) as name_too_long, '
-            .'coalesce(sum(case when emailed_at is not null then 1 else 0 end), 0) as emailed, '
-            .'max(file_deleted_at) as files_deleted_at',
-            [IssuedCertificateStatus::Generated->value, IssuedCertificateStatus::Failed->value],
-        )->first();
+        return $this->loadedCounts ?? self::generationCountsFor(collect([$this]))[$this->id];
+    }
 
-        return [
-            'total' => (int) $row->total,
-            'generated' => (int) $row->generated,
-            'failed' => (int) $row->failed,
-            'name_too_long' => (int) $row->name_too_long,
-            'emailed' => (int) $row->emailed,
-            // Set once the retention purge removed the files; Regenerate clears it again.
-            'files_deleted_at' => $row->files_deleted_at ? Carbon::parse($row->files_deleted_at)->toJSON() : null,
-        ];
+    /**
+     * Loads the counts of all given Certificates with one grouped query and remembers them on each model.
+     *
+     * @param  Collection<int, Certificate>  $certificates
+     * @return array<int, array{total: int, generated: int, failed: int, name_too_long: int, emailed: int, files_deleted_at: ?string}>
+     */
+    public static function generationCountsFor(Collection $certificates): array
+    {
+        $rows = IssuedCertificate::query()->visible()->toBase()
+            ->whereIn('certificate_id', $certificates->pluck('id'))
+            ->groupBy('certificate_id')
+            ->selectRaw(
+                'certificate_id, count(*) as total, '
+                .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as generated, '
+                .'coalesce(sum(case when status = ? then 1 else 0 end), 0) as failed, '
+                .'coalesce(sum(case when name_too_long then 1 else 0 end), 0) as name_too_long, '
+                .'coalesce(sum(case when emailed_at is not null then 1 else 0 end), 0) as emailed, '
+                .'max(file_deleted_at) as files_deleted_at',
+                [IssuedCertificateStatus::Generated->value, IssuedCertificateStatus::Failed->value],
+            )->get()->keyBy('certificate_id');
+
+        $counts = [];
+        foreach ($certificates as $certificate) {
+            $row = $rows->get($certificate->id);
+            $counts[$certificate->id] = $certificate->loadedCounts = [
+                'total' => (int) ($row->total ?? 0),
+                'generated' => (int) ($row->generated ?? 0),
+                'failed' => (int) ($row->failed ?? 0),
+                'name_too_long' => (int) ($row->name_too_long ?? 0),
+                'emailed' => (int) ($row->emailed ?? 0),
+                // Set once the retention purge removed the files; Regenerate clears it again.
+                'files_deleted_at' => ($row->files_deleted_at ?? null) ? Carbon::parse($row->files_deleted_at)->toJSON() : null,
+            ];
+        }
+
+        return $counts;
     }
 }

@@ -122,6 +122,7 @@ class SaveCertificateRequest extends FormRequest
 
     private function organizationId(): int
     {
-        return Event::withoutGlobalScopes()->whereKey($this->eventId())->value('organization_id');
+        // An unknown event matches no union or mission instead of raising a TypeError.
+        return (int) Event::withoutGlobalScopes()->whereKey($this->eventId())->value('organization_id');
     }
 }

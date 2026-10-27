@@ -74,9 +74,8 @@ class CertificateAttendeeAccessTest extends TestCase
         $path = "certificates/{$certificate->id}/{$attendee->id}.pdf";
         Storage::disk('local')->put($path, $content);
 
-        return IssuedCertificate::create([
+        return IssuedCertificate::factory()->generated($path)->create([
             'certificate_id' => $certificate->id, 'attendee_id' => $attendee->id,
-            'status' => 'generated', 'file_path' => $path, 'generated_at' => now(),
         ]);
     }
 

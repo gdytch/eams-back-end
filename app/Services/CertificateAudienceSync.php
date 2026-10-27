@@ -21,15 +21,21 @@ class CertificateAudienceSync
 
     public function sync(Attendee $attendee, bool $nameChanged = false): void
     {
+        // One cheap query ends the common case: an event with no published Certificate.
+        $certificates = Certificate::withoutGlobalScopes()
+            ->where('event_id', $attendee->event_id)
+            ->where('status', CertificateStatus::Published)
+            ->get();
+        if ($certificates->isEmpty()) {
+            return;
+        }
+
         $event = Event::withoutGlobalScopes()->find($attendee->event_id);
         if ($event === null || $event->isArchived()) {
             return;
         }
 
-        Certificate::withoutGlobalScopes()
-            ->where('event_id', $event->id)
-            ->where('status', CertificateStatus::Published)
-            ->each(fn (Certificate $certificate) => $this->syncCertificate($certificate, $attendee, $nameChanged));
+        $certificates->each(fn (Certificate $certificate) => $this->syncCertificate($certificate, $attendee, $nameChanged));
     }
 
     /**

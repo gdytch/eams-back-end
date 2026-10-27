@@ -8,15 +8,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\SaveCertificateRequest;
 use App\Http\Requests\SetCertificateGoogleFontRequest;
 use App\Http\Requests\UploadCertificateTemplateRequest;
+use App\Http\Resources\CertificateAudienceCountResource;
 use App\Http\Resources\CertificateResource;
 use App\Models\AuditLog;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Services\CertificateAudience;
 use App\Services\CertificateAudienceSync;
-use App\Services\PublishCertificate;
 use App\Services\GoogleFontException;
 use App\Services\GoogleFontService;
+use App\Services\PublishCertificate;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -27,7 +28,10 @@ class CertificateController extends Controller
     {
         $this->authorize('viewAny', [Certificate::class, $event]);
 
-        return CertificateResource::collection($event->certificates()->orderBy('id')->get());
+        $certificates = $event->certificates()->orderBy('id')->get();
+        Certificate::generationCountsFor($certificates);
+
+        return CertificateResource::collection($certificates);
     }
 
     public function store(SaveCertificateRequest $request, Event $event)
@@ -65,7 +69,7 @@ class CertificateController extends Controller
     {
         $this->authorize('view', $certificate);
 
-        return response()->json(['data' => ['count' => $audience->count($certificate)]]);
+        return CertificateAudienceCountResource::make($audience->count($certificate));
     }
 
     public function destroy(Event $event, Certificate $certificate)

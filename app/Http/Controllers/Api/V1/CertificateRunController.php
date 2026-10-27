@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\IssuedCertificateStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\CertificateRunStatusResource;
+use App\Http\Resources\IssuedCertificateResource;
 use App\Jobs\GenerateCertificateJob;
 use App\Jobs\GenerateIssuedCertificatesBatchJob;
 use App\Models\AuditLog;
@@ -23,20 +25,9 @@ class CertificateRunController extends Controller
     {
         $this->authorize('view', $certificate);
 
-        $rows = fn () => $certificate->issuedCertificates()->visible()->with('attendee')->orderBy('id');
-        $identity = fn (IssuedCertificate $row) => [
-            'attendee_id' => $row->attendee_id,
-            'full_name' => $row->attendee?->full_name,
-            'email_address' => $row->attendee?->email_address,
-        ];
+        $certificate->setRelation('issuedCertificates', $certificate->issuedCertificates()->visible()->with('attendee')->orderBy('id')->get());
 
-        return response()->json(['data' => [
-            ...$certificate->generationCounts(),
-            'failures' => $rows()->where('status', IssuedCertificateStatus::Failed)->get()
-                ->map(fn ($row) => [...$identity($row), 'reason' => $row->failure_reason])->values(),
-            'name_too_long_attendees' => $rows()->where('name_too_long', true)->get()
-                ->map($identity)->values(),
-        ]]);
+        return CertificateRunStatusResource::make($certificate);
     }
 
     public function retryFailed(Event $event, Certificate $certificate)
@@ -98,7 +89,7 @@ class CertificateRunController extends Controller
         AuditLog::record('certificate.regenerated', $certificate, ['attendee_id' => $attendee]);
         GenerateIssuedCertificatesBatchJob::dispatch($certificate->id, $certificate->generation_run, [$issued->id]);
 
-        return response()->json(['data' => $issued->refresh()->only(['attendee_id', 'status', 'name_too_long'])]);
+        return IssuedCertificateResource::make($issued->refresh());
     }
 
     public function downloadAll(Event $event, Certificate $certificate)
@@ -111,15 +102,23 @@ class CertificateRunController extends Controller
         abort_if($files->isEmpty(), 404);
 
         $temporary = tempnam(sys_get_temp_dir(), 'certificates-');
-        $archive = new ZipArchive;
-        if ($archive->open($temporary, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
-            throw new RuntimeException('Unable to create the certificate archive.');
+        try {
+            $archive = new ZipArchive;
+            if ($archive->open($temporary, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+                throw new RuntimeException('Unable to create the certificate archive.');
+            }
+            foreach ($files as $row) {
+                $name = Str::slug($row->attendee?->full_name ?? '') ?: 'attendee';
+                // Read from disk when the archive is closed, never held in memory.
+                $archive->addFile($disk->path($row->file_path), "{$name}-{$row->attendee_id}.pdf");
+            }
+            if (! $archive->close()) {
+                throw new RuntimeException('Unable to write the certificate archive.');
+            }
+        } catch (\Throwable $e) {
+            @unlink($temporary);
+            throw $e;
         }
-        foreach ($files as $row) {
-            $name = Str::slug($row->attendee?->full_name ?? '') ?: 'attendee';
-            $archive->addFromString("{$name}-{$row->attendee_id}.pdf", $disk->get($row->file_path));
-        }
-        $archive->close();
 
         $title = Str::slug($certificate->title) ?: 'certificates';
 

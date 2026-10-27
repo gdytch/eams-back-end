@@ -15,6 +15,7 @@ use App\Services\DailyMailBudget;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -42,11 +43,14 @@ class SendCertificateEmails extends Command
         $this->cap = (int) config('certificates.email_daily_cap');
         $this->limit = (int) config('certificates.email_per_run');
 
-        foreach ($this->certificates() as $certificate) {
+        $certificates = $this->certificates();
+        $eventNames = Event::withoutGlobalScopes()->whereIn('id', $certificates->pluck('event_id'))->pluck('name', 'id');
+
+        foreach ($certificates as $certificate) {
             if ($this->sent >= $this->limit || ! $eligibility->isReleased($certificate)) {
                 continue;
             }
-            if (! $this->sendFor($certificate, $audience, $eligibility, $budget)) {
+            if (! $this->sendFor($certificate, (string) $eventNames->get($certificate->event_id), $audience, $eligibility, $budget)) {
                 break;
             }
         }
@@ -68,9 +72,8 @@ class SendCertificateEmails extends Command
     }
 
     /** Returns false once the daily cap is used up, so the run stops. */
-    private function sendFor(Certificate $certificate, CertificateAudience $audience, CertificateEligibility $eligibility, DailyMailBudget $budget): bool
+    private function sendFor(Certificate $certificate, string $eventName, CertificateAudience $audience, CertificateEligibility $eligibility, DailyMailBudget $budget): bool
     {
-        $eventName = (string) Event::withoutGlobalScopes()->whereKey($certificate->event_id)->value('name');
         $capacityLeft = true;
 
         $this->pending($certificate, $audience)->chunkById(100, function (Collection $rows) use ($certificate, $eligibility, $budget, $eventName, &$capacityLeft) {
@@ -93,8 +96,12 @@ class SendCertificateEmails extends Command
         return $capacityLeft;
     }
 
-    /** Generated rows with a stored file, not yet emailed, of current Audience members who have an email address. */
-    private function pending(Certificate $certificate, CertificateAudience $audience)
+    /**
+     * Generated rows with a stored file, not yet emailed, of current Audience members who have an email address.
+     *
+     * @return Builder<IssuedCertificate>
+     */
+    private function pending(Certificate $certificate, CertificateAudience $audience): Builder
     {
         return IssuedCertificate::query()
             ->where('certificate_id', $certificate->id)

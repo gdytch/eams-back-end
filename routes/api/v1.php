@@ -169,7 +169,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'show'])->scopeBindings();
         Route::delete('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'destroy'])->scopeBindings();
 
-        Route::post('events/{event}/certificates/{certificate}/template', [CertificateController::class, 'uploadTemplate']);
+        Route::post('events/{event}/certificates/{certificate}/template', [CertificateController::class, 'uploadTemplate'])->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/audience-count', [CertificateController::class, 'audienceCount'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/publish', [CertificateController::class, 'publish'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/unpublish', [CertificateController::class, 'unpublish'])->scopeBindings();
@@ -178,7 +178,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/certificates/{certificate}/retry-failed', [CertificateRunController::class, 'retryFailed'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/attendees/{attendee}/regenerate', [CertificateRunController::class, 'regenerate'])->whereNumber('attendee')->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/download-all', [CertificateRunController::class, 'downloadAll'])->scopeBindings();
-        Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont']);
+        Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont'])->scopeBindings();
         Route::apiResource('events.certificates', CertificateController::class)->scoped();
 
         Route::put('events/{event}/forms/order', [FormController::class, 'order']);

@@ -102,6 +102,7 @@ class SendCertificateEmails extends Command
             ->whereNotNull('file_path')
             ->whereNull('file_deleted_at')
             ->whereNull('emailed_at')
+            ->whereNull('hidden_at')
             ->whereIn('attendee_id', $audience->query($certificate)
                 ->whereNotNull('attendees.email_address')->where('attendees.email_address', '!=', '')
                 ->select('attendees.id'))

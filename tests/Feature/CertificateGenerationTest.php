@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\OrganizationLevel;
 use App\Jobs\GenerateCertificateJob;
+use App\Jobs\GenerateIssuedCertificatesBatchJob;
 use App\Models\Attendee;
 use App\Models\AuditLog;
 use App\Models\Certificate;
@@ -11,6 +12,7 @@ use App\Models\Event;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
+use App\Services\CertificateRenderer;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
@@ -251,6 +253,22 @@ class CertificateGenerationTest extends TestCase
 
         $this->event->forceFill(['archived_at' => now()])->save();
         (new GenerateCertificateJob($this->certificate->id, $this->certificate->fresh()->generation_run))->handle();
+
+        $this->assertSame([], Storage::disk('local')->allFiles('events'));
+        $this->assertDatabaseHas('issued_certificates', ['attendee_id' => $attendee->id, 'status' => 'pending']);
+    }
+
+    public function test_the_batch_job_writes_nothing_when_the_event_is_archived(): void
+    {
+        $this->uploadTemplate();
+        $attendee = Attendee::factory()->for($this->event)->create();
+        Queue::fake();
+        $this->publish()->assertOk();
+        $issued = $this->certificate->issuedCertificates()->firstOrFail();
+
+        $this->event->forceFill(['archived_at' => now()])->save();
+        (new GenerateIssuedCertificatesBatchJob($this->certificate->id, $this->certificate->fresh()->generation_run, [$issued->id]))
+            ->handle(app(CertificateRenderer::class));
 
         $this->assertSame([], Storage::disk('local')->allFiles('events'));
         $this->assertDatabaseHas('issued_certificates', ['attendee_id' => $attendee->id, 'status' => 'pending']);

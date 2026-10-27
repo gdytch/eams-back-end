@@ -1,0 +1,104 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Enums\IssuedCertificateStatus;
+use App\Http\Controllers\Controller;
+use App\Jobs\GenerateCertificateJob;
+use App\Jobs\GenerateIssuedCertificatesBatchJob;
+use App\Models\AuditLog;
+use App\Models\Certificate;
+use App\Models\Event;
+use App\Models\IssuedCertificate;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use RuntimeException;
+use ZipArchive;
+
+/** Admin management of a Certificate's generation run: status, retry, regenerate one file, zip download. */
+class CertificateRunController extends Controller
+{
+    public function status(Event $event, Certificate $certificate)
+    {
+        $this->authorize('view', $certificate);
+
+        $rows = fn () => $certificate->issuedCertificates()->with('attendee')->orderBy('id');
+        $identity = fn (IssuedCertificate $row) => [
+            'attendee_id' => $row->attendee_id,
+            'full_name' => $row->attendee?->full_name,
+            'email_address' => $row->attendee?->email_address,
+        ];
+
+        return response()->json(['data' => [
+            ...$certificate->generationCounts(),
+            'failures' => $rows()->where('status', IssuedCertificateStatus::Failed)->get()
+                ->map(fn ($row) => [...$identity($row), 'reason' => $row->failure_reason])->values(),
+            'name_too_long_attendees' => $rows()->where('name_too_long', true)->get()
+                ->map($identity)->values(),
+        ]]);
+    }
+
+    public function retryFailed(Event $event, Certificate $certificate)
+    {
+        $this->authorize('update', $certificate);
+        $this->ensurePublished($certificate);
+
+        $retried = $certificate->issuedCertificates()
+            ->where('status', IssuedCertificateStatus::Failed)
+            ->update(['status' => IssuedCertificateStatus::Pending, 'failure_reason' => null]);
+
+        AuditLog::record('certificate.retried', $certificate, ['count' => $retried]);
+        if ($retried > 0) {
+            GenerateCertificateJob::dispatch($certificate->id, $certificate->generation_run);
+        }
+
+        return response()->json(['data' => ['retried' => $retried]]);
+    }
+
+    public function regenerate(Event $event, Certificate $certificate, int $attendee)
+    {
+        $this->authorize('update', $certificate);
+        $this->ensurePublished($certificate);
+
+        $issued = $certificate->issuedCertificates()->where('attendee_id', $attendee)->firstOrFail();
+        $issued->update(['status' => IssuedCertificateStatus::Pending, 'failure_reason' => null]);
+
+        AuditLog::record('certificate.regenerated', $certificate, ['attendee_id' => $attendee]);
+        GenerateIssuedCertificatesBatchJob::dispatch($certificate->id, $certificate->generation_run, [$issued->id]);
+
+        return response()->json(['data' => $issued->refresh()->only(['attendee_id', 'status', 'name_too_long'])]);
+    }
+
+    public function downloadAll(Event $event, Certificate $certificate)
+    {
+        $this->authorize('view', $certificate);
+
+        $disk = Storage::disk('local');
+        $files = $certificate->issuedCertificates()->with('attendee')->orderBy('id')->get()
+            ->filter(fn (IssuedCertificate $row) => $row->hasFile() && $disk->exists($row->file_path));
+        abort_if($files->isEmpty(), 404);
+
+        $temporary = tempnam(sys_get_temp_dir(), 'certificates-');
+        $archive = new ZipArchive;
+        if ($archive->open($temporary, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new RuntimeException('Unable to create the certificate archive.');
+        }
+        foreach ($files as $row) {
+            $name = Str::slug($row->attendee?->full_name ?? '') ?: 'attendee';
+            $archive->addFromString("{$name}-{$row->attendee_id}.pdf", $disk->get($row->file_path));
+        }
+        $archive->close();
+
+        $title = Str::slug($certificate->title) ?: 'certificates';
+
+        return response()->download($temporary, "{$title}.zip", ['Content-Type' => 'application/zip'])->deleteFileAfterSend();
+    }
+
+    private function ensurePublished(Certificate $certificate): void
+    {
+        if (! $certificate->isPublished()) {
+            throw ValidationException::withMessages(['status' => 'Publish the certificate first.']);
+        }
+    }
+}

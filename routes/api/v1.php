@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BreakoutController;
 use App\Http\Controllers\Api\V1\BreakoutProgramController;
 use App\Http\Controllers\Api\V1\CertificateController;
+use App\Http\Controllers\Api\V1\CertificateRunController;
 use App\Http\Controllers\Api\V1\ChurchController;
 use App\Http\Controllers\Api\V1\DashboardController;
 use App\Http\Controllers\Api\V1\EventAttendeeController;
@@ -170,6 +171,10 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('events/{event}/certificates/{certificate}/publish', [CertificateController::class, 'publish'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/unpublish', [CertificateController::class, 'unpublish'])->scopeBindings();
         Route::get('events/{event}/certificates/{certificate}/attendees/{attendee}/download', [CertificateController::class, 'download'])->whereNumber('attendee')->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/status', [CertificateRunController::class, 'status'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/retry-failed', [CertificateRunController::class, 'retryFailed'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/attendees/{attendee}/regenerate', [CertificateRunController::class, 'regenerate'])->whereNumber('attendee')->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/download-all', [CertificateRunController::class, 'downloadAll'])->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont']);
         Route::apiResource('events.certificates', CertificateController::class)->scoped();
 

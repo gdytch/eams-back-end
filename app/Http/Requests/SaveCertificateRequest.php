@@ -15,6 +15,7 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class SaveCertificateRequest extends FormRequest
 {
@@ -59,6 +60,32 @@ class SaveCertificateRequest extends FormRequest
             'audience.attendee_ids' => ['sometimes', 'array'],
             'audience.attendee_ids.*' => ['integer', 'distinct', Rule::exists('attendees', 'id')->where('event_id', $this->eventId())],
         ];
+    }
+
+    public function after(): array
+    {
+        return [function (Validator $validator) {
+            $certificate = $this->route('certificate');
+            if (! $certificate instanceof Certificate || ! $certificate->isPublished()) {
+                return;
+            }
+
+            foreach (Certificate::DESIGN_FIELDS as $field) {
+                if ($this->has($field) && ! $this->sameAsStored($certificate, $field)) {
+                    $validator->errors()->add($field, 'The design is locked while the certificate is published. Unpublish it first.');
+                }
+            }
+        }];
+    }
+
+    private function sameAsStored(Certificate $certificate, string $field): bool
+    {
+        $stored = $certificate->{$field};
+        $stored = $stored instanceof \BackedEnum ? $stored->value : $stored;
+
+        return is_numeric($stored)
+            ? is_numeric($this->input($field)) && abs((float) $stored - (float) $this->input($field)) < 1e-9
+            : strcasecmp((string) $stored, (string) $this->input($field)) === 0;
     }
 
     /**

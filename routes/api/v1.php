@@ -167,6 +167,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::post('events/{event}/certificates/{certificate}/template', [CertificateController::class, 'uploadTemplate']);
         Route::get('events/{event}/certificates/{certificate}/audience-count', [CertificateController::class, 'audienceCount'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/publish', [CertificateController::class, 'publish'])->scopeBindings();
+        Route::post('events/{event}/certificates/{certificate}/unpublish', [CertificateController::class, 'unpublish'])->scopeBindings();
+        Route::get('events/{event}/certificates/{certificate}/attendees/{attendee}/download', [CertificateController::class, 'download'])->whereNumber('attendee')->scopeBindings();
         Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont']);
         Route::apiResource('events.certificates', CertificateController::class)->scoped();
 

@@ -28,6 +28,7 @@ class CertificateResource extends JsonResource
             'orientation' => $this->orientation->value,
             'status' => $this->status->value,
             'published_at' => $this->published_at,
+            'generation' => $this->generationCounts(),
             'audience' => [
                 'union_ids' => $this->audience_union_ids ?? [],
                 'mission_ids' => $this->audience_mission_ids ?? [],

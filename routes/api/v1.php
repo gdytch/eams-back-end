@@ -96,6 +96,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendee/dashboard', [AttendeeDashboardController::class, 'index']);
     Route::get('attendee/registrations', [AttendeeDashboardController::class, 'registrations']);
     Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
+    Route::get('attendee/events/{event}/breakouts', [AttendeeDashboardController::class, 'breakouts']);
     Route::get('attendee/events/{event}/program', [AttendeeDashboardController::class, 'program']);
     Route::get('attendee/events/{event}/certificates', [AttendeeCertificateController::class, 'index'])->whereNumber('event');
     Route::get('attendee/events/{event}/certificates/{certificate}/download', [AttendeeCertificateController::class, 'download'])->whereNumber(['event', 'certificate'])->name('attendee.events.certificates.download');

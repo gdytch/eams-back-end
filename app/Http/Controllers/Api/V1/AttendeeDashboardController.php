@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Http\Resources\AttendeeBreakoutResource;
 use App\Http\Resources\AttendeeDashboardResource;
 use App\Http\Resources\AttendeeProgramBreakoutResource;
 use App\Http\Resources\EventAttendeeResource;
@@ -54,7 +55,7 @@ class AttendeeDashboardController extends Controller
 
         $registrations = $user->attendees()
             ->withoutGlobalScopes()
-            ->with(['event' => fn ($query) => $query->withoutGlobalScopes(), 'attendanceRecords', 'pickedBreakouts' => $this->ownPickRelation()])
+            ->with(['event' => fn ($query) => $query->withoutGlobalScopes()->withExists(['breakouts as has_breakouts' => fn ($breakouts) => $breakouts->withoutGlobalScopes()]), 'attendanceRecords', 'pickedBreakouts' => $this->ownPickRelation()])
             ->orderBy('created_at', 'desc')
             ->get()
             ->each(fn (Attendee $registration) => $registration->setAttribute('own_picks', $dashboardData->ownPicks($registration)));
@@ -125,6 +126,23 @@ class AttendeeDashboardController extends Controller
             ->each(fn ($breakout) => $breakout->setAttribute('picked', in_array($breakout->id, $pickedIds, true)));
 
         return AttendeeProgramBreakoutResource::collection($breakouts)->resolve();
+    }
+
+    /**
+     * List the Breakouts one registered event shows the authenticated attendee, with own attendance.
+     */
+    public function breakouts(Request $request, int $event, AttendeeDashboardData $dashboardData): AnonymousResourceCollection
+    {
+        $user = $request->user();
+        abort_unless($user->isAttendee() || $user->has_attendee_account, 403, 'You do not have permission to perform this action.');
+
+        $event = Event::withoutGlobalScopes()->findOrFail($event);
+        $registration = $user->attendees()->withoutGlobalScopes()->where('event_id', $event->id)->first();
+        abort_unless($registration !== null, 404, 'Registration not found.');
+
+        $programIsPublic = (bool) $event->program()->value('is_public');
+
+        return AttendeeBreakoutResource::collection($dashboardData->attendeeBreakouts($event, $registration, $programIsPublic));
     }
 
     public function speakers(Request $request, int $eventId): AnonymousResourceCollection

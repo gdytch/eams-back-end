@@ -15,7 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
     'organization_id', 'event_id', 'title', 'template_path',
-    'name_x', 'name_y', 'name_font_size', 'font', 'color',
+    'name_x', 'name_y', 'name_font_size', 'font', 'google_font_family', 'google_font_path', 'color',
     'page_size', 'orientation', 'status', 'published_at',
 ])]
 class Certificate extends Model

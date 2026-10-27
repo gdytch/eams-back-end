@@ -6,6 +6,7 @@ use App\Enums\CertificateFont;
 use App\Enums\CertificateOrientation;
 use App\Enums\CertificatePageSize;
 use App\Models\Certificate;
+use Closure;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
@@ -35,7 +36,11 @@ class SaveCertificateRequest extends FormRequest
             'name_x' => ['sometimes', 'numeric', 'between:0,1'],
             'name_y' => ['sometimes', 'numeric', 'between:0,1'],
             'name_font_size' => ['sometimes', 'numeric', 'between:0.005,0.25'],
-            'font' => ['sometimes', Rule::enum(CertificateFont::class)],
+            'font' => ['sometimes', Rule::enum(CertificateFont::class), function (string $attribute, mixed $value, Closure $fail) {
+                if ($value === CertificateFont::Google->value && ! $this->route('certificate')?->google_font_path) {
+                    $fail('Add a Google Fonts link before choosing a Google font.');
+                }
+            }],
             'color' => ['sometimes', 'string', 'regex:/^#[0-9a-fA-F]{6}$/'],
             'page_size' => ['sometimes', Rule::enum(CertificatePageSize::class)],
             'orientation' => ['sometimes', Rule::enum(CertificateOrientation::class)],

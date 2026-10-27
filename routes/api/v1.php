@@ -166,6 +166,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::delete('events/{event}/breakouts/{breakout}/program', [BreakoutProgramController::class, 'destroy'])->scopeBindings();
 
         Route::post('events/{event}/certificates/{certificate}/template', [CertificateController::class, 'uploadTemplate']);
+        Route::post('events/{event}/certificates/{certificate}/google-font', [CertificateController::class, 'setGoogleFont']);
         Route::apiResource('events.certificates', CertificateController::class)->scoped();
 
         Route::put('events/{event}/forms/order', [FormController::class, 'order']);

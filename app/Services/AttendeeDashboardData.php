@@ -3,12 +3,14 @@
 namespace App\Services;
 
 use App\Http\Resources\BreakoutResource;
+use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\User;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 class AttendeeDashboardData
 {
@@ -94,6 +96,53 @@ class AttendeeDashboardData
         ];
     }
 
+    /** Status: walk_in, checked_in, missed (ended without a check-in) or pending. */
+    private function breakoutStatus(Breakout $breakout, ?AttendanceRecord $record): string
+    {
+        return match (true) {
+            (bool) $record?->is_walk_in => 'walk_in',
+            $record !== null => 'checked_in',
+            $breakout->endsAt()->isPast() => 'missed',
+            default => 'pending',
+        };
+    }
+
+    /**
+     * The Breakouts an Attendee may see for one event, with own attendance. Own picks and Walk-in Breakouts are
+     * always listed; the rest only while the Program is public. Empty without a pick mode or on a draft registration.
+     * Never exposes capacity, pick counts or `overbooked`.
+     *
+     * @return Collection<int, Breakout>
+     */
+    public function attendeeBreakouts(Event $event, Attendee $registration, bool $programIsPublic): Collection
+    {
+        if ($event->pick_mode === null || $registration->registration_completed_at === null) {
+            return collect();
+        }
+
+        $records = $registration->attendanceRecords()
+            ->whereNotNull('breakout_id')
+            ->whereNotNull('check_in_at')
+            ->get()
+            ->keyBy('breakout_id');
+        $pickedIds = DB::table('breakout_picks')->where('attendee_id', $registration->id)->pluck('breakout_id')->map(fn ($id) => (int) $id);
+        $ownIds = $pickedIds->merge($records->keys())->unique();
+
+        return $event->breakouts()->withoutGlobalScopes()
+            ->when(! $programIsPublic, fn ($query) => $query->whereIn('id', $ownIds))
+            ->with(['speakers' => fn ($speakers) => $speakers->withoutGlobalScopes(), 'program.days.sections.items.speaker'])
+            ->orderBy('date')->orderBy('start_time')
+            ->get()
+            ->each(function (Breakout $breakout) use ($pickedIds, $records): void {
+                $record = $records->get($breakout->id);
+                $picked = $pickedIds->contains($breakout->id);
+
+                $breakout->setAttribute('picked', $picked);
+                $breakout->setAttribute('attendance_status', $picked || $record !== null ? $this->breakoutStatus($breakout, $record) : null);
+                $breakout->setAttribute('attendance_check_in_at', $record?->check_in_at);
+            });
+    }
+
     /**
      * Breakout attendance, kept apart from the session rows (ADR 0003). Empty while the event has no pick mode.
      * Status: checked_in, walk_in, missed (ended without a check-in) or pending. Never exposes `overbooked`.
@@ -129,12 +178,7 @@ class AttendeeDashboardData
                     'start_time' => $breakout->start_time,
                     'end_time' => $breakout->end_time,
                     'room' => $breakout->room,
-                    'status' => match (true) {
-                        $record?->is_walk_in => 'walk_in',
-                        $record !== null => 'checked_in',
-                        $breakout->endsAt()->isPast() => 'missed',
-                        default => 'pending',
-                    },
+                    'status' => $this->breakoutStatus($breakout, $record),
                     'check_in_at' => $record?->check_in_at,
                 ];
             })

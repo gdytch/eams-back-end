@@ -35,7 +35,10 @@ class EventAttendeeResource extends JsonResource
             'id_card_generated_at' => $this->id_card_generated_at,
             'registered_by' => $this->registered_by,
             'registered_at' => $this->registered_at,
-            'event' => EventResource::make($this->whenLoaded('event')),
+            'event' => $ownPicks && $this->event !== null
+                // Set by the attendee's own registrations endpoint only; staff payloads never carry it.
+                ? EventResource::make($this->event)->resolve($request) + ['has_breakouts' => $this->event->pick_mode !== null && (bool) $this->event->getAttribute('has_breakouts')]
+                : EventResource::make($this->whenLoaded('event')),
             'attendee' => $attendee,
             // Set by the attendee's own registrations endpoint only; staff payloads never carry it.
             'picks' => $this->when($ownPicks, fn () => $this->resource->getAttributes()['own_picks']),

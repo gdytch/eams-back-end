@@ -93,6 +93,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attendee/dashboard', [AttendeeDashboardController::class, 'index']);
     Route::get('attendee/registrations', [AttendeeDashboardController::class, 'registrations']);
     Route::get('attendee/events/{event}/attendance', [AttendeeDashboardController::class, 'attendance']);
+    Route::get('attendee/events/{event}/breakouts', [AttendeeDashboardController::class, 'breakouts']);
     Route::get('attendee/events/{event}/program', [AttendeeDashboardController::class, 'program']);
     Route::get('attendee/events/{eventId}/speakers', [AttendeeDashboardController::class, 'speakers'])->whereNumber('eventId');
     Route::get('form-answers/{answer}/file', FormAnswerFileController::class)->middleware('throttle:60,1')->name('form-answers.file');

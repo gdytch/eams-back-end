@@ -10,8 +10,9 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Resolves a Certificate's Audience: the Fully registered Attendees of its event matching the selected
- * unions and missions by Organization level, Attendees who picked a selected Breakout, plus hand-picked Attendees. Nothing selected means everyone.
- * Eligibility (release rule, Attendance rate) is deliberately not decided here.
+ * unions and missions by Organization level, Attendees who picked a selected Breakout, plus hand-picked Attendees.
+ * Nothing selected means everyone. Picks are read from the raw breakout_picks table so the Breakout organization
+ * scope cannot hide them from an Attendee user. Eligibility (release rule, Attendance rate) is deliberately not decided here.
  */
 class CertificateAudience
 {
@@ -28,7 +29,7 @@ class CertificateAudience
         return Attendee::query()
             ->where('attendees.event_id', $certificate->event_id)
             ->withRegistrationStatus('registered')
-            ->when($unions || $missions || $picked || $breakouts, fn (Builder $query) => $query->where(fn (Builder $any) => $any
+            ->unless($certificate->audienceIsEveryone(), fn (Builder $query) => $query->where(fn (Builder $any) => $any
                 ->when($unions, fn (Builder $q) => $q->orWhere(fn (Builder $level) => $level
                     ->where('attendees.organization_level', OrganizationLevel::Union)
                     ->whereIn('attendees.union_id', $unions)))
@@ -36,7 +37,7 @@ class CertificateAudience
                     ->where('attendees.organization_level', OrganizationLevel::Mission)
                     ->whereIn('attendees.mission_id', $missions)))
                 ->when($breakouts, fn (Builder $q) => $q->orWhereIn('attendees.id', DB::table('breakout_picks')
-                    ->select('attendee_id')->whereIn('breakout_id', $breakouts))) // raw: the Breakout org scope must not hide picks from an Attendee user
+                    ->select('attendee_id')->whereIn('breakout_id', $breakouts)))
                 ->when($picked, fn (Builder $q) => $q->orWhereIn('attendees.id', $picked))));
     }
 

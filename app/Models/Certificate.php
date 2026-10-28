@@ -55,6 +55,17 @@ class Certificate extends Model
     /** Fields every stored Issued certificate depends on; locked while published. */
     public const DESIGN_FIELDS = ['name_x', 'name_y', 'name_font_size', 'font', 'color', 'page_size', 'orientation'];
 
+    /**
+     * Whether the Audience selects nobody in particular, which means every Fully registered Attendee.
+     * Pass $breakoutIds to test the Audience as if those Breakouts were selected instead of the stored ones.
+     *
+     * @param  array<int, int>|null  $breakoutIds
+     */
+    public function audienceIsEveryone(?array $breakoutIds = null): bool
+    {
+        return ! ($this->audience_union_ids || $this->audience_mission_ids || $this->audience_attendee_ids || ($breakoutIds ?? $this->audience_breakout_ids));
+    }
+
     /** @return BelongsTo<Event, $this> */
     public function event(): BelongsTo
     {

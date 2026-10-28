@@ -9,6 +9,7 @@ use App\Models\Attendee;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\IssuedCertificate;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -54,22 +55,21 @@ class CertificateAudienceSync
     /**
      * Certificates of the event whose Audience lists the Breakout.
      *
-     * @return \Illuminate\Support\Collection<int, Certificate>
+     * @return Collection<int, Certificate>
      */
-    private function usingBreakout(int $eventId, int $breakoutId)
+    private function usingBreakout(int $eventId, int $breakoutId): Collection
     {
         return Certificate::withoutGlobalScopes()->where('event_id', $eventId)->lockForUpdate()->get()
             ->filter(fn (Certificate $c) => in_array($breakoutId, $c->audience_breakout_ids ?? [], true));
     }
 
-    /** Refuses when dropping the Breakout would leave a published Certificate with an empty Audience (empty means everyone). */
+    /** Refuses when dropping the Breakout would leave a published Certificate with an empty Audience, which would mean everyone. */
     public function guardBreakoutRemoval(int $eventId, int $breakoutId): void
     {
         $emptied = $this->usingBreakout($eventId, $breakoutId)->first(fn (Certificate $c) => $c->isPublished()
-            && ! ($c->audience_union_ids || $c->audience_mission_ids || $c->audience_attendee_ids)
-            && array_values(array_diff($c->audience_breakout_ids, [$breakoutId])) === []);
+            && $c->audienceIsEveryone(array_diff($c->audience_breakout_ids, [$breakoutId])));
         if ($emptied !== null) {
-            throw ValidationException::withMessages(['breakout' => "This breakout is the only audience of the published certificate \"{$emptied->title}\". Unpublish it or change its audience first."]);
+            throw ValidationException::withMessages(['breakout' => "This Breakout is the only Audience of the published Certificate \"{$emptied->title}\". Unpublish it or change its Audience first."]);
         }
     }
 
@@ -77,9 +77,9 @@ class CertificateAudienceSync
      * Removes the Breakout from every Audience listing it. Returns the published Certificates to reconcile once the
      * Breakout is gone.
      *
-     * @return \Illuminate\Support\Collection<int, Certificate>
+     * @return Collection<int, Certificate>
      */
-    public function removeBreakout(int $eventId, int $breakoutId)
+    public function removeBreakout(int $eventId, int $breakoutId): Collection
     {
         return $this->usingBreakout($eventId, $breakoutId)->each(function (Certificate $c) use ($breakoutId) {
             $c->audience_breakout_ids = array_values(array_diff($c->audience_breakout_ids, [$breakoutId]));

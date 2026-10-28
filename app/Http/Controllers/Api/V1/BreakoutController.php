@@ -75,7 +75,7 @@ class BreakoutController extends Controller
         $this->authorize('delete', $breakout);
 
         // Lock the row so a pick cannot arrive between the check and the cascade delete.
-        $deleted = DB::transaction(function () use ($event, $breakout, $sync) {
+        $toReconcile = DB::transaction(function () use ($event, $breakout, $sync) {
             Event::withoutGlobalScopes()->whereKey($event->id)->lockForUpdate()->first();
             Breakout::whereKey($breakout->id)->lockForUpdate()->first();
             if ($breakout->picks()->exists()) {
@@ -89,10 +89,10 @@ class BreakoutController extends Controller
             return $published;
         });
 
-        if ($deleted === false) {
+        if ($toReconcile === false) {
             return response()->json(['message' => 'A breakout with picks cannot be deleted.'], 422);
         }
-        $deleted->each(fn ($certificate) => $sync->reconcile($certificate));
+        $toReconcile->each(fn ($certificate) => $sync->reconcile($certificate));
 
         AuditLog::record('breakout.deleted', $breakout);
 

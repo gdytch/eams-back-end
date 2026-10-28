@@ -9,6 +9,7 @@ use App\Models\Attendee;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\IssuedCertificate;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Keeps the Issued certificates of published Certificates in step with the Audience after publish: a newly
@@ -48,6 +49,42 @@ class CertificateAudienceSync
         $this->unhideReturners($certificate);
         $this->createMissingRows($certificate);
         $this->dispatchPending($certificate);
+    }
+
+    /**
+     * Certificates of the event whose Audience lists the Breakout.
+     *
+     * @return \Illuminate\Support\Collection<int, Certificate>
+     */
+    private function usingBreakout(int $eventId, int $breakoutId)
+    {
+        return Certificate::withoutGlobalScopes()->where('event_id', $eventId)->lockForUpdate()->get()
+            ->filter(fn (Certificate $c) => in_array($breakoutId, $c->audience_breakout_ids ?? [], true));
+    }
+
+    /** Refuses when dropping the Breakout would leave a published Certificate with an empty Audience (empty means everyone). */
+    public function guardBreakoutRemoval(int $eventId, int $breakoutId): void
+    {
+        $emptied = $this->usingBreakout($eventId, $breakoutId)->first(fn (Certificate $c) => $c->isPublished()
+            && ! ($c->audience_union_ids || $c->audience_mission_ids || $c->audience_attendee_ids)
+            && array_values(array_diff($c->audience_breakout_ids, [$breakoutId])) === []);
+        if ($emptied !== null) {
+            throw ValidationException::withMessages(['breakout' => "This breakout is the only audience of the published certificate \"{$emptied->title}\". Unpublish it or change its audience first."]);
+        }
+    }
+
+    /**
+     * Removes the Breakout from every Audience listing it. Returns the published Certificates to reconcile once the
+     * Breakout is gone.
+     *
+     * @return \Illuminate\Support\Collection<int, Certificate>
+     */
+    public function removeBreakout(int $eventId, int $breakoutId)
+    {
+        return $this->usingBreakout($eventId, $breakoutId)->each(function (Certificate $c) use ($breakoutId) {
+            $c->audience_breakout_ids = array_values(array_diff($c->audience_breakout_ids, [$breakoutId]));
+            $c->save();
+        })->filter(fn (Certificate $c) => $c->isPublished())->values();
     }
 
     private function unhideReturners(Certificate $certificate): void

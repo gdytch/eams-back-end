@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Enums\OrganizationLevel;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Certificate;
 use App\Models\Church;
 use App\Models\Event;
@@ -213,6 +214,109 @@ class CertificateAudienceTest extends TestCase
         $this->certificate->update(['audience_attendee_ids' => [$picked->id, $draft->id]]);
 
         $this->assertSame(1, $this->audienceCount());
+    }
+
+    /** A Fully registered Attendee of the event who picked the Breakout. */
+    private function picker(Breakout $breakout, bool $overbooked = false): Attendee
+    {
+        $attendee = Attendee::factory()->for($this->event)->create();
+        $attendee->breakouts()->attach($breakout->id, ['overbooked' => $overbooked]);
+
+        return $attendee;
+    }
+
+    private function breakout(?Event $event = null): Breakout
+    {
+        return Breakout::factory()->for($event ?? $this->event)->create();
+    }
+
+    public function test_breakout_ids_round_trip_through_the_certificate_resource(): void
+    {
+        $breakout = $this->breakout();
+
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$breakout->id]]])
+            ->assertOk()
+            ->assertJsonPath('data.audience.breakout_ids', [$breakout->id]);
+
+        $this->getJson($this->url())->assertJsonPath('data.audience.breakout_ids', [$breakout->id]);
+    }
+
+    public function test_certificates_without_breakouts_report_an_empty_list(): void
+    {
+        $this->getJson($this->url())->assertJsonPath('data.audience.breakout_ids', []);
+    }
+
+    public function test_breakout_ids_must_belong_to_the_certificates_event(): void
+    {
+        $foreign = $this->breakout(Event::factory()->for($this->org)->create());
+
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$foreign->id]]])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('audience.breakout_ids.0');
+    }
+
+    public function test_a_breakout_alone_makes_the_audience_its_pickers(): void
+    {
+        $breakout = $this->breakout();
+        $this->picker($breakout);
+        $this->picker($breakout);
+        $this->picker($this->breakout());
+        Attendee::factory()->for($this->event)->create();
+
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$breakout->id]]])->assertOk();
+
+        $this->assertSame(2, $this->audienceCount());
+    }
+
+    public function test_breakout_pickers_are_added_to_a_union_selection_and_counted_once(): void
+    {
+        $union = $this->union();
+        $breakout = $this->breakout();
+        $unionPicker = $this->picker($breakout);
+        $unionPicker->forceFill(['organization_level' => OrganizationLevel::Union, 'union_id' => $union->id])->saveQuietly();
+        $this->unionAttendee($union);
+        $this->picker($breakout);
+        $this->unionAttendee($this->union());
+
+        $this->putJson($this->url(), ['audience' => ['union_ids' => [$union->id], 'breakout_ids' => [$breakout->id]]])->assertOk();
+
+        $this->assertSame(3, $this->audienceCount());
+    }
+
+    public function test_an_overbooked_pick_counts_as_a_picker(): void
+    {
+        $breakout = $this->breakout();
+        $this->picker($breakout, overbooked: true);
+        $this->picker($breakout);
+
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$breakout->id]]])->assertOk();
+
+        $this->assertSame(2, $this->audienceCount());
+    }
+
+    public function test_a_picker_who_is_not_fully_registered_is_excluded(): void
+    {
+        $breakout = $this->breakout();
+        $this->picker($breakout);
+        $draft = Attendee::factory()->draft()->for($this->event)->create();
+        $draft->breakouts()->attach($breakout->id);
+
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$breakout->id]]])->assertOk();
+
+        $this->assertSame(1, $this->audienceCount());
+    }
+
+    public function test_clearing_every_list_again_means_everyone(): void
+    {
+        $breakout = $this->breakout();
+        $this->picker($breakout);
+        Attendee::factory()->for($this->event)->create();
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$breakout->id]]])->assertOk();
+        $this->assertSame(1, $this->audienceCount());
+
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => []]])->assertOk();
+
+        $this->assertSame(2, $this->audienceCount());
     }
 
     public function test_audience_count_is_hidden_from_another_organizations_admin(): void

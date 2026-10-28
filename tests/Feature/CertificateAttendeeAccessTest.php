@@ -289,6 +289,16 @@ class CertificateAttendeeAccessTest extends TestCase
         $this->assertAccess(true);
     }
 
+    public function test_attendee_who_did_not_pick_the_audience_breakout_is_hidden_until_they_do(): void
+    {
+        $breakout = Breakout::factory()->for($this->event)->create();
+        $this->certificate->update(['audience_breakout_ids' => [$breakout->id]]);
+        $this->assertAccess(false);
+
+        $this->attendee->breakouts()->attach($breakout->id, ['overbooked' => true]);
+        $this->assertAccess(true);
+    }
+
     public function test_incompletely_registered_attendee_gets_nothing_on_the_everyone_rule(): void
     {
         $this->attendee->forceFill(['registration_completed_at' => null])->saveQuietly();

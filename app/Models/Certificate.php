@@ -22,7 +22,7 @@ use Illuminate\Support\Collection;
     'organization_id', 'event_id', 'title', 'template_path', 'template_pdf_path',
     'name_x', 'name_y', 'name_font_size', 'font', 'google_font_family', 'google_font_path', 'color',
     'page_size', 'orientation', 'status', 'published_at',
-    'audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids',
+    'audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids', 'audience_breakout_ids',
     'release_rule', 'include_breakouts', 'release_at', 'generation_run', 'email_enabled',
 ])]
 class Certificate extends Model
@@ -44,6 +44,7 @@ class Certificate extends Model
             'audience_union_ids' => 'array',
             'audience_mission_ids' => 'array',
             'audience_attendee_ids' => 'array',
+            'audience_breakout_ids' => 'array',
             'release_rule' => CertificateReleaseRule::class,
             'include_breakouts' => 'boolean',
             'email_enabled' => 'boolean',

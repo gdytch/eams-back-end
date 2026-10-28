@@ -33,6 +33,7 @@ class CertificateResource extends JsonResource
                 'union_ids' => $this->audience_union_ids ?? [],
                 'mission_ids' => $this->audience_mission_ids ?? [],
                 'attendee_ids' => $this->audience_attendee_ids ?? [],
+                'breakout_ids' => $this->audience_breakout_ids ?? [],
             ],
             'release_rule' => $this->release_rule->value,
             'include_breakouts' => $this->include_breakouts,

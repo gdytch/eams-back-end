@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\DB;
  */
 class BreakoutPickService
 {
+    public function __construct(private CertificateAudienceSync $certificates) {}
+
     /**
      * Replace the Attendee's picks in one transaction that locks the chosen rows in id order.
      * Returns a note when full breakouts were opened because the Attendee has no other choice.
@@ -57,6 +59,8 @@ class BreakoutPickService
             ]));
             $attendee->unsetRelation('breakouts');
             $attendee->forceFill(['picks_saved_at' => now(), 'picks_released_at' => null])->save();
+            // A new picker joins, a dropper leaves, a returner is restored in every published Certificate's Audience.
+            $this->certificates->sync($attendee);
 
             return $flagged->isEmpty() ? null : 'Opened for you because you have no other choice: '.$flagged->pluck('title')->join(', ').'.';
         });

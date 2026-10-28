@@ -54,7 +54,7 @@ class CertificateController extends Controller
     public function update(SaveCertificateRequest $request, Event $event, Certificate $certificate, CertificateAudienceSync $sync)
     {
         $certificate->fill($request->certificateAttributes());
-        $audienceChanged = $certificate->isDirty(['audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids']);
+        $audienceChanged = $certificate->isDirty(['audience_union_ids', 'audience_mission_ids', 'audience_attendee_ids', 'audience_breakout_ids']);
         $certificate->save();
         AuditLog::record('certificate.updated', $certificate);
 

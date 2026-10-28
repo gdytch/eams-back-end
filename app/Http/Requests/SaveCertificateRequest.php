@@ -61,6 +61,8 @@ class SaveCertificateRequest extends FormRequest
             'audience.mission_ids.*' => ['integer', 'distinct', Rule::exists('missions', 'id')->where('organization_id', $this->organizationId())],
             'audience.attendee_ids' => ['sometimes', 'array'],
             'audience.attendee_ids.*' => ['integer', 'distinct', Rule::exists('attendees', 'id')->where('event_id', $this->eventId())],
+            'audience.breakout_ids' => ['sometimes', 'array'],
+            'audience.breakout_ids.*' => ['integer', 'distinct', Rule::exists('breakouts', 'id')->where('event_id', $this->eventId())],
         ];
     }
 
@@ -141,7 +143,7 @@ class SaveCertificateRequest extends FormRequest
             $data['release_at'] = Carbon::parse($data['release_at'])->setTimezone(config('app.timezone'));
         }
 
-        foreach (['union_ids', 'mission_ids', 'attendee_ids'] as $key) {
+        foreach (['union_ids', 'mission_ids', 'attendee_ids', 'breakout_ids'] as $key) {
             if (array_key_exists($key, $audience)) {
                 $data["audience_{$key}"] = array_values($audience[$key]);
             }

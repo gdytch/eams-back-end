@@ -154,7 +154,7 @@ The generated file of one Certificate for one Attendee, carrying that Attendee's
 _Avoid_: Certificate copy, generated certificate
 
 **Audience**:
-The Fully registered Attendees a Certificate is generated for: those matching the selected unions and missions by Organization level, plus any Attendees the admin picked by name. With nothing selected, every Fully registered Attendee of the event. Selecting a union covers union-level Attendees of that union; selecting a mission covers mission-level Attendees of that mission.
+The Fully registered Attendees a Certificate is generated for: those matching the selected unions and missions by Organization level, those who picked any selected Breakout (overbooked picks included), plus any Attendees the admin picked by name. With nothing selected, every Fully registered Attendee of the event. Selecting a union covers union-level Attendees of that union; selecting a mission covers mission-level Attendees of that mission; selecting a Breakout covers its pickers, whether or not they attended.
 _Avoid_: Recipients, target group
 
 **Attendance rate**:

@@ -9,6 +9,7 @@ use App\Models\AuditLog;
 use App\Models\Breakout;
 use App\Models\Event;
 use App\Services\BreakoutPickRules;
+use App\Services\CertificateAudienceSync;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -69,26 +70,29 @@ class BreakoutController extends Controller
         return BreakoutResource::make($this->loaded($breakout));
     }
 
-    public function destroy(Event $event, Breakout $breakout)
+    public function destroy(Event $event, Breakout $breakout, CertificateAudienceSync $sync)
     {
         $this->authorize('delete', $breakout);
 
         // Lock the row so a pick cannot arrive between the check and the cascade delete.
-        $deleted = DB::transaction(function () use ($event, $breakout) {
+        $toReconcile = DB::transaction(function () use ($event, $breakout, $sync) {
             Event::withoutGlobalScopes()->whereKey($event->id)->lockForUpdate()->first();
             Breakout::whereKey($breakout->id)->lockForUpdate()->first();
             if ($breakout->picks()->exists()) {
                 return false;
             }
             $this->guardMinimum($event, $event->breakouts()->whereKeyNot($breakout->id)->get());
+            $sync->guardBreakoutRemoval($event->id, $breakout->id);
+            $published = $sync->removeBreakout($event->id, $breakout->id);
             $breakout->delete();
 
-            return true;
+            return $published;
         });
 
-        if (! $deleted) {
+        if ($toReconcile === false) {
             return response()->json(['message' => 'A breakout with picks cannot be deleted.'], 422);
         }
+        $toReconcile->each(fn ($certificate) => $sync->reconcile($certificate));
 
         AuditLog::record('breakout.deleted', $breakout);
 

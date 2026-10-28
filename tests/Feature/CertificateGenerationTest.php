@@ -6,6 +6,7 @@ use App\Enums\OrganizationLevel;
 use App\Jobs\GenerateCertificateJob;
 use App\Jobs\GenerateIssuedCertificatesBatchJob;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\AuditLog;
 use App\Models\Certificate;
 use App\Models\Event;
@@ -167,6 +168,21 @@ class CertificateGenerationTest extends TestCase
         $this->publish()->assertJsonPath('data.generation.total', 1);
 
         $this->download($inUnion)->assertOk();
+        $this->download($other)->assertNotFound();
+    }
+
+    public function test_breakout_audience_generates_files_for_pickers_only(): void
+    {
+        $this->uploadTemplate();
+        $breakout = Breakout::factory()->for($this->event)->create();
+        $picker = Attendee::factory()->for($this->event)->create();
+        $picker->breakouts()->attach($breakout->id, ['overbooked' => true]);
+        $other = Attendee::factory()->for($this->event)->create();
+        $this->putJson($this->url(), ['audience' => ['breakout_ids' => [$breakout->id]]])->assertOk();
+
+        $this->publish()->assertJsonPath('data.generation.total', 1);
+
+        $this->download($picker)->assertOk();
         $this->download($other)->assertNotFound();
     }
 

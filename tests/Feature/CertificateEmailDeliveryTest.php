@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Mail\CertificateIssuedMail;
 use App\Mail\UserAccountInviteMail;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Certificate;
 use App\Models\Event;
 use App\Models\IssuedCertificate;
@@ -155,6 +156,19 @@ class CertificateEmailDeliveryTest extends TestCase
         $this->sendEmails();
 
         Mail::assertNothingSent();
+    }
+
+    public function test_non_pickers_of_the_audience_breakout_are_not_emailed(): void
+    {
+        $breakout = Breakout::factory()->for($this->event)->create();
+        $this->certificate->update(['audience_breakout_ids' => [$breakout->id]]);
+        $picked = $this->issue();
+        $picked->attendee->breakouts()->attach($breakout->id);
+        $this->issue();
+
+        $this->sendEmails();
+
+        Mail::assertSent(CertificateIssuedMail::class, 1);
     }
 
     public function test_a_run_never_exceeds_the_daily_cap_and_the_rest_goes_out_later(): void

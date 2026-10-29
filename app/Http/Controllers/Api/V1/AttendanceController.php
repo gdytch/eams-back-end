@@ -305,9 +305,18 @@ class AttendanceController extends Controller
      */
     private function resolveSlot(Event $event, array $input): EventSession|Breakout
     {
-        return empty($input['breakout_id'])
-            ? EventSession::where('event_id', $event->id)->findOrFail($input['session_id'])
-            : Breakout::where('event_id', $event->id)->findOrFail($input['breakout_id']);
+        if (empty($input['breakout_id'])) {
+            return EventSession::where('event_id', $event->id)->findOrFail($input['session_id']);
+        }
+
+        $breakout = Breakout::where('event_id', $event->id)->findOrFail($input['breakout_id']);
+        if (! $breakout->attendance_enabled) {
+            throw ValidationException::withMessages([
+                'breakout_id' => 'Attendance is not checked in this breakout, so no one can be checked in to it.',
+            ]);
+        }
+
+        return $breakout;
     }
 
     /**

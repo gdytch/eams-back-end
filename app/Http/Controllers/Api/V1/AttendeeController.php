@@ -305,7 +305,7 @@ class AttendeeController extends Controller
         $data = $pageGroups->map(function ($group) use ($request, $organizationNames) {
             $attendees = Attendee::query()
                 ->whereIn('id', $group->ids)
-                ->with(['union', 'mission', 'church', 'event', 'attendanceRecords'])
+                ->with(['union', 'mission', 'church', 'event', 'attendanceRecords' => fn ($records) => $records->counted()])
                 ->orderBy('created_at')
                 ->get();
 

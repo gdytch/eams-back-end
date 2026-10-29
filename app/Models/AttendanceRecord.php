@@ -42,7 +42,7 @@ class AttendanceRecord extends Model
     {
         $query->where(fn (Builder $q) => $q
             ->whereNull('attendance_records.breakout_id')
-            ->orWhereIn('attendance_records.breakout_id', Breakout::withoutGlobalScopes()->where('attendance_enabled', true)->select('id')));
+            ->orWhereIn('attendance_records.breakout_id', Breakout::withoutGlobalScopes()->trackingAttendance()->select('id')));
     }
 
     /** @return BelongsTo<Attendee, $this> */

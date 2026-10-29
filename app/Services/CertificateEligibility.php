@@ -114,7 +114,7 @@ class CertificateEligibility
     private function endedBreakouts(Certificate $certificate): Collection
     {
         return $certificate->include_breakouts
-            ? Breakout::withoutGlobalScopes()->where('event_id', $certificate->event_id)->where('attendance_enabled', true)->get()->filter->hasEnded()
+            ? Breakout::withoutGlobalScopes()->where('event_id', $certificate->event_id)->trackingAttendance()->get()->filter->hasEnded()
             : collect();
     }
 

@@ -164,7 +164,7 @@ class AttendeeDashboardData
         $ids = $registration->breakouts()->withoutGlobalScopes()->pluck('breakouts.id')->merge($records->keys())->unique();
 
         return Breakout::withoutGlobalScopes()
-            ->where('attendance_enabled', true)
+            ->trackingAttendance()
             ->whereIn('id', $ids)
             ->get()
             ->sortBy(fn (Breakout $breakout): string => $breakout->date->toDateString().' '.$breakout->start_time)

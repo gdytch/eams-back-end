@@ -51,7 +51,7 @@ class Breakout extends Model
 
     public function tracksAttendance(): bool
     {
-        return (bool) $this->attendance_enabled;
+        return $this->attendance_enabled;
     }
 
     public function startsAt(): Carbon
@@ -72,6 +72,16 @@ class Breakout extends Model
     public function isOverbooked(int $picks): bool
     {
         return $this->capacity !== null && $picks > $this->capacity;
+    }
+
+    /**
+     * Breakouts that check attendance in (attendance_enabled on).
+     *
+     * @param  Builder<Breakout>  $query
+     */
+    public function scopeTrackingAttendance(Builder $query): void
+    {
+        $query->where('breakouts.attendance_enabled', true);
     }
 
     /**

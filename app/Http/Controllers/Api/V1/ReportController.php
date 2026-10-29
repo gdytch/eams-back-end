@@ -184,8 +184,8 @@ class ReportController extends Controller
 
         AuditLog::record('report.event_attendance_exported', $event, ['format' => $format, 'session_id' => $sessionId]);
 
-        // Session-only exports hold no breakout data; every other export of an event with breakouts does.
-        if (! $session && $event->breakouts()->exists()) {
+        // Session-only exports hold no breakout data; every other export of an event with attendance-tracking breakouts does.
+        if (! $session && $event->breakouts()->trackingAttendance()->exists()) {
             AuditLog::record('breakout_attendance.exported', $event, ['format' => $format, 'breakout_id' => $breakout?->id]);
         }
 
@@ -221,7 +221,7 @@ class ReportController extends Controller
         AuditLog::record('report.attendee_summary_exported', $event);
 
         return Excel::download(
-            new AttendeeSummaryExport($this->buildAttendeeSummary($event), $event->breakouts()->where('attendance_enabled', true)->exists()),
+            new AttendeeSummaryExport($this->buildAttendeeSummary($event), $event->breakouts()->trackingAttendance()->exists()),
             "event-{$event->id}-attendance-summary.xlsx",
         );
     }
@@ -229,7 +229,7 @@ class ReportController extends Controller
     private function buildAttendeeSummary(Event $event)
     {
         $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get();
-        $breakouts = $event->breakouts()->where('attendance_enabled', true)->get();
+        $breakouts = $event->breakouts()->trackingAttendance()->get();
         $levelOrder = ['union' => 0, 'mission' => 1];
 
         return $event->attendees()

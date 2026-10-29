@@ -15,7 +15,7 @@ class BreakoutAttendanceReport
 {
     public function overview(Event $event): Collection
     {
-        return $event->breakouts()->where('attendance_enabled', true)->orderBy('date')->orderBy('start_time')->orderBy('id')->withCount('picks')->get()
+        return $event->breakouts()->trackingAttendance()->orderBy('date')->orderBy('start_time')->orderBy('id')->withCount('picks')->get()
             ->map(function (Breakout $breakout) use ($event) {
                 $counts = $breakout->attendanceCounts($event);
 
@@ -60,20 +60,7 @@ class BreakoutAttendanceReport
                     default => $breakout->attendanceStatus($record !== null, $attendee->first_registered_at)?->label(),
                 };
 
-                return [
-                    'attendee_id' => $attendee->id,
-                    'attendee_name' => $attendee->full_name,
-                    'first_name' => $attendee->first_name,
-                    'middle_name' => $attendee->middle_name ?? '',
-                    'last_name' => $attendee->last_name,
-                    'union' => $attendee->union?->name,
-                    'mission' => $attendee->mission?->name,
-                    'organization_level_code' => $attendee->organization_level_code ?? '',
-                    'status' => $status,
-                    'check_in_at' => $record?->check_in_at?->format('Y-m-d H:i:s'),
-                    'method' => $record?->method?->value,
-                    'recorded_by' => $record ? ($record->recordedBy->name ?? 'System') : null,
-                ];
+                return $this->rosterRow($attendee, $status, $record);
             });
     }
 
@@ -87,19 +74,27 @@ class BreakoutAttendanceReport
             ->with(['union', 'mission'])
             ->orderBy('last_name')->orderBy('first_name')
             ->get()
-            ->map(fn (Attendee $attendee) => [
-                'attendee_id' => $attendee->id,
-                'attendee_name' => $attendee->full_name,
-                'first_name' => $attendee->first_name,
-                'middle_name' => $attendee->middle_name ?? '',
-                'last_name' => $attendee->last_name,
-                'union' => $attendee->union?->name,
-                'mission' => $attendee->mission?->name,
-                'organization_level_code' => $attendee->organization_level_code ?? '',
-                'status' => null,
-                'check_in_at' => null,
-                'method' => null,
-                'recorded_by' => null,
-            ]);
+            ->map(fn (Attendee $attendee) => $this->rosterRow($attendee, null, null));
+    }
+
+    /**
+     * The one roster row shape; $record is the attendee's check-in, null when there is none to show.
+     */
+    private function rosterRow(Attendee $attendee, ?string $status, ?AttendanceRecord $record): array
+    {
+        return [
+            'attendee_id' => $attendee->id,
+            'attendee_name' => $attendee->full_name,
+            'first_name' => $attendee->first_name,
+            'middle_name' => $attendee->middle_name ?? '',
+            'last_name' => $attendee->last_name,
+            'union' => $attendee->union?->name,
+            'mission' => $attendee->mission?->name,
+            'organization_level_code' => $attendee->organization_level_code ?? '',
+            'status' => $status,
+            'check_in_at' => $record?->check_in_at?->format('Y-m-d H:i:s'),
+            'method' => $record?->method?->value,
+            'recorded_by' => $record ? ($record->recordedBy->name ?? 'System') : null,
+        ];
     }
 }

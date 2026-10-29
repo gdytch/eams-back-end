@@ -96,9 +96,10 @@ class AttendeeDashboardData
     }
 
     /** Status: walk_in, checked_in, missed (ended without a check-in) or pending. */
-    private function breakoutStatus(Breakout $breakout, ?AttendanceRecord $record): string
+    private function breakoutStatus(Breakout $breakout, ?AttendanceRecord $record): ?string
     {
         return match (true) {
+            ! $breakout->tracksAttendance() => null,
             (bool) $record?->is_walk_in => 'walk_in',
             $record !== null => 'checked_in',
             $breakout->endsAt()->isPast() => 'missed',
@@ -138,7 +139,7 @@ class AttendeeDashboardData
 
                 $breakout->setAttribute('picked', $picked);
                 $breakout->setAttribute('attendance_status', $picked || $record !== null ? $this->breakoutStatus($breakout, $record) : null);
-                $breakout->setAttribute('attendance_check_in_at', $record?->check_in_at);
+                $breakout->setAttribute('attendance_check_in_at', $breakout->tracksAttendance() ? $record?->check_in_at : null);
             });
     }
 
@@ -163,6 +164,7 @@ class AttendeeDashboardData
         $ids = $registration->breakouts()->withoutGlobalScopes()->pluck('breakouts.id')->merge($records->keys())->unique();
 
         return Breakout::withoutGlobalScopes()
+            ->trackingAttendance()
             ->whereIn('id', $ids)
             ->get()
             ->sortBy(fn (Breakout $breakout): string => $breakout->date->toDateString().' '.$breakout->start_time)

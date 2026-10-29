@@ -33,6 +33,7 @@ class SaveBreakoutRequest extends FormRequest
             'end_time' => ['required', 'date_format:H:i', 'after:start_time'],
             'room' => ['required', 'string', 'max:255'],
             'capacity' => ['nullable', 'integer', 'min:1'],
+            'attendance_enabled' => ['sometimes', 'boolean'],
             'topics' => ['required', 'array', 'min:1'],
             'topics.*' => ['required', 'string', 'max:255'],
             'speaker_ids' => ['present', 'array'],

@@ -14,15 +14,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
-#[Fillable(['organization_id', 'event_id', 'title', 'description', 'date', 'start_time', 'end_time', 'room', 'capacity', 'topics'])]
+#[Fillable(['organization_id', 'event_id', 'title', 'description', 'date', 'start_time', 'end_time', 'room', 'capacity', 'topics', 'attendance_enabled'])]
 class Breakout extends Model
 {
     /** @use HasFactory<BreakoutFactory> */
     use BelongsToOrganization, HasAttendanceStatus, HasFactory;
 
+    /** @var array<string, mixed> */
+    protected $attributes = ['attendance_enabled' => true];
+
     protected function casts(): array
     {
-        return ['date' => 'date:Y-m-d', 'topics' => 'array', 'capacity' => 'integer'];
+        return ['date' => 'date:Y-m-d', 'topics' => 'array', 'capacity' => 'integer', 'attendance_enabled' => 'boolean'];
     }
 
     /** @return BelongsTo<Event, $this> */
@@ -46,6 +49,11 @@ class Breakout extends Model
         return $this->hasOne(EventProgram::class);
     }
 
+    public function tracksAttendance(): bool
+    {
+        return $this->attendance_enabled;
+    }
+
     public function startsAt(): Carbon
     {
         return Carbon::parse($this->date->toDateString().' '.$this->start_time);
@@ -64,6 +72,16 @@ class Breakout extends Model
     public function isOverbooked(int $picks): bool
     {
         return $this->capacity !== null && $picks > $this->capacity;
+    }
+
+    /**
+     * Breakouts that check attendance in (attendance_enabled on).
+     *
+     * @param  Builder<Breakout>  $query
+     */
+    public function scopeTrackingAttendance(Builder $query): void
+    {
+        $query->where('breakouts.attendance_enabled', true);
     }
 
     /**

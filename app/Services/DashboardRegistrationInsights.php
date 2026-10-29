@@ -40,7 +40,7 @@ class DashboardRegistrationInsights
             ->selectRaw("CASE attendees.organization_level WHEN 'union' THEN unions.id WHEN 'mission' THEN missions.id END as territory_id")
             ->selectRaw("CASE attendees.organization_level WHEN 'union' THEN unions.name WHEN 'mission' THEN missions.name END as organization_name")
             ->selectRaw('COUNT(*) as registrations')
-            ->selectRaw('SUM(CASE WHEN EXISTS (SELECT 1 FROM attendance_records WHERE attendance_records.attendee_id = attendees.id AND check_in_at IS NOT NULL) THEN 1 ELSE 0 END) as checked_in')
+            ->selectRaw('SUM(CASE WHEN EXISTS (SELECT 1 FROM attendance_records WHERE attendance_records.attendee_id = attendees.id AND check_in_at IS NOT NULL AND (attendance_records.breakout_id IS NULL OR attendance_records.breakout_id IN (SELECT id FROM breakouts WHERE attendance_enabled = 1))) THEN 1 ELSE 0 END) as checked_in')
             ->groupBy('attendees.organization_level', 'territory_id', 'organization_name')
             ->orderByDesc('registrations')
             ->orderBy('organization_name')

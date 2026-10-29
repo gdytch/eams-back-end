@@ -23,6 +23,7 @@ class BreakoutResource extends JsonResource
             'room' => $this->room,
             'capacity' => $this->capacity,
             'topics' => $this->topics,
+            'attendance_enabled' => $this->attendance_enabled,
             'speakers' => $this->whenLoaded('speakers', fn () => $this->speakers->map(fn ($speaker) => [
                 'id' => $speaker->id,
                 'name' => $speaker->name,

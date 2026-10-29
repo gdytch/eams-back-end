@@ -15,6 +15,12 @@ trait HasAttendanceStatus
 {
     abstract public function endsAt(): Carbon;
 
+    /** False for a slot whose attendance is off: it has no Expected Attendees and shows no attendance. */
+    public function tracksAttendance(): bool
+    {
+        return true;
+    }
+
     public function hasEnded(): bool
     {
         return $this->endsAt()->isPast();
@@ -23,7 +29,7 @@ trait HasAttendanceStatus
     /** Expected: fully registered for the first time before the slot ended. */
     public function isExpected(?CarbonInterface $firstRegisteredAt): bool
     {
-        return $firstRegisteredAt !== null && $firstRegisteredAt->lt($this->endsAt());
+        return $this->tracksAttendance() && $firstRegisteredAt !== null && $firstRegisteredAt->lt($this->endsAt());
     }
 
     /** Null means the Attendee is neither Present nor Expected here. */

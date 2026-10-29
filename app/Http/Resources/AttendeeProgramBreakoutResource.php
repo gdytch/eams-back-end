@@ -23,6 +23,7 @@ class AttendeeProgramBreakoutResource extends JsonResource
             'start_time' => substr($this->start_time, 0, 5),
             'end_time' => substr($this->end_time, 0, 5),
             'room' => $this->room,
+            'attendance_enabled' => $this->attendance_enabled,
             'speakers' => $this->speakers->map(fn ($speaker) => [
                 'id' => $speaker->id,
                 'name' => $speaker->name,

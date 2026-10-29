@@ -257,6 +257,58 @@ class CertificateAttendeeAccessTest extends TestCase
         $this->assertAccess(true);
     }
 
+    public function test_breakout_with_attendance_off_is_never_an_expected_slot(): void
+    {
+        $session = $this->makeSession('2026-06-09');
+        $off = $this->breakout('2026-06-09');
+        $off->update(['attendance_enabled' => false]);
+        $this->attendee->breakouts()->attach($off->id);
+        $this->checkIn($this->attendee, $session);
+
+        $this->rule('rate_75', true);
+        $this->assertAccess(true); // 1 of 1: the breakout is not Expected despite the flag
+    }
+
+    public function test_check_ins_at_a_breakout_with_attendance_off_are_not_present(): void
+    {
+        $session = $this->makeSession('2026-06-09');
+        $on = $this->breakout('2026-06-09');
+        $off = $this->breakout('2026-06-09');
+        $off->update(['attendance_enabled' => false]);
+        $this->attendee->breakouts()->attach([$on->id, $off->id]);
+        $this->checkIn($this->attendee, $off);
+
+        $this->rule('rate_50', true);
+        $this->assertAccess(false); // 0 of 2 (session + enabled breakout); hidden check-in is ignored
+
+        $this->checkIn($this->attendee, $session);
+        $this->assertAccess(true); // 1 of 2
+    }
+
+    public function test_checked_in_ignores_check_ins_at_a_breakout_with_attendance_off(): void
+    {
+        $off = $this->breakout('2026-06-09');
+        $this->checkIn($this->attendee, $off);
+        $this->rule('checked_in', true);
+        $this->assertAccess(true);
+
+        $off->update(['attendance_enabled' => false]);
+        $this->assertAccess(false);
+
+        $off->update(['attendance_enabled' => true]);
+        $this->assertAccess(true);
+    }
+
+    public function test_audience_by_breakout_still_includes_pickers_of_a_breakout_with_attendance_off(): void
+    {
+        $off = Breakout::factory()->for($this->event)->create(['attendance_enabled' => false]);
+        $this->certificate->update(['audience_breakout_ids' => [$off->id]]);
+        $this->assertAccess(false);
+
+        $this->attendee->breakouts()->attach($off->id);
+        $this->assertAccess(true);
+    }
+
     public function test_breakout_not_picked_is_not_expected(): void
     {
         $this->rule('rate_75', true);

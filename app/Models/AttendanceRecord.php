@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Enums\AttendanceMethod;
 use Database\Factories\AttendanceRecordFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -28,6 +29,20 @@ class AttendanceRecord extends Model
     public static function slotColumn(EventSession|Breakout $slot): string
     {
         return $slot instanceof Breakout ? 'breakout_id' : 'event_session_id';
+    }
+
+    /**
+     * The one rule for "attendance records that count": leaves out check-in records of breakouts with
+     * attendance off (kept in the table, ignored while it stays off). Session records, including those
+     * cascaded through a breakout (via_breakout_id), have no breakout_id and always count.
+     *
+     * @param  Builder<AttendanceRecord>  $query
+     */
+    public function scopeCounted(Builder $query): void
+    {
+        $query->where(fn (Builder $q) => $q
+            ->whereNull('attendance_records.breakout_id')
+            ->orWhereIn('attendance_records.breakout_id', Breakout::withoutGlobalScopes()->trackingAttendance()->select('id')));
     }
 
     /** @return BelongsTo<Attendee, $this> */

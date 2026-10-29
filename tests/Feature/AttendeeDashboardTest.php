@@ -695,6 +695,29 @@ class AttendeeDashboardTest extends TestCase
         $this->assertSame(0, $response->json('stats.total_sessions'));
     }
 
+    public function test_attendance_leaves_out_breakouts_with_attendance_off_until_turned_back_on(): void
+    {
+        Carbon::setTestNow('2026-06-25 12:00:00');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $event = Event::factory()->for($organization)->create(['pick_mode' => 'multiple', 'pick_min' => 1, 'pick_max' => null]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->for($event)->create(['first_registered_at' => now()->subYear()]);
+        $make = fn (string $start, string $end, bool $on) => Breakout::factory()->for($event)->create(['date' => '2026-06-25', 'start_time' => $start, 'end_time' => $end, 'attendance_enabled' => $on]);
+        $off = $make('09:00', '10:00', false);
+        $offCheckedIn = $make('08:00', '09:00', false);
+        $on = $make('14:00', '15:00', true);
+        $attendee->breakouts()->attach([$off->id, $offCheckedIn->id, $on->id]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $offCheckedIn->id, 'check_in_at' => now()->subHours(3)]);
+
+        $url = "/api/v1/attendee/events/{$event->id}/attendance";
+        $this->actingAs($user, 'sanctum')->getJson($url)->assertOk()->assertJsonPath('breakouts.*.id', [$on->id]);
+
+        Breakout::whereKey([$off->id, $offCheckedIn->id])->update(['attendance_enabled' => true]);
+        $rows = collect($this->actingAs($user, 'sanctum')->getJson($url)->assertOk()->json('breakouts'))->keyBy('id');
+        $this->assertSame('checked_in', $rows[$offCheckedIn->id]['status']);
+        $this->assertSame('missed', $rows[$off->id]['status']);
+    }
+
     public function test_attendance_breakouts_is_empty_when_event_has_no_pick_mode(): void
     {
         $organization = Organization::factory()->create();

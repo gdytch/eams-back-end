@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\Organization;
@@ -217,6 +218,24 @@ class AttendeeDuplicateTest extends TestCase
 
         $this->actingAs($admin, 'sanctum')->putJson("/api/v1/attendees/{$attendee->id}", $payload + ['override_duplicate' => true])
             ->assertOk();
+    }
+
+    public function test_duplicate_attendance_count_ignores_records_of_breakouts_with_attendance_off(): void
+    {
+        $org = Organization::factory()->create();
+        $admin = User::factory()->orgAdmin()->for($org)->create();
+        $event = Event::factory()->for($org)->create();
+        $first = Attendee::factory()->for($event)->create(['first_name' => 'Ana', 'middle_name' => null, 'last_name' => 'Cruz']);
+        Attendee::factory()->for($event)->create(['first_name' => 'ana', 'middle_name' => null, 'last_name' => 'cruz']);
+        $session = EventSession::factory()->for($event)->create();
+        $hidden = Breakout::factory()->for($event)->create(['attendance_enabled' => false]);
+        AttendanceRecord::factory()->for($first)->for($session)->create(['check_in_at' => now()]);
+        AttendanceRecord::factory()->for($first)->create(['breakout_id' => $hidden->id, 'event_session_id' => null, 'check_in_at' => now()]);
+
+        $counts = collect($this->actingAs($admin, 'sanctum')->getJson('/api/v1/attendees/duplicates')
+            ->assertOk()->json('data.0.attendees'))->pluck('attendance_count', 'id');
+
+        $this->assertSame(1, $counts[$first->id]);
     }
 
     public function test_merge_unions_same_event_attendance_records(): void

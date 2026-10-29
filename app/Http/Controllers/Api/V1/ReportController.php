@@ -19,6 +19,7 @@ use App\Services\EventDashboardReport;
 use App\Services\OrganizationAttendanceOverview;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Validation\ValidationException;
 use Maatwebsite\Excel\Facades\Excel;
 
 class ReportController extends Controller
@@ -176,6 +177,10 @@ class ReportController extends Controller
         $session = $sessionId ? $event->sessions()->findOrFail($sessionId) : null;
         $breakout = $breakoutId && ! $session ? $event->breakouts()->whereKey($breakoutId)->firstOrFail() : null;
 
+        if ($breakout && ! $breakout->attendance_enabled) {
+            throw ValidationException::withMessages(['breakout_id' => 'Attendance is not checked in this breakout, so there is nothing to export.']);
+        }
+
         AuditLog::record('report.event_attendance_exported', $event, ['format' => $format, 'session_id' => $sessionId]);
 
         // Session-only exports hold no breakout data; every other export of an event with breakouts does.
@@ -215,7 +220,7 @@ class ReportController extends Controller
         AuditLog::record('report.attendee_summary_exported', $event);
 
         return Excel::download(
-            new AttendeeSummaryExport($this->buildAttendeeSummary($event), $event->breakouts()->exists()),
+            new AttendeeSummaryExport($this->buildAttendeeSummary($event), $event->breakouts()->where('attendance_enabled', true)->exists()),
             "event-{$event->id}-attendance-summary.xlsx",
         );
     }
@@ -223,7 +228,7 @@ class ReportController extends Controller
     private function buildAttendeeSummary(Event $event)
     {
         $sessions = $event->sessions()->orderBy('session_date')->orderBy('start_time')->get();
-        $breakouts = $event->breakouts()->get();
+        $breakouts = $event->breakouts()->where('attendance_enabled', true)->get();
         $levelOrder = ['union' => 0, 'mission' => 1];
 
         return $event->attendees()
@@ -234,7 +239,7 @@ class ReportController extends Controller
             ->map(function ($registration) use ($sessions, $breakouts) {
                 $attendee = $registration;
                 $presentIds = $registration->attendanceRecords->pluck('event_session_id')->filter()->unique();
-                $breakoutPresentIds = $registration->attendanceRecords->pluck('breakout_id')->filter()->unique();
+                $breakoutPresentIds = $registration->attendanceRecords->pluck('breakout_id')->filter()->unique()->intersect($breakouts->pluck('id'));
                 $present = $presentIds->count();
                 $status = fn ($session) => $session->attendanceStatus($presentIds->contains($session->id), $registration->first_registered_at);
                 $absent = $sessions->filter(fn ($s) => $status($s) === AttendanceStatus::Absent);

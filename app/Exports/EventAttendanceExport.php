@@ -51,7 +51,7 @@ class EventAttendanceExport implements Export, WithMultipleSheets
             $sheets[] = new EventSessionAttendanceSheetExport($this->event, $session);
         }
 
-        $breakouts = $this->event->breakouts()->orderBy('date')->orderBy('start_time')->orderBy('id')->get();
+        $breakouts = $this->event->breakouts()->where('attendance_enabled', true)->orderBy('date')->orderBy('start_time')->orderBy('id')->get();
         if ($breakouts->isNotEmpty()) {
             $sheets[] = new BreakoutOverviewSheetExport($this->event);
             foreach ($breakouts as $breakout) {

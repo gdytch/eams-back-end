@@ -15,7 +15,7 @@ class BreakoutAttendanceReport
 {
     public function overview(Event $event): Collection
     {
-        return $event->breakouts()->orderBy('date')->orderBy('start_time')->orderBy('id')->withCount('picks')->get()
+        return $event->breakouts()->where('attendance_enabled', true)->orderBy('date')->orderBy('start_time')->orderBy('id')->withCount('picks')->get()
             ->map(function (Breakout $breakout) use ($event) {
                 $counts = $breakout->attendanceCounts($event);
 
@@ -44,6 +44,10 @@ class BreakoutAttendanceReport
      */
     public function roster(Event $event, Breakout $breakout): Collection
     {
+        if (! $breakout->attendance_enabled) {
+            return $this->picksOnlyRoster($event, $breakout);
+        }
+
         return $event->attendees()
             ->inAttendanceOf($breakout)
             ->with(['union', 'mission', 'attendanceRecords' => fn ($q) => $q->where('breakout_id', $breakout->id)->with('recordedBy')])
@@ -71,5 +75,31 @@ class BreakoutAttendanceReport
                     'recorded_by' => $record ? ($record->recordedBy->name ?? 'System') : null,
                 ];
             });
+    }
+
+    /**
+     * A breakout with attendance off has no Expected Attendees and shows no attendance: pick holders only, no status or check-in.
+     */
+    private function picksOnlyRoster(Event $event, Breakout $breakout): Collection
+    {
+        return $event->attendees()
+            ->whereHas('breakouts', fn ($picks) => $picks->whereKey($breakout->id))
+            ->with(['union', 'mission'])
+            ->orderBy('last_name')->orderBy('first_name')
+            ->get()
+            ->map(fn (Attendee $attendee) => [
+                'attendee_id' => $attendee->id,
+                'attendee_name' => $attendee->full_name,
+                'first_name' => $attendee->first_name,
+                'middle_name' => $attendee->middle_name ?? '',
+                'last_name' => $attendee->last_name,
+                'union' => $attendee->union?->name,
+                'mission' => $attendee->mission?->name,
+                'organization_level_code' => $attendee->organization_level_code ?? '',
+                'status' => null,
+                'check_in_at' => null,
+                'method' => null,
+                'recorded_by' => null,
+            ]);
     }
 }

@@ -20,7 +20,7 @@ class EventOverviewAttendanceSheetExport extends AttendanceSheetExport
         $sessions = $this->event->sessions;
 
         return $this->event->attendees()
-            ->with('union', 'mission', 'attendanceRecords')
+            ->with(['union', 'mission', 'attendanceRecords' => fn ($records) => $records->counted()])
             ->get()
             ->map(function ($registration) use ($sessions) {
                 $checkInRecord = $registration->attendanceRecords->whereNotNull('check_in_at')->first();

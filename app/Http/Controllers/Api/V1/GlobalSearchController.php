@@ -179,6 +179,7 @@ class GlobalSearchController extends Controller
     private function attendanceQuery(User $user, Builder $events, string $like): Builder
     {
         $query = AttendanceRecord::query()
+            ->counted()
             ->whereNotNull('check_in_at')
             ->whereHas('attendee', function (Builder $attendee) use ($user, $events) {
                 $attendee->withoutGlobalScopes()->whereIn('event_id', (clone $events)->select('events.id'));

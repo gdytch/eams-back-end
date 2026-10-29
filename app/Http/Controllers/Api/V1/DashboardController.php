@@ -176,6 +176,7 @@ class DashboardController extends Controller
     private function scansRecordedBy(User $user): Builder
     {
         return AttendanceRecord::query()
+            ->counted()
             ->where('recorded_by', $user->id)
             ->whereHas('attendee.event', fn (Builder $query) => $query->whereNull('archived_at'));
     }

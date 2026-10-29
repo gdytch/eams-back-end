@@ -79,6 +79,7 @@ class ReportController extends Controller
         $attendanceRecords = $event->attendees()
             ->whereNotNull('first_registered_at')
             ->with([
+                'attendanceRecords' => fn ($records) => $records->counted(),
                 'attendanceRecords.eventSession',
                 'attendanceRecords.breakout',
                 'attendanceRecords.viaBreakout',
@@ -578,19 +579,11 @@ class ReportController extends Controller
 
         $totalRegistered = $event->attendees()->count();
         $totalCheckedIn = $event->attendees()
-            ->whereExists(function ($q) {
-                $q->selectRaw(1)
-                    ->from('attendance_records')
-                    ->whereColumn('attendance_records.attendee_id', 'attendees.id')
-                    ->whereNotNull('check_in_at');
-            })->count();
+            ->whereHas('attendanceRecords', fn ($records) => $records->counted()->whereNotNull('check_in_at'))
+            ->count();
         $totalCheckedOut = $event->attendees()
-            ->whereExists(function ($q) {
-                $q->selectRaw(1)
-                    ->from('attendance_records')
-                    ->whereColumn('attendance_records.attendee_id', 'attendees.id')
-                    ->whereNotNull('check_out_at');
-            })->count();
+            ->whereHas('attendanceRecords', fn ($records) => $records->counted()->whereNotNull('check_out_at'))
+            ->count();
         $noShow = $totalRegistered - $totalCheckedIn;
 
         return [
@@ -650,12 +643,8 @@ class ReportController extends Controller
         return $events->map(function ($event) {
             $totalRegistered = $event->attendees()->count();
             $totalCheckedIn = $event->attendees()
-                ->whereExists(function ($q) {
-                    $q->selectRaw(1)
-                        ->from('attendance_records')
-                        ->whereColumn('attendance_records.attendee_id', 'attendees.id')
-                        ->whereNotNull('check_in_at');
-                })->count();
+                ->whereHas('attendanceRecords', fn ($records) => $records->counted()->whereNotNull('check_in_at'))
+                ->count();
 
             return [
                 'event_id' => $event->id,

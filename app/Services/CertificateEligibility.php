@@ -72,7 +72,7 @@ class CertificateEligibility
 
     /**
      * The one definition of which check-ins count toward a Certificate. A session check-in made through a breakout
-     * (via_breakout_id) is a session check-in, as in the attendance report; breakout slots count only with the flag.
+     * (via_breakout_id) is a session check-in, as in the attendance report; breakout slots count only with the flag, and never those of a breakout with attendance off.
      *
      * @param  Collection<int, int>  $attendeeIds
      * @return Builder<AttendanceRecord>
@@ -82,6 +82,7 @@ class CertificateEligibility
         return AttendanceRecord::query()
             ->whereIn('attendee_id', $attendeeIds)
             ->whereNotNull('check_in_at')
+            ->counted()
             ->when(! $certificate->include_breakouts, fn (Builder $q) => $q->whereNull('breakout_id'));
     }
 
@@ -113,7 +114,7 @@ class CertificateEligibility
     private function endedBreakouts(Certificate $certificate): Collection
     {
         return $certificate->include_breakouts
-            ? Breakout::withoutGlobalScopes()->where('event_id', $certificate->event_id)->get()->filter->hasEnded()
+            ? Breakout::withoutGlobalScopes()->where('event_id', $certificate->event_id)->where('attendance_enabled', true)->get()->filter->hasEnded()
             : collect();
     }
 

@@ -6,6 +6,7 @@ use App\Enums\AttendanceStatus;
 use App\Exports\EventOverviewAttendanceSheetExport;
 use App\Exports\EventSessionAttendanceSheetExport;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
 use App\Models\Organization;
@@ -74,6 +75,22 @@ class AttendanceStatusRuleTest extends TestCase
         $this->assertNull($this->ended->attendanceStatus(false, null));
         $this->assertSame(AttendanceStatus::Upcoming, $this->upcoming->attendanceStatus(false, now()));
         $this->assertNull($this->upcoming->attendanceStatus(false, null));
+    }
+
+    public function test_breakout_with_attendance_off_has_no_expected_attendees(): void
+    {
+        $date = today()->subDay()->toDateString();
+        $on = Breakout::factory()->for($this->event)->create(['date' => $date, 'start_time' => '09:00', 'end_time' => '11:00']);
+        $off = Breakout::factory()->for($this->event)->create(['date' => $date, 'start_time' => '09:00', 'end_time' => '11:00', 'attendance_enabled' => false]);
+        foreach (['Present', 'Absent'] as $name) {
+            $this->people[$name]->breakouts()->attach([$on->id, $off->id]);
+        }
+
+        $this->assertSame(AttendanceStatus::Absent, $on->attendanceStatus(false, now()->subDays(3)));
+        $this->assertNull($off->attendanceStatus(false, now()->subDays(3)));
+        $this->assertSame(['Absent', 'Present'], $this->event->attendees()->expectedAt($on)->orderBy('first_name')->pluck('first_name')->all());
+        $this->assertSame([], $this->event->attendees()->expectedAt($off)->pluck('first_name')->all());
+        $this->assertSame([], $this->event->attendees()->notCheckedInAt($off)->pluck('first_name')->all());
     }
 
     public function test_query_scopes_match_the_model_rule(): void

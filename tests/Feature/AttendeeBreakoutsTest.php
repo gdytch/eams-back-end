@@ -173,6 +173,37 @@ class AttendeeBreakoutsTest extends TestCase
         $this->assertSame('pending', $rows[$pending->id]['status']);
     }
 
+    public function test_breakout_with_attendance_off_has_no_status_or_check_in_time_and_restores_when_turned_on(): void
+    {
+        Carbon::setTestNow('2026-06-25 12:00:00');
+        [$user, $attendee, $event] = $this->setupAttendee();
+        $make = fn (string $start, string $end, array $extra = []) => Breakout::factory()->for($event)->create(['date' => '2026-06-25', 'start_time' => $start, 'end_time' => $end] + $extra);
+        $missed = $make('09:00', '10:00', ['attendance_enabled' => false]);
+        $pending = $make('14:00', '15:00', ['attendance_enabled' => false]);
+        $checkedIn = $make('08:00', '09:00', ['attendance_enabled' => false]);
+        $walkIn = $make('10:00', '11:00', ['attendance_enabled' => false]);
+        $attendee->breakouts()->attach([$missed->id, $pending->id, $checkedIn->id]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $checkedIn->id, 'check_in_at' => now()->subHours(3)]);
+        AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $walkIn->id, 'check_in_at' => now()->subHour(), 'is_walk_in' => true]);
+
+        $rows = collect($this->getBreakouts($user, $event)->assertOk()->json('data'))->keyBy('id');
+        $this->assertCount(4, $rows);
+        foreach ([$missed, $pending, $checkedIn, $walkIn] as $breakout) {
+            $this->assertNull($rows[$breakout->id]['status']);
+            $this->assertNull($rows[$breakout->id]['check_in_at']);
+            $this->assertFalse($rows[$breakout->id]['attendance_enabled']);
+        }
+
+        Breakout::whereKey([$missed->id, $pending->id, $checkedIn->id, $walkIn->id])->update(['attendance_enabled' => true]);
+
+        $rows = collect($this->getBreakouts($user, $event)->assertOk()->json('data'))->keyBy('id');
+        $this->assertSame('missed', $rows[$missed->id]['status']);
+        $this->assertSame('pending', $rows[$pending->id]['status']);
+        $this->assertSame('checked_in', $rows[$checkedIn->id]['status']);
+        $this->assertNotNull($rows[$checkedIn->id]['check_in_at']);
+        $this->assertSame('walk_in', $rows[$walkIn->id]['status']);
+    }
+
     public function test_payload_never_exposes_capacity_pick_counts_or_overbooked(): void
     {
         [$user, $attendee, $event] = $this->setupAttendee(programPublic: true);

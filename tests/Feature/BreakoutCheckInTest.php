@@ -326,4 +326,62 @@ class BreakoutCheckInTest extends TestCase
 
         $this->scan($outsider, $this->attendee())->assertForbidden();
     }
+
+    private function attendanceOff(): void
+    {
+        $this->breakout->update(['attendance_enabled' => false]);
+        $this->makeSession('09:00', '12:00');
+    }
+
+    public function test_scan_into_a_breakout_with_attendance_off_is_refused(): void
+    {
+        $this->attendanceOff();
+
+        $this->scan($this->checker, $this->attendee())->assertUnprocessable()->assertJsonValidationErrors('breakout_id');
+        $this->assertDatabaseCount('attendance_records', 0);
+    }
+
+    public function test_manual_and_walk_in_check_in_to_a_breakout_with_attendance_off_are_refused(): void
+    {
+        $this->attendanceOff();
+        $pick = $this->attendee();
+        $stranger = $this->attendee(false);
+
+        $this->actingAs($this->checker, 'sanctum')->postJson('/api/v1/attendance/manual', [
+            'event_id' => $this->event->id, 'breakout_id' => $this->breakout->id, 'attendee_id' => $pick->id,
+        ])->assertUnprocessable();
+        $this->actingAs($this->admin, 'sanctum')->postJson('/api/v1/attendance/manual', [
+            'event_id' => $this->event->id, 'breakout_id' => $this->breakout->id, 'attendee_id' => $stranger->id, 'walk_in' => true,
+        ])->assertUnprocessable();
+        $this->scan($this->admin, $stranger, ['walk_in' => true])->assertUnprocessable();
+        $this->assertDatabaseCount('attendance_records', 0);
+    }
+
+    public function test_test_mode_scan_for_a_breakout_with_attendance_off_is_refused(): void
+    {
+        $this->attendanceOff();
+        $superAdmin = User::factory()->superAdmin()->create();
+
+        $this->scan($superAdmin, $this->attendee(), ['test_mode' => true])->assertUnprocessable()->assertJsonValidationErrors('breakout_id');
+    }
+
+    public function test_sync_batch_rejects_only_the_scan_for_a_breakout_with_attendance_off(): void
+    {
+        $off = $this->breakout('13:00', '14:00');
+        $off->update(['attendance_enabled' => false]);
+        $pick = $this->attendee();
+        $this->makeSession('09:00', '12:00');
+
+        $response = $this->actingAs($this->checker, 'sanctum')->postJson('/api/v1/attendance/sync-batch', ['scans' => [
+            ['client_ref' => 'off', 'event_id' => $this->event->id, 'breakout_id' => $off->id, 'qr_token' => $pick->qr_token, 'method' => 'qr'],
+            ['client_ref' => 'on', 'event_id' => $this->event->id, 'breakout_id' => $this->breakout->id, 'qr_token' => $pick->qr_token, 'method' => 'qr'],
+        ]]);
+
+        $response->assertOk()
+            ->assertJsonPath('results.0.status', 'error')
+            ->assertJsonPath('results.1.status', 'created');
+        $this->assertStringContainsString('attendance', strtolower($response->json('results.0.message')));
+        $this->assertDatabaseMissing('attendance_records', ['breakout_id' => $off->id]);
+        $this->assertDatabaseHas('attendance_records', ['attendee_id' => $pick->id, 'breakout_id' => $this->breakout->id]);
+    }
 }

@@ -156,6 +156,12 @@ class Attendee extends Model
      */
     public function scopeExpectedAt(Builder $query, EventSession|Breakout $slot): void
     {
+        if (! $slot->tracksAttendance()) {
+            $query->whereRaw('1 = 0');
+
+            return;
+        }
+
         $query->where('attendees.first_registered_at', '<', $slot->endsAt())
             // At a breakout only current pick holders are Expected; walk-ins never are.
             ->when($slot instanceof Breakout, fn (Builder $q) => $q->whereHas('breakouts', fn ($picks) => $picks->whereKey($slot->id)));

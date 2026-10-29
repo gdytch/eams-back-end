@@ -49,6 +49,11 @@ class Breakout extends Model
         return $this->hasOne(EventProgram::class);
     }
 
+    public function tracksAttendance(): bool
+    {
+        return (bool) $this->attendance_enabled;
+    }
+
     public function startsAt(): Carbon
     {
         return Carbon::parse($this->date->toDateString().' '.$this->start_time);

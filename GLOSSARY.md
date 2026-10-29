@@ -98,7 +98,7 @@ An attendance period of an event, such as a morning or afternoon of one day, tha
 _Avoid_: Main session, slot
 
 **Breakout**:
-An optional talk or workshop within one event, with its own time slot, room, speakers, topics and attendance, checked only for Attendees who picked it. A breakout usually runs inside a session but is not part of it; a workshop repeated at two times is two breakouts.
+An optional talk or workshop within one event, with its own time slot, room, speakers, topics and attendance, checked only for Attendees who picked it, unless an admin turns attendance off for it. A breakout with attendance off shows no attendance to anyone. A breakout usually runs inside a session but is not part of it; a workshop repeated at two times is two breakouts.
 _Avoid_: Breakout session, workshop, track, elective
 
 **Pick**:
@@ -120,7 +120,7 @@ The time span of one session or one breakout, used when the same attendance rule
 _Avoid_: Period, block
 
 **Expected Attendee**:
-An Attendee who should be at a slot: for a session, anyone first fully registered before it ended; for a breakout, the same but only those who currently pick it.
+An Attendee who should be at a slot: for a session, anyone first fully registered before it ended; for a breakout, the same but only those who currently pick it. A breakout with attendance off has no expected Attendees.
 _Avoid_: Registered (for this meaning), invitee
 
 **Present**:

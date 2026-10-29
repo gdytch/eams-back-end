@@ -97,6 +97,18 @@ class AttendeeBreakoutsTest extends TestCase
             ->assertJsonPath('data.0.id', $mine->id);
     }
 
+    public function test_payload_includes_attendance_enabled(): void
+    {
+        [$user, $attendee, $event] = $this->setupAttendee();
+        $on = Breakout::factory()->for($event)->create(['start_time' => '09:00', 'end_time' => '09:30']);
+        $off = Breakout::factory()->for($event)->create(['start_time' => '10:00', 'end_time' => '11:00', 'attendance_enabled' => false]);
+        $attendee->breakouts()->attach([$on->id, $off->id]);
+
+        $this->getBreakouts($user, $event)->assertOk()
+            ->assertJsonPath('data.0.attendance_enabled', true)
+            ->assertJsonPath('data.1.attendance_enabled', false);
+    }
+
     public function test_unpicked_breakouts_are_shown_when_program_is_public(): void
     {
         [$user, $attendee, $event] = $this->setupAttendee(programPublic: true);

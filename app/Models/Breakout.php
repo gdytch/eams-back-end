@@ -14,15 +14,18 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
-#[Fillable(['organization_id', 'event_id', 'title', 'description', 'date', 'start_time', 'end_time', 'room', 'capacity', 'topics'])]
+#[Fillable(['organization_id', 'event_id', 'title', 'description', 'date', 'start_time', 'end_time', 'room', 'capacity', 'topics', 'attendance_enabled'])]
 class Breakout extends Model
 {
     /** @use HasFactory<BreakoutFactory> */
     use BelongsToOrganization, HasAttendanceStatus, HasFactory;
 
+    /** @var array<string, mixed> */
+    protected $attributes = ['attendance_enabled' => true];
+
     protected function casts(): array
     {
-        return ['date' => 'date:Y-m-d', 'topics' => 'array', 'capacity' => 'integer'];
+        return ['date' => 'date:Y-m-d', 'topics' => 'array', 'capacity' => 'integer', 'attendance_enabled' => 'boolean'];
     }
 
     /** @return BelongsTo<Event, $this> */

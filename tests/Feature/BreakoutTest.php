@@ -72,6 +72,25 @@ class BreakoutTest extends TestCase
         $this->assertModelMissing(Breakout::findOrNew($id));
     }
 
+    public function test_attendance_enabled_defaults_true_and_can_be_turned_off_and_on(): void
+    {
+        $id = $this->postJson($this->url, $this->payload())->assertCreated()
+            ->assertJsonPath('data.attendance_enabled', true)->json('data.id');
+
+        $this->putJson("$this->url/$id", $this->payload(['attendance_enabled' => false]))
+            ->assertOk()->assertJsonPath('data.attendance_enabled', false);
+        $this->getJson("$this->url/$id")->assertJsonPath('data.attendance_enabled', false);
+        $this->getJson($this->url)->assertJsonPath('data.0.attendance_enabled', false);
+
+        $this->putJson("$this->url/$id", $this->payload(['attendance_enabled' => true]))
+            ->assertOk()->assertJsonPath('data.attendance_enabled', true);
+
+        $this->postJson($this->url, $this->payload(['attendance_enabled' => false]))
+            ->assertCreated()->assertJsonPath('data.attendance_enabled', false);
+        $this->postJson($this->url, $this->payload(['attendance_enabled' => 'maybe']))
+            ->assertUnprocessable()->assertJsonValidationErrors('attendance_enabled');
+    }
+
     public function test_time_and_field_validation(): void
     {
         $this->postJson($this->url, $this->payload(['start_time' => '10:00', 'end_time' => '09:00']))->assertUnprocessable()->assertJsonValidationErrors('end_time');

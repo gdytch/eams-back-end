@@ -695,6 +695,28 @@ class AttendeeDashboardTest extends TestCase
         $this->assertSame(0, $response->json('stats.total_sessions'));
     }
 
+    public function test_attendance_breakouts_carry_the_attendance_record_id_like_sessions_do(): void
+    {
+        Carbon::setTestNow('2026-06-25 12:00:00');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create(['organization_id' => $organization->id]);
+        $event = Event::factory()->for($organization)->create(['pick_mode' => 'multiple', 'pick_min' => 1, 'pick_max' => null]);
+        $attendee = Attendee::factory()->for($organization)->for($user)->for($event)->create(['first_registered_at' => now()->subYear()]);
+        $make = fn (string $start, string $end) => Breakout::factory()->for($event)->create(['date' => '2026-06-25', 'start_time' => $start, 'end_time' => $end]);
+        $checkedIn = $make('08:00', '09:00');
+        $missed = $make('09:00', '10:00');
+        $walkIn = $make('10:00', '11:00');
+        $attendee->breakouts()->attach([$checkedIn->id, $missed->id]);
+        $record = AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $checkedIn->id, 'check_in_at' => now()->subHours(3)]);
+        $walkInRecord = AttendanceRecord::factory()->create(['attendee_id' => $attendee->id, 'event_session_id' => null, 'breakout_id' => $walkIn->id, 'check_in_at' => now()->subHour(), 'is_walk_in' => true]);
+
+        $rows = collect($this->actingAs($user, 'sanctum')->getJson("/api/v1/attendee/events/{$event->id}/attendance")->assertOk()->json('breakouts'))->keyBy('id');
+
+        $this->assertSame($record->id, $rows[$checkedIn->id]['attendance_record_id']);
+        $this->assertSame($walkInRecord->id, $rows[$walkIn->id]['attendance_record_id']);
+        $this->assertNull($rows[$missed->id]['attendance_record_id']);
+    }
+
     public function test_attendance_leaves_out_breakouts_with_attendance_off_until_turned_back_on(): void
     {
         Carbon::setTestNow('2026-06-25 12:00:00');

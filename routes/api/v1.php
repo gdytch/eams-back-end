@@ -233,6 +233,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         Route::get('events/{event}/sessions/{session}/attendance', [AttendanceController::class, 'forSession']);
         Route::get('events/{event}/sessions/{session}/roster', [AttendanceController::class, 'roster']);
+        Route::get('events/{event}/breakouts/{breakout}/attendance', [AttendanceController::class, 'forBreakout'])->scopeBindings();
         Route::get('events/{event}/sessions/{session}/quick-stats', [ReportController::class, 'eventSessionQuickStats']);
 
         Route::get('events/{event}/reports/attendance-summary', [ReportController::class, 'eventAttendanceSummary']);

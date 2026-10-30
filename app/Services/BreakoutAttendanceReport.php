@@ -92,6 +92,7 @@ class BreakoutAttendanceReport
             'mission' => $attendee->mission?->name,
             'organization_level_code' => $attendee->organization_level_code ?? '',
             'status' => $status,
+            'attendance_record_id' => $record?->id,
             'check_in_at' => $record?->check_in_at?->format('Y-m-d H:i:s'),
             'method' => $record?->method?->value,
             'recorded_by' => $record ? ($record->recordedBy->name ?? 'System') : null,

@@ -4,8 +4,11 @@ namespace Tests\Feature;
 
 use App\Jobs\GenerateAttendeeIdCardJob;
 use App\Mail\AttendeeAccountInviteMail;
+use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\AuditLog;
 use App\Models\Event;
+use App\Models\EventSession;
 use App\Models\Organization;
 use App\Models\Union;
 use App\Models\User;
@@ -113,14 +116,19 @@ class AdminWizardTest extends TestCase
         $this->postJson('/api/v1/attendees', $this->basicInfo(['confirm' => true]))->assertCreated();
     }
 
-    public function test_only_a_draft_can_be_deleted_and_it_is_audited(): void
+    public function test_a_draft_and_a_registered_attendee_can_be_deleted_and_it_is_audited(): void
     {
         $this->actingAs($this->admin, 'sanctum');
         $draft = Attendee::find($this->postJson('/api/v1/attendees', $this->basicInfo())->json('data.id'));
-        $registered = Attendee::factory()->for($this->event)->create();
+        $registered = Attendee::factory()->for($this->event)->create(['first_registered_at' => now()]);
+        $session = EventSession::factory()->for($this->event)->create();
+        AttendanceRecord::factory()->for($registered)->for($session, 'eventSession')->create();
 
-        $this->deleteJson("/api/v1/attendees/{$registered->id}")->assertUnprocessable();
-        $this->assertDatabaseHas('attendees', ['id' => $registered->id]);
+        $this->deleteJson("/api/v1/attendees/{$registered->id}")->assertNoContent();
+        $this->assertDatabaseMissing('attendees', ['id' => $registered->id]);
+        $this->assertDatabaseMissing('attendance_records', ['attendee_id' => $registered->id]);
+        $log = AuditLog::where('action', 'attendee.deleted')->where('auditable_id', $registered->id)->sole();
+        $this->assertSame($registered->last_name, $log->changes['snapshot']['last_name']);
 
         $this->deleteJson("/api/v1/attendees/{$draft->id}")->assertNoContent();
         $this->assertDatabaseHas('audit_logs', ['action' => 'attendee.deleted', 'auditable_id' => $draft->id]);

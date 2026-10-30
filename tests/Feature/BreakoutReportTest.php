@@ -119,6 +119,19 @@ class BreakoutReportTest extends TestCase
         $this->assertNull($rows->firstWhere('status', 'Absent')['check_in_at']);
     }
 
+    public function test_roster_rows_carry_the_attendance_record_id_walk_ins_included(): void
+    {
+        $present = $this->checkIn($this->attendee());
+        $this->attendee();
+        $walkIn = $this->checkIn($this->attendee(false), ['is_walk_in' => true, 'method' => 'manual']);
+
+        $rows = collect($this->actingAs($this->admin, 'sanctum')->getJson("/api/v1/events/{$this->event->id}/reports/breakouts/{$this->breakout->id}")
+            ->assertOk()->json('data'));
+
+        $this->assertEqualsCanonicalizing([$present->id, $walkIn->id, null], $rows->pluck('attendance_record_id')->all());
+        $this->assertSame($walkIn->id, $rows->firstWhere('status', 'Walk-in')['attendance_record_id']);
+    }
+
     public function test_report_endpoints_follow_view_staff_data(): void
     {
         $otherOrg = Organization::factory()->create();

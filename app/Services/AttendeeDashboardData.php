@@ -181,6 +181,7 @@ class AttendeeDashboardData
                     'room' => $breakout->room,
                     'status' => $this->breakoutStatus($breakout, $record),
                     'check_in_at' => $record?->check_in_at,
+                    'attendance_record_id' => $record?->id,
                 ];
             })
             ->all();

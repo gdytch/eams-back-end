@@ -21,6 +21,7 @@ use App\Models\Union;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class GlobalSearchController extends Controller
 {
@@ -83,11 +84,7 @@ class GlobalSearchController extends Controller
         if (! $user->isAttendee()) {
             $categories[] = 'attendees';
         }
-        array_push($categories, 'events', 'sessions');
-        if (! $user->isAttendee()) {
-            $categories[] = 'breakouts';
-        }
-        array_push($categories, 'registrations', 'attendance', 'program');
+        array_push($categories, 'events', 'sessions', 'breakouts', 'registrations', 'attendance', 'program');
         if (! $user->isChecker()) {
             $categories[] = 'speakers';
         }
@@ -150,8 +147,8 @@ class GlobalSearchController extends Controller
                 fn (EventSession $record) => $this->item('session', $record->id, $record->name, $record->session_date?->toDateString(), $record->event?->name, $record->event_id),
             ],
             'breakouts' => [
-                $this->breakoutQuery($events, $like),
-                fn (Breakout $record) => $this->item('breakout', $record->id, $record->title, $this->breakoutSubtitle($record), $record->event?->name, $record->event_id),
+                $this->breakoutQuery($user, $events, $like),
+                $this->breakoutMapper($user),
             ],
             'registrations' => [
                 $this->registrationQuery($user, $events, $like),
@@ -173,16 +170,32 @@ class GlobalSearchController extends Controller
         return $this->group($key, $total, $items, $page, $perPage);
     }
 
-    private function breakoutQuery(Builder $events, string $like): Builder
+    private function breakoutQuery(User $user, Builder $events, string $like): Builder
     {
         $query = Breakout::withoutGlobalScopes()
             ->whereIn('event_id', (clone $events)->select('events.id'))
-            ->with(['event' => fn ($event) => $event->withoutGlobalScopes()]);
+            ->with(['event' => fn ($event) => $event->withoutGlobalScopes()])
+            // Attendees are not offered Breakouts while the event has them disabled.
+            ->when($user->isAttendee(), fn (Builder $query) => $query->whereHas('event', fn (Builder $event) => $event->withoutGlobalScopes()->whereNotNull('pick_mode')));
 
         return $query->where(function (Builder $match) use ($like) {
             $this->matches($match, ['title', 'description', 'room', 'topics'], $like)
                 ->orWhereHas('speakers', fn (Builder $speaker) => $this->matches($speaker->withoutGlobalScopes(), ['name'], $like));
         });
+    }
+
+    private function breakoutMapper(User $user): \Closure
+    {
+        $picked = $user->isAttendee()
+            ? DB::table('breakout_picks')
+                ->whereIn('attendee_id', Attendee::withoutGlobalScopes()->where('user_id', $user->id)->select('id'))
+                ->pluck('breakout_id')->flip()
+            : null;
+
+        return fn (Breakout $record) => $this->item(
+            'breakout', $record->id, $record->title, $this->breakoutSubtitle($record), $record->event?->name, $record->event_id,
+            $picked === null ? [] : ['picked' => $picked->has($record->id)],
+        );
     }
 
     private function breakoutSubtitle(Breakout $breakout): string

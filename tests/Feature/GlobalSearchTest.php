@@ -312,9 +312,47 @@ class GlobalSearchTest extends TestCase
         $checker->accessibleEvents()->attach($ownEvent);
         $this->actingAs($checker, 'sanctum');
         $this->assertSame([$ownBreakout->id], $this->ids($this->getJson('/api/v1/search?q=Lantern&all_events=1')->json(), 'breakouts'));
+    }
 
-        $this->actingAs(User::factory()->attendee()->create(), 'sanctum');
-        $this->getJson('/api/v1/search?q=Lantern&category=breakouts')->assertForbidden();
+    public function test_attendee_sees_breakouts_of_joined_events_with_picked_flag_but_not_of_disabled_or_other_events(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create();
+        $joined = Event::factory()->for($organization)->create(['name' => 'Joined Summit', 'pick_mode' => 'required', 'pick_min' => 1, 'pick_max' => 2]);
+        $disabled = Event::factory()->for($organization)->create(['pick_mode' => null]);
+        $other = Event::factory()->for($organization)->create(['pick_mode' => 'required', 'pick_min' => 1, 'pick_max' => 2]);
+        $mine = $this->registerInEvent($joined, Attendee::create(['organization_id' => $organization->id, 'user_id' => $user->id, 'first_name' => 'Pat', 'last_name' => 'Picker']));
+        $this->registerInEvent($disabled, Attendee::create(['organization_id' => $organization->id, 'user_id' => $user->id, 'first_name' => 'Pat', 'last_name' => 'Picker']));
+        $picked = Breakout::factory()->for($joined)->create(['title' => 'Mosaic Picked']);
+        $unpicked = Breakout::factory()->for($joined)->create(['title' => 'Mosaic Unpicked']);
+        $offered = Breakout::factory()->for($disabled)->create(['title' => 'Mosaic Disabled']);
+        $elsewhere = Breakout::factory()->for($other)->create(['title' => 'Mosaic Elsewhere']);
+        $picked->picks()->attach($mine);
+        $someoneElse = $this->registerInEvent($joined, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Other', 'last_name' => 'Person']));
+        $unpicked->picks()->attach($someoneElse);
+        $this->actingAs($user, 'sanctum');
+
+        $result = $this->getJson('/api/v1/search?q=Mosaic&all_events=1')->assertOk()->json();
+
+        $this->assertEqualsCanonicalizing([$picked->id, $unpicked->id], $this->ids($result, 'breakouts'));
+        $items = collect($this->group($result, 'breakouts')['items']);
+        $this->assertTrue($items->firstWhere('id', $picked->id)['picked']);
+        $this->assertFalse($items->firstWhere('id', $unpicked->id)['picked']);
+        $this->assertSame('Joined Summit', $items->firstWhere('id', $picked->id)['context']);
+        $this->getJson('/api/v1/search?q=Mosaic&category=breakouts')->assertOk()->assertJsonPath('groups.0.key', 'breakouts');
+    }
+
+    public function test_staff_breakout_items_do_not_carry_picked_flag(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        Breakout::factory()->for($event)->create(['title' => 'Staffview']);
+
+        $result = $this->actingAs(User::factory()->orgAdmin()->for($organization)->create(), 'sanctum')
+            ->getJson('/api/v1/search?q=Staffview&all_events=1')->json();
+        $item = $this->group($result, 'breakouts')['items'][0];
+
+        $this->assertArrayNotHasKey('picked', $item);
     }
 
     public function test_breakouts_category_is_paginated(): void

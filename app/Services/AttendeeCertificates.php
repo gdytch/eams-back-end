@@ -24,24 +24,44 @@ class AttendeeCertificates
      */
     public function availableFor(User $user, int $eventId): Collection
     {
-        $eventId = Event::withoutGlobalScopes()->findOrFail($eventId)->id;
-        $attendees = $user->attendees()->withoutGlobalScopes()->whereNull('merged_at')->where('event_id', $eventId)->get();
+        return $this->availableForEvents($user, [Event::withoutGlobalScopes()->findOrFail($eventId)->id]);
+    }
+
+    /**
+     * The same rows as availableFor() for several events, loading Attendees, Certificates and file-holding rows once
+     * for all of them. Ordered by event id, then Certificate id; events the user has not joined contribute nothing.
+     *
+     * @param  array<int, int>  $eventIds
+     * @return Collection<int, IssuedCertificate>
+     */
+    public function availableForEvents(User $user, array $eventIds): Collection
+    {
+        $attendees = $user->attendees()->withoutGlobalScopes()->whereNull('merged_at')->whereIn('event_id', $eventIds)->get();
         if ($attendees->isEmpty()) {
             return collect();
         }
 
-        $certificates = $this->releasedCertificates($eventId);
+        $byEvent = $attendees->groupBy('event_id');
+        $certificates = $this->releasedCertificates($byEvent->keys()->all());
         $issued = $this->fileHolders($certificates, $attendees);
 
         return $certificates
-            ->map(fn (Certificate $certificate) => $this->eligibleRow($certificate, $attendees, $issued->get($certificate->id, collect())->keyBy('attendee_id')))
+            ->map(function (Certificate $certificate) use ($byEvent, $issued) {
+                $eventAttendees = $byEvent->get($certificate->event_id, collect());
+                $mine = $issued->get($certificate->id, collect())->whereIn('attendee_id', $eventAttendees->modelKeys())->keyBy('attendee_id');
+
+                return $this->eligibleRow($certificate, $eventAttendees, $mine);
+            })
             ->filter()->values();
     }
 
-    /** @return Collection<int, Certificate> */
-    private function releasedCertificates(int $eventId): Collection
+    /**
+     * @param  array<int, int>  $eventIds
+     * @return Collection<int, Certificate>
+     */
+    private function releasedCertificates(array $eventIds): Collection
     {
-        return Certificate::withoutGlobalScopes()->where('event_id', $eventId)->orderBy('id')->get()
+        return Certificate::withoutGlobalScopes()->whereIn('event_id', $eventIds)->orderBy('event_id')->orderBy('id')->get()
             ->filter(fn (Certificate $certificate) => $this->eligibility->isReleased($certificate));
     }
 

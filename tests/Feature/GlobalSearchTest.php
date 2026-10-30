@@ -22,6 +22,7 @@ use App\Models\Speaker;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -588,6 +589,126 @@ class GlobalSearchTest extends TestCase
         $second = $this->group($this->getJson('/api/v1/search?q=Pagedissue&category=certificates&page=2&per_page=4')->json(), 'certificates');
         $this->assertCount(2, $second['items']);
         $this->assertFalse($second['has_more']);
+    }
+
+    public function test_breakout_check_in_never_reports_a_session_id(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $session = EventSession::factory()->for($event)->create();
+        $breakout = Breakout::factory()->for($event)->create(['title' => 'Cascade Workshop']);
+        $attendee = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Ann', 'last_name' => 'Pickford']));
+        AttendanceRecord::factory()->for($attendee)->create(['event_session_id' => $session->id, 'breakout_id' => $breakout->id]);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $item = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Cascade&category=attendance')->assertOk()->json('groups.0.items.0');
+
+        $this->assertNull($item['session_id']);
+        $this->assertSame($breakout->id, $item['breakout_id']);
+    }
+
+    public function test_picked_flag_ignores_merged_attendees(): void
+    {
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create();
+        $event = Event::factory()->for($organization)->create(['pick_mode' => 'required', 'pick_min' => 1, 'pick_max' => 2]);
+        $live = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'user_id' => $user->id, 'first_name' => 'Pat', 'last_name' => 'Live']));
+        $otherEvent = Event::factory()->for($organization)->create(['pick_mode' => 'required', 'pick_min' => 1, 'pick_max' => 2]);
+        $merged = $this->registerInEvent($otherEvent, Attendee::create(['organization_id' => $organization->id, 'user_id' => $user->id, 'first_name' => 'Pat', 'last_name' => 'Merged']));
+        $merged->forceFill(['merged_at' => now()])->saveQuietly();
+        $liveBreakout = Breakout::factory()->for($event)->create(['title' => 'Mergetest Live']);
+        $mergedBreakout = Breakout::factory()->for($otherEvent)->create(['title' => 'Mergetest Merged']);
+        $liveBreakout->picks()->attach($live);
+        $mergedBreakout->picks()->attach($merged);
+
+        $items = collect($this->actingAs($user, 'sanctum')->getJson('/api/v1/search?q=Mergetest&category=breakouts')->assertOk()->json('groups.0.items'));
+
+        $this->assertTrue($items->firstWhere('id', $liveBreakout->id)['picked']);
+        $this->assertFalse($items->firstWhere('id', $mergedBreakout->id)['picked']);
+    }
+
+    public function test_breakout_topics_match_non_ascii_text_and_ignore_json_punctuation(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $accented = Breakout::factory()->for($event)->create(['title' => 'A', 'description' => null, 'room' => '', 'topics' => ['Café culture', 'Fé']]);
+        $slashed = Breakout::factory()->for($event)->create(['title' => 'B', 'description' => null, 'room' => '', 'topics' => ['Faith/Hope']]);
+        Breakout::factory()->for($event)->create(['title' => 'C', 'description' => null, 'room' => '', 'topics' => ['plain', 'other']]);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+        $this->actingAs($admin, 'sanctum');
+
+        $this->assertSame([$accented->id], $this->ids($this->getJson('/api/v1/search?q='.urlencode('Café').'&category=breakouts')->json(), 'breakouts'));
+        $this->assertSame([$slashed->id], $this->ids($this->getJson('/api/v1/search?q='.urlencode('Faith/Hope').'&category=breakouts')->json(), 'breakouts'));
+        $this->assertSame([], $this->ids($this->getJson('/api/v1/search?q='.urlencode('","').'&category=breakouts')->json(), 'breakouts'));
+        $this->assertSame([], $this->ids($this->getJson('/api/v1/search?q='.urlencode('["pl').'&category=breakouts')->json(), 'breakouts'));
+    }
+
+    public function test_form_subtitle_for_terms_with_wildcards_reflects_where_it_matched(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $byTitle = Form::factory()->for($event)->required()->published()->create(['title' => '100% Waiver']);
+        $byField = Form::factory()->for($event)->create(['title' => 'Merch']);
+        $byField->fields()->create(['type' => FormFieldType::ShortText, 'label' => '100% cotton']);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $items = collect($this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q='.urlencode('100%').'&category=forms')->assertOk()->json('groups.0.items'));
+
+        $this->assertSame('Required · Published', $items->firstWhere('id', $byTitle->id)['subtitle']);
+        $this->assertSame('Field: 100% cotton', $items->firstWhere('id', $byField->id)['subtitle']);
+    }
+
+    public function test_form_search_runs_a_constant_number_of_queries(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        foreach (range(1, 4) as $n) {
+            Form::factory()->for($event)->create(['title' => "Form {$n}"])->fields()->create(['type' => FormFieldType::ShortText, 'label' => "Qcount field {$n}"]);
+        }
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+        $this->actingAs($admin, 'sanctum');
+        $this->getJson('/api/v1/search?q=none&category=forms');
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->getJson('/api/v1/search?q=Qcount&category=forms')->assertOk();
+        $four = count(DB::getQueryLog());
+        Form::query()->first()->delete();
+        DB::flushQueryLog();
+        $this->getJson('/api/v1/search?q=Qcount&category=forms')->assertOk();
+
+        $this->assertSame($four, count(DB::getQueryLog()));
+    }
+
+    public function test_attendee_certificate_search_adds_at_most_one_query_per_event_certificate(): void
+    {
+        Storage::fake('local');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create();
+        $released = ['status' => 'published', 'published_at' => '2026-01-01 00:00:00', 'release_at' => '2026-01-02 00:00:00', 'release_rule' => 'everyone'];
+        $join = function () use ($organization, $user, $released) {
+            $event = Event::factory()->for($organization)->create();
+            $attendee = $this->joinedAttendee($event, $user);
+            $certificate = Certificate::factory()->for($event)->create(['title' => 'Qcount cert', ...$released]);
+            Storage::disk('local')->put($path = "certificates/{$certificate->id}/{$attendee->id}.pdf", 'PDF');
+            IssuedCertificate::factory()->generated($path)->create(['certificate_id' => $certificate->id, 'attendee_id' => $attendee->id]);
+        };
+        $join();
+        $this->actingAs($user, 'sanctum');
+        $this->getJson('/api/v1/search?q=Qcount&category=certificates');
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        $this->getJson('/api/v1/search?q=Qcount&category=certificates')->assertOk();
+        $one = count(DB::getQueryLog());
+        foreach (range(1, 3) as $ignored) {
+            $join();
+        }
+        DB::flushQueryLog();
+        $response = $this->getJson('/api/v1/search?q=Qcount&category=certificates')->assertOk();
+
+        $this->assertSame(4, $response->json('groups.0.total'));
+        $this->assertLessThanOrEqual($one + 3, count(DB::getQueryLog()));
     }
 
     private function joinedAttendee(Event $event, ?User $user): Attendee

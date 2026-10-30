@@ -14,6 +14,7 @@ use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
+use App\Models\Form;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Speaker;
@@ -84,7 +85,11 @@ class GlobalSearchController extends Controller
         if (! $user->isAttendee()) {
             $categories[] = 'attendees';
         }
-        array_push($categories, 'events', 'sessions', 'breakouts', 'registrations', 'attendance', 'program');
+        array_push($categories, 'events', 'sessions', 'breakouts');
+        if ($user->isSuperAdmin() || $user->isOrgAdmin()) {
+            $categories[] = 'forms';
+        }
+        array_push($categories, 'registrations', 'attendance', 'program');
         if (! $user->isChecker()) {
             $categories[] = 'speakers';
         }
@@ -150,6 +155,10 @@ class GlobalSearchController extends Controller
                 $this->breakoutQuery($user, $events, $like),
                 $this->breakoutMapper($user),
             ],
+            'forms' => [
+                $this->formQuery($events, $like),
+                fn (Form $record) => $this->item('form', $record->id, $record->title, $this->formSubtitle($record, $like), $record->event?->name, $record->event_id),
+            ],
             'registrations' => [
                 $this->registrationQuery($user, $events, $like),
                 fn (Attendee $record) => $this->item('registration', $record->id, $record->full_name ?: 'Registration', $record->email_address, $record->event?->name, $record->event_id),
@@ -203,6 +212,33 @@ class GlobalSearchController extends Controller
         $time = substr((string) $breakout->start_time, 0, 5).'-'.substr((string) $breakout->end_time, 0, 5);
 
         return trim($breakout->date?->toDateString().' '.$time.($breakout->room ? ' · '.$breakout->room : ''));
+    }
+
+    private function formQuery(Builder $events, string $like): Builder
+    {
+        $query = Form::withoutGlobalScopes()
+            ->whereIn('event_id', (clone $events)->select('events.id'))
+            ->with(['event' => fn ($event) => $event->withoutGlobalScopes()]);
+
+        return $query->where(function (Builder $match) use ($like) {
+            $this->matches($match, ['title', 'description'], $like)
+                ->orWhereHas('fields', fn (Builder $field) => $this->matches($field->active(), ['label'], $like));
+        });
+    }
+
+    private function formSubtitle(Form $form, string $like): string
+    {
+        $needle = mb_strtolower(trim($like, '%'));
+        $formMatches = collect([$form->title, $form->description])
+            ->contains(fn (?string $text) => $text !== null && str_contains(mb_strtolower($text), stripcslashes($needle)));
+        if (! $formMatches) {
+            $label = $form->fields()->active()->where('label', 'like', $like)->value('label');
+            if ($label !== null) {
+                return 'Field: '.$label;
+            }
+        }
+
+        return ($form->is_required ? 'Required' : 'Optional').' · '.ucfirst($form->status->value);
     }
 
     private function registrationQuery(User $user, Builder $events, string $like): Builder

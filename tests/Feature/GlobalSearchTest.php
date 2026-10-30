@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\FormFieldType;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Breakout;
@@ -12,6 +13,7 @@ use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
+use App\Models\Form;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Speaker;
@@ -368,6 +370,88 @@ class GlobalSearchTest extends TestCase
         $second = $this->group($this->getJson('/api/v1/search?q=Paged&category=breakouts&page=2&per_page=5')->json(), 'breakouts');
         $this->assertCount(2, $second['items']);
         $this->assertFalse($second['has_more']);
+    }
+
+    public function test_forms_match_title_description_and_active_field_label_with_subtitles(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create(['name' => 'Harvest Summit']);
+        $byTitle = Form::factory()->for($event)->required()->published()->create(['title' => 'Zephyr Waiver']);
+        $byDescription = Form::factory()->for($event)->create(['title' => 'Plain', 'description' => 'Collects zephyr data']);
+        $byField = Form::factory()->for($event)->create(['title' => 'Merch']);
+        $byField->fields()->create(['type' => FormFieldType::ShortText, 'label' => 'Zephyr size']);
+        $archived = Form::factory()->for($event)->create(['title' => 'Old']);
+        $archived->fields()->create(['type' => FormFieldType::ShortText, 'label' => 'Zephyr gone', 'archived_at' => now()]);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $result = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Zephyr&all_events=1')->assertOk()->json();
+
+        $this->assertEqualsCanonicalizing([$byTitle->id, $byDescription->id, $byField->id], $this->ids($result, 'forms'));
+        $items = collect($this->group($result, 'forms')['items']);
+        $item = $items->firstWhere('id', $byTitle->id);
+        $this->assertSame('form', $item['type']);
+        $this->assertSame('Zephyr Waiver', $item['title']);
+        $this->assertSame('Required · Published', $item['subtitle']);
+        $this->assertSame('Harvest Summit', $item['context']);
+        $this->assertSame($event->id, $item['event_id']);
+        $this->assertSame('Optional · Draft', $items->firstWhere('id', $byDescription->id)['subtitle']);
+        $this->assertSame('Field: Zephyr size', $items->firstWhere('id', $byField->id)['subtitle']);
+    }
+
+    public function test_form_answers_never_match(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $form = Form::factory()->for($event)->create(['title' => 'Survey']);
+        $field = $form->fields()->create(['type' => FormFieldType::ShortText, 'label' => 'Notes']);
+        $attendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Ann', 'last_name' => 'Lee']);
+        $submission = $form->submissions()->create(['attendee_id' => $attendee->id]);
+        $submission->answers()->create(['form_field_id' => $field->id, 'value' => 'Secretanswer']);
+
+        $result = $this->actingAs(User::factory()->orgAdmin()->for($organization)->create(), 'sanctum')
+            ->getJson('/api/v1/search?q=Secretanswer&all_events=1')->assertOk()->json();
+
+        $this->assertSame([], $this->ids($result, 'forms'));
+    }
+
+    public function test_forms_group_follows_breakouts_and_is_admin_only(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        Form::factory()->for($event)->create(['title' => 'Gateform']);
+
+        $keys = array_column($this->actingAs(User::factory()->orgAdmin()->for($organization)->create(), 'sanctum')->getJson('/api/v1/search?q=Gateform&all_events=1')->json('groups'), 'key');
+        $this->assertSame(array_search('breakouts', $keys) + 1, array_search('forms', $keys));
+        $this->getJson('/api/v1/search?q=Gateform&category=forms')->assertOk()->assertJsonPath('groups.0.key', 'forms');
+        $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum')->getJson('/api/v1/search?q=Gateform&category=forms')->assertOk();
+
+        $checker = User::factory()->checker()->for($organization)->create();
+        $attendee = User::factory()->attendee()->create();
+        foreach ([$checker, $attendee] as $user) {
+            $this->actingAs($user, 'sanctum');
+            $keys = array_column($this->getJson('/api/v1/search?q=Gateform&all_events=1')->assertOk()->json('groups'), 'key');
+            $this->assertNotContains('forms', $keys);
+            $this->getJson('/api/v1/search?q=Gateform&category=forms')->assertForbidden();
+        }
+    }
+
+    public function test_forms_are_isolated_by_organization_and_category_is_paginated(): void
+    {
+        $own = Organization::factory()->create();
+        $other = Organization::factory()->create();
+        $ownEvent = Event::factory()->for($own)->create();
+        Form::factory()->count(7)->for($ownEvent)->create(['title' => 'Pagedform']);
+        Form::factory()->for(Event::factory()->for($other)->create())->create(['title' => 'Pagedform Foreign']);
+
+        $this->actingAs(User::factory()->orgAdmin()->for($own)->create(), 'sanctum');
+        $preview = $this->group($this->getJson('/api/v1/search?q=Pagedform&all_events=1')->json(), 'forms');
+        $this->assertCount(5, $preview['items']);
+        $this->assertSame(7, $preview['total']);
+        $second = $this->group($this->getJson('/api/v1/search?q=Pagedform&category=forms&page=2&per_page=5')->json(), 'forms');
+        $this->assertCount(2, $second['items']);
+
+        $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum');
+        $this->assertSame(8, $this->group($this->getJson('/api/v1/search?q=Pagedform&all_events=1')->json(), 'forms')['total']);
     }
 
     private function group(array $response, string $key): ?array

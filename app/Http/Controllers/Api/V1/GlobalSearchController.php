@@ -16,11 +16,13 @@ use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
 use App\Models\Form;
+use App\Models\IssuedCertificate;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\Union;
 use App\Models\User;
+use App\Services\AttendeeCertificates;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -66,9 +68,11 @@ class GlobalSearchController extends Controller
 
         $groups = [];
         foreach ($categories as $key) {
-            $groups[] = $key === 'program'
-                ? $this->programGroup($events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage)
-                : $this->groupFor($key, $user, $events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage, $eventId !== null && ! $allEvents);
+            $groups[] = match (true) {
+                $key === 'program' => $this->programGroup($events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage),
+                $key === 'certificates' && $user->isAttendee() => $this->issuedCertificatesGroup($user, $events, $term, $category === null ? 1 : $page, $category === null ? 5 : $perPage),
+                default => $this->groupFor($key, $user, $events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage, $eventId !== null && ! $allEvents),
+            };
         }
 
         return ['groups' => $groups];
@@ -88,7 +92,10 @@ class GlobalSearchController extends Controller
         }
         array_push($categories, 'events', 'sessions', 'breakouts');
         if ($user->isSuperAdmin() || $user->isOrgAdmin()) {
-            array_push($categories, 'forms', 'certificates');
+            $categories[] = 'forms';
+        }
+        if (! $user->isChecker()) {
+            $categories[] = 'certificates';
         }
         array_push($categories, 'registrations', 'attendance', 'program');
         if (! $user->isChecker()) {
@@ -182,6 +189,24 @@ class GlobalSearchController extends Controller
         $items = $query->orderBy('id')->forPage($page, $perPage)->get()->map($map)->all();
 
         return $this->group($key, $total, $items, $page, $perPage);
+    }
+
+    /** An Attendee's own Issued certificates, exactly those My Certificates lists, filtered by Certificate title in memory. */
+    private function issuedCertificatesGroup(User $user, Builder $events, string $term, int $page, int $perPage): array
+    {
+        $service = app(AttendeeCertificates::class);
+        $needle = mb_strtolower($term);
+        $rows = (clone $events)->orderBy('events.id')->get(['events.id', 'events.name'])
+            ->flatMap(fn (Event $event) => $service->availableFor($user, $event->id)->map(fn (IssuedCertificate $issued) => [$issued, $event]))
+            ->filter(fn (array $row) => str_contains(mb_strtolower((string) $row[0]->certificate->title), $needle))
+            ->values();
+
+        $items = $rows->forPage($page, $perPage)->map(fn (array $row) => $this->item(
+            'issued_certificate', $row[0]->id, $row[0]->certificate->title, null, $row[1]->name, $row[1]->id,
+            ['certificate_id' => $row[0]->certificate_id],
+        ))->values()->all();
+
+        return $this->group('certificates', $rows->count(), $items, $page, $perPage);
     }
 
     private function breakoutQuery(User $user, Builder $events, string $like): Builder

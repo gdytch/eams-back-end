@@ -15,12 +15,14 @@ use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
 use App\Models\Form;
+use App\Models\IssuedCertificate;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\Union;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class GlobalSearchTest extends TestCase
@@ -524,6 +526,76 @@ class GlobalSearchTest extends TestCase
 
         $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum');
         $this->assertSame(8, $this->group($this->getJson('/api/v1/search?q=Pagedcert&all_events=1')->json(), 'certificates')['total']);
+    }
+
+    public function test_attendee_finds_only_issued_certificates_visible_on_my_certificates(): void
+    {
+        Storage::fake('local');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create();
+        $event = Event::factory()->for($organization)->create(['name' => 'Harvest Summit']);
+        $mine = $this->joinedAttendee($event, $user);
+        $released = ['status' => 'published', 'published_at' => '2026-01-01 00:00:00', 'release_at' => '2026-01-02 00:00:00', 'release_rule' => 'everyone'];
+        $visible = Certificate::factory()->for($event)->create(['title' => 'Zenith Visible', ...$released]);
+        $draft = Certificate::factory()->for($event)->create(['title' => 'Zenith Draft']);
+        $future = Certificate::factory()->for($event)->create(['title' => 'Zenith Future', ...$released, 'release_at' => now()->addYear()]);
+        $noFile = Certificate::factory()->for($event)->create(['title' => 'Zenith Nofile', ...$released]);
+        $ineligible = Certificate::factory()->for($event)->create(['title' => 'Zenith Rate', ...$released, 'release_rule' => 'rate_75']);
+        $other = Certificate::factory()->for($event)->create(['title' => 'Unrelated', ...$released]);
+        $issued = [];
+        foreach ([$visible, $draft, $future, $ineligible, $other] as $certificate) {
+            Storage::disk('local')->put($path = "certificates/{$certificate->id}/{$mine->id}.pdf", 'PDF');
+            $issued[$certificate->title] = IssuedCertificate::factory()->generated($path)->create(['certificate_id' => $certificate->id, 'attendee_id' => $mine->id]);
+        }
+        IssuedCertificate::factory()->create(['certificate_id' => $noFile->id, 'attendee_id' => $mine->id]);
+
+        $result = $this->actingAs($user, 'sanctum')->getJson('/api/v1/search?q=Zenith&all_events=1')->assertOk()->json();
+
+        $this->assertSame([$issued['Zenith Visible']->id], $this->ids($result, 'certificates'));
+        $this->assertSame([
+            'type' => 'issued_certificate', 'id' => $issued['Zenith Visible']->id, 'title' => 'Zenith Visible', 'subtitle' => null,
+            'context' => 'Harvest Summit', 'event_id' => $event->id, 'certificate_id' => $visible->id,
+        ], $this->group($result, 'certificates')['items'][0]);
+        $this->getJson("/api/v1/attendee/events/{$event->id}/certificates")->assertOk()->assertJsonPath('data.0.id', $visible->id);
+    }
+
+    public function test_attendee_issued_certificates_span_joined_events_and_are_paginated(): void
+    {
+        Storage::fake('local');
+        $organization = Organization::factory()->create();
+        $user = User::factory()->attendee()->create();
+        $released = ['status' => 'published', 'published_at' => '2026-01-01 00:00:00', 'release_at' => '2026-01-02 00:00:00', 'release_rule' => 'everyone'];
+        foreach ([1, 2] as $n) {
+            $event = Event::factory()->for($organization)->create();
+            $attendee = $this->joinedAttendee($event, $user);
+            foreach (range(1, 3) as $i) {
+                $certificate = Certificate::factory()->for($event)->create(['title' => "Pagedissue {$n}-{$i}", ...$released]);
+                Storage::disk('local')->put($path = "certificates/{$certificate->id}/{$attendee->id}.pdf", 'PDF');
+                IssuedCertificate::factory()->generated($path)->create(['certificate_id' => $certificate->id, 'attendee_id' => $attendee->id]);
+            }
+        }
+        $foreign = Event::factory()->for($organization)->create();
+        $stranger = $this->joinedAttendee($foreign, null);
+        $certificate = Certificate::factory()->for($foreign)->create(['title' => 'Pagedissue foreign', ...$released]);
+        Storage::disk('local')->put($path = "certificates/{$certificate->id}/{$stranger->id}.pdf", 'PDF');
+        IssuedCertificate::factory()->generated($path)->create(['certificate_id' => $certificate->id, 'attendee_id' => $stranger->id]);
+
+        $this->actingAs($user, 'sanctum');
+        $preview = $this->group($this->getJson('/api/v1/search?q=Pagedissue&all_events=1')->json(), 'certificates');
+        $this->assertSame(6, $preview['total']);
+        $this->assertCount(5, $preview['items']);
+        $this->assertTrue($preview['has_more']);
+        $second = $this->group($this->getJson('/api/v1/search?q=Pagedissue&category=certificates&page=2&per_page=4')->json(), 'certificates');
+        $this->assertCount(2, $second['items']);
+        $this->assertFalse($second['has_more']);
+    }
+
+    private function joinedAttendee(Event $event, ?User $user): Attendee
+    {
+        $attendee = Attendee::factory()->for($event)->create(['user_id' => $user?->id]);
+        $attendee->forceFill(['first_registered_at' => '2026-01-01 08:00:00'])->saveQuietly();
+
+        return $attendee;
     }
 
     private function group(array $response, string $key): ?array

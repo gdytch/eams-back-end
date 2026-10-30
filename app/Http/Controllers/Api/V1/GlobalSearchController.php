@@ -150,7 +150,7 @@ class GlobalSearchController extends Controller
             ],
             'attendance' => [
                 $this->attendanceQuery($user, $events, $like),
-                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->attendee?->full_name ?: 'Attendance', $record->eventSession?->name, $record->attendee?->event?->name, $record->attendee?->event_id, ['session_id' => $record->event_session_id, 'registration_id' => $record->attendee_id]),
+                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->attendee?->full_name ?: 'Attendance', $record->breakout_id ? $record->breakout?->title : $record->eventSession?->name, $record->attendee?->event?->name, $record->attendee?->event_id, ['session_id' => $record->event_session_id, 'breakout_id' => $record->breakout_id, 'is_walk_in' => (bool) $record->is_walk_in, 'registration_id' => $record->attendee_id]),
             ],
             'speakers' => [
                 $this->matches(Speaker::query()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($query) => $query->withoutGlobalScopes()]), ['name', 'designation', 'organization', 'bio'], $like),
@@ -191,11 +191,13 @@ class GlobalSearchController extends Controller
                 'attendee' => fn ($attendee) => $attendee->withoutGlobalScopes(),
                 'attendee.event' => fn ($event) => $event->withoutGlobalScopes(),
                 'eventSession',
+                'breakout' => fn ($breakout) => $breakout->withoutGlobalScopes(),
             ]);
 
         return $query->where(function (Builder $match) use ($like) {
             $match->whereHas('attendee', fn (Builder $attendee) => $this->matches($attendee->withoutGlobalScopes(), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like))
-                ->orWhereHas('eventSession', fn (Builder $session) => $this->matches($session, ['name', 'description'], $like));
+                ->orWhereHas('eventSession', fn (Builder $session) => $this->matches($session, ['name', 'description'], $like))
+                ->orWhereHas('breakout', fn (Builder $breakout) => $this->matches($breakout->withoutGlobalScopes(), ['title'], $like));
         });
     }
 

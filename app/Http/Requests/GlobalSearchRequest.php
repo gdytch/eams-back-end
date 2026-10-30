@@ -21,7 +21,7 @@ class GlobalSearchRequest extends FormRequest
             'all_events' => ['sometimes', 'boolean'],
             'category' => ['nullable', Rule::in([
                 'organizations', 'users', 'attendees', 'unions', 'missions', 'churches',
-                'events', 'sessions', 'registrations', 'attendance', 'program', 'speakers',
+                'events', 'sessions', 'breakouts', 'registrations', 'attendance', 'program', 'speakers',
             ])],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:20'],

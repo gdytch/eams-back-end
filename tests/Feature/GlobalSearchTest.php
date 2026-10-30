@@ -252,6 +252,86 @@ class GlobalSearchTest extends TestCase
         $this->assertNotContains($hidden->id, $this->ids($this->getJson('/api/v1/search?q=Cedar&all_events=1')->json(), 'attendance'));
     }
 
+    public function test_breakouts_match_title_description_room_topic_and_speaker_name(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create(['name' => 'Harvest Summit', 'pick_mode' => null]);
+        $byTitle = Breakout::factory()->for($event)->create(['title' => 'Quillon Basics', 'date' => '2026-11-05', 'start_time' => '09:00', 'end_time' => '10:30', 'room' => 'Hall A']);
+        $byDescription = Breakout::factory()->for($event)->create(['description' => 'About quillon care']);
+        $byRoom = Breakout::factory()->for($event)->create(['room' => 'Quillon Annex']);
+        $byTopic = Breakout::factory()->for($event)->create(['topics' => ['Quillon forging']]);
+        $bySpeaker = Breakout::factory()->for($event)->create();
+        $bySpeaker->speakers()->attach(Speaker::factory()->for($event)->create(['name' => 'Quillon Smith']));
+        Breakout::factory()->for($event)->create(['title' => 'Unrelated', 'description' => null, 'room' => 'Room 1', 'topics' => ['other']]);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $result = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Quillon&all_events=1')->assertOk()->json();
+
+        $this->assertEqualsCanonicalizing(
+            [$byTitle->id, $byDescription->id, $byRoom->id, $byTopic->id, $bySpeaker->id],
+            $this->ids($result, 'breakouts'),
+        );
+        $item = collect($this->group($result, 'breakouts')['items'])->firstWhere('id', $byTitle->id);
+        $this->assertSame('breakout', $item['type']);
+        $this->assertSame('Quillon Basics', $item['title']);
+        $this->assertSame('2026-11-05 09:00-10:30 · Hall A', $item['subtitle']);
+        $this->assertSame('Harvest Summit', $item['context']);
+        $this->assertSame($event->id, $item['event_id']);
+    }
+
+    public function test_breakouts_group_follows_sessions_and_accepts_category(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        Breakout::factory()->for($event)->create(['title' => 'Order Check']);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $keys = array_column($this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Order&all_events=1')->assertOk()->json('groups'), 'key');
+        $this->assertSame(array_search('sessions', $keys) + 1, array_search('breakouts', $keys));
+        $this->getJson('/api/v1/search?q=Order&category=breakouts')->assertOk()->assertJsonPath('groups.0.key', 'breakouts');
+    }
+
+    public function test_breakouts_are_isolated_by_organization_and_checker_access_and_hidden_from_attendees(): void
+    {
+        $own = Organization::factory()->create();
+        $other = Organization::factory()->create();
+        $ownEvent = Event::factory()->for($own)->create();
+        $restrictedEvent = Event::factory()->for($own)->create();
+        $otherEvent = Event::factory()->for($other)->create();
+        $ownBreakout = Breakout::factory()->for($ownEvent)->create(['title' => 'Lantern Own']);
+        $restricted = Breakout::factory()->for($restrictedEvent)->create(['title' => 'Lantern Restricted']);
+        $foreign = Breakout::factory()->for($otherEvent)->create(['title' => 'Lantern Foreign']);
+
+        $this->actingAs(User::factory()->orgAdmin()->for($own)->create(), 'sanctum');
+        $this->assertEqualsCanonicalizing([$ownBreakout->id, $restricted->id], $this->ids($this->getJson('/api/v1/search?q=Lantern&all_events=1')->json(), 'breakouts'));
+
+        $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum');
+        $this->assertCount(3, $this->ids($this->getJson('/api/v1/search?q=Lantern&all_events=1')->json(), 'breakouts'));
+
+        $checker = User::factory()->checker()->for($own)->create();
+        $checker->accessibleEvents()->attach($ownEvent);
+        $this->actingAs($checker, 'sanctum');
+        $this->assertSame([$ownBreakout->id], $this->ids($this->getJson('/api/v1/search?q=Lantern&all_events=1')->json(), 'breakouts'));
+
+        $this->actingAs(User::factory()->attendee()->create(), 'sanctum');
+        $this->getJson('/api/v1/search?q=Lantern&category=breakouts')->assertForbidden();
+    }
+
+    public function test_breakouts_category_is_paginated(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        Breakout::factory()->count(7)->for($event)->create(['title' => 'Paged Breakout']);
+        $this->actingAs(User::factory()->orgAdmin()->for($organization)->create(), 'sanctum');
+
+        $preview = $this->group($this->getJson('/api/v1/search?q=Paged&all_events=1')->json(), 'breakouts');
+        $this->assertCount(5, $preview['items']);
+        $this->assertSame(7, $preview['total']);
+        $second = $this->group($this->getJson('/api/v1/search?q=Paged&category=breakouts&page=2&per_page=5')->json(), 'breakouts');
+        $this->assertCount(2, $second['items']);
+        $this->assertFalse($second['has_more']);
+    }
+
     private function group(array $response, string $key): ?array
     {
         foreach ($response['groups'] as $group) {

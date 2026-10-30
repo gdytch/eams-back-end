@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventProgram;
@@ -172,6 +173,83 @@ class GlobalSearchTest extends TestCase
 
         $this->getJson('/api/v1/search?q=Summit&category=events&per_page=1&page=1')
             ->assertOk()->assertJsonPath('groups.0.total', 1);
+    }
+
+    public function test_breakout_check_in_matched_by_breakout_title_carries_breakout_reference(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $breakout = Breakout::factory()->for($event)->create(['title' => 'Zephyr Workshop']);
+        $attendee = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Ann', 'last_name' => 'Pickford']));
+        $record = AttendanceRecord::factory()->for($attendee)->create(['event_session_id' => null, 'breakout_id' => $breakout->id]);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $result = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Zephyr&all_events=1')->assertOk()->json();
+
+        $item = $this->group($result, 'attendance')['items'][0];
+        $this->assertSame($record->id, $item['id']);
+        $this->assertSame('Zephyr Workshop', $item['subtitle']);
+        $this->assertSame($breakout->id, $item['breakout_id']);
+        $this->assertNull($item['session_id']);
+        $this->assertFalse($item['is_walk_in']);
+    }
+
+    public function test_breakout_check_in_matched_by_attendee_name_and_walk_in_flag(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $breakout = Breakout::factory()->for($event)->create(['title' => 'Lantern Talk']);
+        $attendee = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Walker', 'last_name' => 'Quill']));
+        AttendanceRecord::factory()->for($attendee)->create(['event_session_id' => null, 'breakout_id' => $breakout->id, 'is_walk_in' => true]);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $item = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Quill&category=attendance')->assertOk()->json('groups.0.items.0');
+
+        $this->assertSame('Lantern Talk', $item['subtitle']);
+        $this->assertSame($breakout->id, $item['breakout_id']);
+        $this->assertTrue($item['is_walk_in']);
+    }
+
+    public function test_session_check_in_keeps_shape_with_null_breakout_and_no_walk_in(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $session = EventSession::factory()->for($event)->create(['name' => 'Opening Plenary']);
+        $attendee = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Sam', 'last_name' => 'Doe']));
+        AttendanceRecord::factory()->for($attendee)->for($session, 'eventSession')->create();
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $item = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Sam&category=attendance')->assertOk()->json('groups.0.items.0');
+
+        $this->assertSame('Opening Plenary', $item['subtitle']);
+        $this->assertSame($session->id, $item['session_id']);
+        $this->assertNull($item['breakout_id']);
+        $this->assertFalse($item['is_walk_in']);
+    }
+
+    public function test_attendee_and_checker_see_only_their_own_scope_of_breakout_check_ins(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $restricted = Event::factory()->for($organization)->create();
+        $breakout = Breakout::factory()->for($event)->create(['title' => 'Cedar Forum']);
+        $restrictedBreakout = Breakout::factory()->for($restricted)->create(['title' => 'Cedar Hidden']);
+        $user = User::factory()->attendee()->create();
+        $mine = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'user_id' => $user->id, 'first_name' => 'Mine', 'last_name' => 'Own']));
+        $other = $this->registerInEvent($event, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Theirs', 'last_name' => 'Else']));
+        $far = $this->registerInEvent($restricted, Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Far', 'last_name' => 'Away']));
+        $own = AttendanceRecord::factory()->for($mine)->create(['event_session_id' => null, 'breakout_id' => $breakout->id]);
+        $foreign = AttendanceRecord::factory()->for($other)->create(['event_session_id' => null, 'breakout_id' => $breakout->id]);
+        $hidden = AttendanceRecord::factory()->for($far)->create(['event_session_id' => null, 'breakout_id' => $restrictedBreakout->id]);
+
+        $this->actingAs($user, 'sanctum');
+        $this->assertSame([$own->id], $this->ids($this->getJson('/api/v1/search?q=Cedar&category=attendance')->assertOk()->json(), 'attendance'));
+
+        $checker = User::factory()->checker()->for($organization)->create();
+        $checker->accessibleEvents()->attach($event);
+        $this->actingAs($checker, 'sanctum');
+        $this->assertEqualsCanonicalizing([$own->id, $foreign->id], $this->ids($this->getJson('/api/v1/search?q=Cedar&all_events=1')->assertOk()->json(), 'attendance'));
+        $this->assertNotContains($hidden->id, $this->ids($this->getJson('/api/v1/search?q=Cedar&all_events=1')->json(), 'attendance'));
     }
 
     private function group(array $response, string $key): ?array

@@ -575,10 +575,11 @@ class AttendeeController extends Controller
             return response()->json(['message' => 'Cannot delete an attendee with merged source records.'], 409);
         }
 
-        // A once-registered Attendee holds attendance and registration history.
-        abort_if($attendee->first_registered_at !== null, 422, 'Only a Draft attendee can be deleted.');
-
-        AuditLog::record('attendee.deleted', $attendee);
+        // The row is gone after this, and DB cascades take its attendance, picks, answers and certificates;
+        // the snapshot keeps who was deleted.
+        AuditLog::record('attendee.deleted', $attendee, [
+            'snapshot' => $attendee->only(['event_id', 'first_name', 'middle_name', 'last_name', 'email_address', 'first_registered_at']),
+        ]);
 
         $attendee->delete();
 

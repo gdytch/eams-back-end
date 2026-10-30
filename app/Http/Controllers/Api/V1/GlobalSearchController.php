@@ -7,6 +7,7 @@ use App\Http\Requests\GlobalSearchRequest;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Breakout;
+use App\Models\Certificate;
 use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventProgram;
@@ -87,7 +88,7 @@ class GlobalSearchController extends Controller
         }
         array_push($categories, 'events', 'sessions', 'breakouts');
         if ($user->isSuperAdmin() || $user->isOrgAdmin()) {
-            $categories[] = 'forms';
+            array_push($categories, 'forms', 'certificates');
         }
         array_push($categories, 'registrations', 'attendance', 'program');
         if (! $user->isChecker()) {
@@ -158,6 +159,10 @@ class GlobalSearchController extends Controller
             'forms' => [
                 $this->formQuery($events, $like),
                 fn (Form $record) => $this->item('form', $record->id, $record->title, $this->formSubtitle($record, $like), $record->event?->name, $record->event_id),
+            ],
+            'certificates' => [
+                $this->matches(Certificate::withoutGlobalScopes()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($event) => $event->withoutGlobalScopes()]), ['title'], $like),
+                fn (Certificate $record) => $this->item('certificate', $record->id, $record->title, $this->certificateSubtitle($record), $record->event?->name, $record->event_id),
             ],
             'registrations' => [
                 $this->registrationQuery($user, $events, $like),
@@ -239,6 +244,15 @@ class GlobalSearchController extends Controller
         }
 
         return ($form->is_required ? 'Required' : 'Optional').' · '.ucfirst($form->status->value);
+    }
+
+    private function certificateSubtitle(Certificate $certificate): string
+    {
+        if (! $certificate->isPublished()) {
+            return 'Draft';
+        }
+
+        return $certificate->release_at ? 'Published · releases '.$certificate->release_at->format('Y-m-d H:i') : 'Published';
     }
 
     private function registrationQuery(User $user, Builder $events, string $like): Builder

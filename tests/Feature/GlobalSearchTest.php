@@ -6,6 +6,7 @@ use App\Enums\FormFieldType;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
 use App\Models\Breakout;
+use App\Models\Certificate;
 use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventProgram;
@@ -452,6 +453,77 @@ class GlobalSearchTest extends TestCase
 
         $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum');
         $this->assertSame(8, $this->group($this->getJson('/api/v1/search?q=Pagedform&all_events=1')->json(), 'forms')['total']);
+    }
+
+    public function test_certificates_match_title_only_including_drafts_with_status_subtitles(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create(['name' => 'Harvest Summit']);
+        $draft = Certificate::factory()->for($event)->create(['title' => 'Quasar Participation']);
+        $published = Certificate::factory()->for($event)->create(['title' => 'Quasar Attendance', 'status' => 'published', 'published_at' => now(), 'release_at' => '2027-03-05 14:30:00']);
+        Certificate::factory()->for($event)->create(['title' => 'Other']);
+        $admin = User::factory()->orgAdmin()->for($organization)->create();
+
+        $result = $this->actingAs($admin, 'sanctum')->getJson('/api/v1/search?q=Quasar&all_events=1')->assertOk()->json();
+
+        $this->assertEqualsCanonicalizing([$draft->id, $published->id], $this->ids($result, 'certificates'));
+        $items = collect($this->group($result, 'certificates')['items']);
+        $item = $items->firstWhere('id', $draft->id);
+        $this->assertSame('certificate', $item['type']);
+        $this->assertSame('Quasar Participation', $item['title']);
+        $this->assertSame('Draft', $item['subtitle']);
+        $this->assertSame('Harvest Summit', $item['context']);
+        $this->assertSame($event->id, $item['event_id']);
+        $this->assertSame('Published · releases 2027-03-05 14:30', $items->firstWhere('id', $published->id)['subtitle']);
+    }
+
+    public function test_certificates_never_return_issued_certificates_to_admins(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        $certificate = Certificate::factory()->for($event)->create(['title' => 'Nebula Award']);
+        $attendee = Attendee::create(['organization_id' => $organization->id, 'first_name' => 'Zorbaname', 'last_name' => 'Lee']);
+        $certificate->issuedCertificates()->create(['attendee_id' => $attendee->id, 'organization_id' => $organization->id]);
+
+        $result = $this->actingAs(User::factory()->orgAdmin()->for($organization)->create(), 'sanctum')
+            ->getJson('/api/v1/search?q=Zorbaname&all_events=1')->assertOk()->json();
+
+        $this->assertSame([], $this->ids($result, 'certificates'));
+    }
+
+    public function test_certificates_group_follows_forms_and_is_hidden_from_checkers(): void
+    {
+        $organization = Organization::factory()->create();
+        $event = Event::factory()->for($organization)->create();
+        Certificate::factory()->for($event)->create(['title' => 'Gatecert']);
+
+        $keys = array_column($this->actingAs(User::factory()->orgAdmin()->for($organization)->create(), 'sanctum')->getJson('/api/v1/search?q=Gatecert&all_events=1')->json('groups'), 'key');
+        $this->assertSame(array_search('forms', $keys) + 1, array_search('certificates', $keys));
+        $this->getJson('/api/v1/search?q=Gatecert&category=certificates')->assertOk()->assertJsonPath('groups.0.key', 'certificates');
+        $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum')->getJson('/api/v1/search?q=Gatecert&category=certificates')->assertOk();
+
+        $this->actingAs(User::factory()->checker()->for($organization)->create(), 'sanctum');
+        $keys = array_column($this->getJson('/api/v1/search?q=Gatecert&all_events=1')->assertOk()->json('groups'), 'key');
+        $this->assertNotContains('certificates', $keys);
+        $this->getJson('/api/v1/search?q=Gatecert&category=certificates')->assertForbidden();
+    }
+
+    public function test_certificates_are_isolated_by_organization_and_category_is_paginated(): void
+    {
+        $own = Organization::factory()->create();
+        $other = Organization::factory()->create();
+        Certificate::factory()->count(7)->for(Event::factory()->for($own)->create())->create(['title' => 'Pagedcert']);
+        Certificate::factory()->for(Event::factory()->for($other)->create())->create(['title' => 'Pagedcert Foreign']);
+
+        $this->actingAs(User::factory()->orgAdmin()->for($own)->create(), 'sanctum');
+        $preview = $this->group($this->getJson('/api/v1/search?q=Pagedcert&all_events=1')->json(), 'certificates');
+        $this->assertCount(5, $preview['items']);
+        $this->assertSame(7, $preview['total']);
+        $second = $this->group($this->getJson('/api/v1/search?q=Pagedcert&category=certificates&page=2&per_page=5')->json(), 'certificates');
+        $this->assertCount(2, $second['items']);
+
+        $this->actingAs(User::factory()->superAdmin()->create(), 'sanctum');
+        $this->assertSame(8, $this->group($this->getJson('/api/v1/search?q=Pagedcert&all_events=1')->json(), 'certificates')['total']);
     }
 
     private function group(array $response, string $key): ?array

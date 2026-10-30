@@ -15,6 +15,7 @@ use App\Models\AuditLog;
 use App\Models\Breakout;
 use App\Models\Event;
 use App\Models\EventSession;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Request;
@@ -116,12 +117,32 @@ class AttendanceController extends Controller
         $this->authorize('viewRoster', $session);
         abort_unless($session->event_id === $event->id, 404);
 
+        return $this->recordList($request, $event, AttendanceRecord::where('event_session_id', $session->id));
+    }
+
+    /**
+     * List the check-in records of a breakout, in the shape of the session list. Records of a breakout with attendance off are ignored.
+     */
+    public function forBreakout(Request $request, Event $event, Breakout $breakout)
+    {
+        $this->authorize('viewStaffData', $event);
+
+        return $this->recordList($request, $event, AttendanceRecord::where('breakout_id', $breakout->id)->counted());
+    }
+
+    /**
+     * One page of the event's records in the given session or breakout query: `record_id` narrows to one, `sort_by` is `last_name` or latest check-in.
+     *
+     * @param  Builder<AttendanceRecord>  $slotRecords
+     */
+    private function recordList(Request $request, Event $event, Builder $slotRecords)
+    {
         $input = $request->validate([
             'record_id' => ['sometimes', 'integer', 'min:1'],
         ]);
 
-        $records = AttendanceRecord::whereHas('attendee', fn ($q) => $q->where('event_id', $event->id))
-            ->where('event_session_id', $session->id)
+        $records = $slotRecords
+            ->whereHas('attendee', fn ($q) => $q->where('event_id', $event->id))
             ->when(isset($input['record_id']), fn ($query) => $query->whereKey($input['record_id']))
             ->with('attendee');
         if ($request->has('sort_by')) {

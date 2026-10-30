@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\GlobalSearchRequest;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Breakout;
 use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventProgram;
@@ -82,7 +83,11 @@ class GlobalSearchController extends Controller
         if (! $user->isAttendee()) {
             $categories[] = 'attendees';
         }
-        array_push($categories, 'events', 'sessions', 'registrations', 'attendance', 'program');
+        array_push($categories, 'events', 'sessions');
+        if (! $user->isAttendee()) {
+            $categories[] = 'breakouts';
+        }
+        array_push($categories, 'registrations', 'attendance', 'program');
         if (! $user->isChecker()) {
             $categories[] = 'speakers';
         }
@@ -144,6 +149,10 @@ class GlobalSearchController extends Controller
                 $this->matches(EventSession::query()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($query) => $query->withoutGlobalScopes()]), ['name', 'description'], $like),
                 fn (EventSession $record) => $this->item('session', $record->id, $record->name, $record->session_date?->toDateString(), $record->event?->name, $record->event_id),
             ],
+            'breakouts' => [
+                $this->breakoutQuery($events, $like),
+                fn (Breakout $record) => $this->item('breakout', $record->id, $record->title, $this->breakoutSubtitle($record), $record->event?->name, $record->event_id),
+            ],
             'registrations' => [
                 $this->registrationQuery($user, $events, $like),
                 fn (Attendee $record) => $this->item('registration', $record->id, $record->full_name ?: 'Registration', $record->email_address, $record->event?->name, $record->event_id),
@@ -162,6 +171,25 @@ class GlobalSearchController extends Controller
         $items = $query->orderBy('id')->forPage($page, $perPage)->get()->map($map)->all();
 
         return $this->group($key, $total, $items, $page, $perPage);
+    }
+
+    private function breakoutQuery(Builder $events, string $like): Builder
+    {
+        $query = Breakout::withoutGlobalScopes()
+            ->whereIn('event_id', (clone $events)->select('events.id'))
+            ->with(['event' => fn ($event) => $event->withoutGlobalScopes()]);
+
+        return $query->where(function (Builder $match) use ($like) {
+            $this->matches($match, ['title', 'description', 'room', 'topics'], $like)
+                ->orWhereHas('speakers', fn (Builder $speaker) => $this->matches($speaker->withoutGlobalScopes(), ['name'], $like));
+        });
+    }
+
+    private function breakoutSubtitle(Breakout $breakout): string
+    {
+        $time = substr((string) $breakout->start_time, 0, 5).'-'.substr((string) $breakout->end_time, 0, 5);
+
+        return trim($breakout->date?->toDateString().' '.$time.($breakout->room ? ' · '.$breakout->room : ''));
     }
 
     private function registrationQuery(User $user, Builder $events, string $like): Builder

@@ -66,12 +66,16 @@ class GlobalSearchController extends Controller
             $categories = [$category];
         }
 
+        $groupPage = $category === null ? 1 : $page;
+        $groupSize = $category === null ? 5 : $perPage;
+        $scoped = $eventId !== null && ! $allEvents;
+
         $groups = [];
         foreach ($categories as $key) {
             $groups[] = match (true) {
-                $key === 'program' => $this->programGroup($events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage),
-                $key === 'certificates' && $user->isAttendee() => $this->issuedCertificatesGroup($user, $events, $term, $category === null ? 1 : $page, $category === null ? 5 : $perPage),
-                default => $this->groupFor($key, $user, $events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage, $eventId !== null && ! $allEvents),
+                $key === 'program' => $this->programGroup($events, $like, $groupPage, $groupSize),
+                $key === 'certificates' && $user->isAttendee() => $this->issuedCertificatesGroup($user, $events, $term, $groupPage, $groupSize),
+                default => $this->groupFor($key, $user, $events, $term, $like, $groupPage, $groupSize, $scoped),
             };
         }
 
@@ -124,7 +128,7 @@ class GlobalSearchController extends Controller
         return $events;
     }
 
-    private function groupFor(string $key, User $user, Builder $events, string $like, int $page, int $perPage, bool $scoped): array
+    private function groupFor(string $key, User $user, Builder $events, string $term, string $like, int $page, int $perPage, bool $scoped): array
     {
         [$query, $map] = match ($key) {
             'organizations' => [
@@ -160,12 +164,12 @@ class GlobalSearchController extends Controller
                 fn (EventSession $record) => $this->item('session', $record->id, $record->name, $record->session_date?->toDateString(), $record->event?->name, $record->event_id),
             ],
             'breakouts' => [
-                $this->breakoutQuery($user, $events, $like),
+                $this->breakoutQuery($user, $events, $term, $like),
                 $this->breakoutMapper($user),
             ],
             'forms' => [
                 $this->formQuery($events, $like),
-                fn (Form $record) => $this->item('form', $record->id, $record->title, $this->formSubtitle($record, $like), $record->event?->name, $record->event_id),
+                fn (Form $record) => $this->item('form', $record->id, $record->title, $this->formSubtitle($record), $record->event?->name, $record->event_id),
             ],
             'certificates' => [
                 $this->matches(Certificate::withoutGlobalScopes()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($event) => $event->withoutGlobalScopes()]), ['title'], $like),
@@ -177,7 +181,7 @@ class GlobalSearchController extends Controller
             ],
             'attendance' => [
                 $this->attendanceQuery($user, $events, $like),
-                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->attendee?->full_name ?: 'Attendance', $record->breakout_id ? $record->breakout?->title : $record->eventSession?->name, $record->attendee?->event?->name, $record->attendee?->event_id, ['session_id' => $record->event_session_id, 'breakout_id' => $record->breakout_id, 'is_walk_in' => (bool) $record->is_walk_in, 'registration_id' => $record->attendee_id]),
+                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->attendee?->full_name ?: 'Attendance', $record->breakout_id ? $record->breakout?->title : $record->eventSession?->name, $record->attendee?->event?->name, $record->attendee?->event_id, ['session_id' => $record->breakout_id ? null : $record->event_session_id, 'breakout_id' => $record->breakout_id, 'is_walk_in' => (bool) $record->is_walk_in, 'registration_id' => $record->attendee_id]),
             ],
             'speakers' => [
                 $this->matches(Speaker::query()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($query) => $query->withoutGlobalScopes()]), ['name', 'designation', 'organization', 'bio'], $like),
@@ -191,34 +195,42 @@ class GlobalSearchController extends Controller
         return $this->group($key, $total, $items, $page, $perPage);
     }
 
-    /** An Attendee's own Issued certificates, exactly those My Certificates lists, filtered by Certificate title in memory. */
+    /**
+     * An Attendee's own Issued certificates, exactly those My Certificates lists (one batched service call across the
+     * accessible events), filtered by Certificate title in memory.
+     */
     private function issuedCertificatesGroup(User $user, Builder $events, string $term, int $page, int $perPage): array
     {
-        $service = app(AttendeeCertificates::class);
+        $eventsById = (clone $events)->get(['events.id', 'events.name'])->keyBy('id');
         $needle = mb_strtolower($term);
-        $rows = (clone $events)->orderBy('events.id')->get(['events.id', 'events.name'])
-            ->flatMap(fn (Event $event) => $service->availableFor($user, $event->id)->map(fn (IssuedCertificate $issued) => [$issued, $event]))
-            ->filter(fn (array $row) => str_contains(mb_strtolower((string) $row[0]->certificate->title), $needle))
+        $rows = app(AttendeeCertificates::class)->availableForEvents($user, $eventsById->keys()->all())
+            ->filter(fn (IssuedCertificate $issued) => str_contains(mb_strtolower((string) $issued->certificate->title), $needle))
             ->values();
 
-        $items = $rows->forPage($page, $perPage)->map(fn (array $row) => $this->item(
-            'issued_certificate', $row[0]->id, $row[0]->certificate->title, null, $row[1]->name, $row[1]->id,
-            ['certificate_id' => $row[0]->certificate_id],
+        $items = $rows->forPage($page, $perPage)->map(fn (IssuedCertificate $issued) => $this->item(
+            'issued_certificate', $issued->id, $issued->certificate->title, null, $eventsById[$issued->certificate->event_id]->name, $issued->certificate->event_id,
+            ['certificate_id' => $issued->certificate_id],
         ))->values()->all();
 
         return $this->group('certificates', $rows->count(), $items, $page, $perPage);
     }
 
-    private function breakoutQuery(User $user, Builder $events, string $like): Builder
+    /**
+     * Attendees are not offered Breakouts while the event has them disabled. Topics are stored as JSON text, so they
+     * are matched against the JSON-encoded term (non-ASCII text is stored as \uXXXX escapes).
+     */
+    private function breakoutQuery(User $user, Builder $events, string $term, string $like): Builder
     {
         $query = Breakout::withoutGlobalScopes()
             ->whereIn('event_id', (clone $events)->select('events.id'))
             ->with(['event' => fn ($event) => $event->withoutGlobalScopes()])
-            // Attendees are not offered Breakouts while the event has them disabled.
             ->when($user->isAttendee(), fn (Builder $query) => $query->whereHas('event', fn (Builder $event) => $event->withoutGlobalScopes()->whereNotNull('pick_mode')));
 
-        return $query->where(function (Builder $match) use ($like) {
-            $this->matches($match, ['title', 'description', 'room', 'topics'], $like)
+        $topicLike = '%'.addcslashes(substr(json_encode($term), 1, -1), '%_\\').'%';
+
+        return $query->where(function (Builder $match) use ($like, $topicLike) {
+            $this->matches($match, ['title', 'description', 'room'], $like)
+                ->orWhereRaw($this->likeSql($match, 'topics'), [$topicLike, '\\'])
                 ->orWhereHas('speakers', fn (Builder $speaker) => $this->matches($speaker->withoutGlobalScopes(), ['name'], $like));
         });
     }
@@ -227,7 +239,7 @@ class GlobalSearchController extends Controller
     {
         $picked = $user->isAttendee()
             ? DB::table('breakout_picks')
-                ->whereIn('attendee_id', Attendee::withoutGlobalScopes()->where('user_id', $user->id)->select('id'))
+                ->whereIn('attendee_id', Attendee::withoutGlobalScopes()->where('user_id', $user->id)->whereNull('merged_at')->select('id'))
                 ->pluck('breakout_id')->flip()
             : null;
 
@@ -244,11 +256,20 @@ class GlobalSearchController extends Controller
         return trim($breakout->date?->toDateString().' '.$time.($breakout->room ? ' · '.$breakout->room : ''));
     }
 
+    /**
+     * Flags (`matched_itself`) in SQL whether the Form's own title or description matched, and eager-loads only the
+     * active fields whose label matched, so the subtitle needs no further query.
+     */
     private function formQuery(Builder $events, string $like): Builder
     {
         $query = Form::withoutGlobalScopes()
             ->whereIn('event_id', (clone $events)->select('events.id'))
-            ->with(['event' => fn ($event) => $event->withoutGlobalScopes()]);
+            ->with([
+                'event' => fn ($event) => $event->withoutGlobalScopes(),
+                'fields' => fn ($field) => $this->matches($field->getQuery()->active(), ['label'], $like)->orderBy('id'),
+            ]);
+        $itself = $this->likeSql($query, 'forms.title').' or '.$this->likeSql($query, 'forms.description');
+        $query->selectRaw("forms.*, case when {$itself} then 1 else 0 end as matched_itself", [$like, '\\', $like, '\\']);
 
         return $query->where(function (Builder $match) use ($like) {
             $this->matches($match, ['title', 'description'], $like)
@@ -256,16 +277,11 @@ class GlobalSearchController extends Controller
         });
     }
 
-    private function formSubtitle(Form $form, string $like): string
+    private function formSubtitle(Form $form): string
     {
-        $needle = mb_strtolower(trim($like, '%'));
-        $formMatches = collect([$form->title, $form->description])
-            ->contains(fn (?string $text) => $text !== null && str_contains(mb_strtolower($text), stripcslashes($needle)));
-        if (! $formMatches) {
-            $label = $form->fields()->active()->where('label', 'like', $like)->value('label');
-            if ($label !== null) {
-                return 'Field: '.$label;
-            }
+        $label = $form->fields->first()?->label;
+        if (! $form->matched_itself && $label !== null) {
+            return 'Field: '.$label;
         }
 
         return ($form->is_required ? 'Required' : 'Optional').' · '.ucfirst($form->status->value);
@@ -345,9 +361,15 @@ class GlobalSearchController extends Controller
     {
         return $query->where(function (Builder $match) use ($columns, $like) {
             foreach ($columns as $column) {
-                $match->orWhere($column, 'like', $like);
+                $match->orWhereRaw($this->likeSql($match, $column), [$like, '\\']);
             }
         });
+    }
+
+    /** A LIKE predicate with an explicit backslash ESCAPE, so escaped wildcards behave the same on every driver. */
+    private function likeSql(Builder $query, string $column): string
+    {
+        return $query->getQuery()->getGrammar()->wrap($column).' like ? escape ?';
     }
 
     private function item(string $type, int $id, ?string $title, ?string $subtitle = null, ?string $context = null, ?int $eventId = null, array $extra = []): array

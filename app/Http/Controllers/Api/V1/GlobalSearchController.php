@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\GlobalSearchRequest;
 use App\Models\AttendanceRecord;
 use App\Models\Attendee;
+use App\Models\Certificate;
 use App\Models\Church;
 use App\Models\Event;
 use App\Models\EventProgram;
@@ -13,16 +14,31 @@ use App\Models\EventProgramDay;
 use App\Models\EventProgramItem;
 use App\Models\EventProgramSection;
 use App\Models\EventSession;
+use App\Models\Form;
 use App\Models\Mission;
 use App\Models\Organization;
 use App\Models\Speaker;
 use App\Models\Union;
 use App\Models\User;
+use App\Services\GlobalSearch\AttendanceSearch;
+use App\Services\GlobalSearch\BreakoutSearch;
+use App\Services\GlobalSearch\BuildsSearchItems;
+use App\Services\GlobalSearch\CertificateSearch;
+use App\Services\GlobalSearch\FormSearch;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 
 class GlobalSearchController extends Controller
 {
+    use BuildsSearchItems;
+
+    public function __construct(
+        private BreakoutSearch $breakouts,
+        private FormSearch $forms,
+        private CertificateSearch $certificates,
+        private AttendanceSearch $attendance,
+    ) {}
+
     public function __invoke(GlobalSearchRequest $request): JsonResponse
     {
         $input = $request->validated();
@@ -60,14 +76,27 @@ class GlobalSearchController extends Controller
             $categories = [$category];
         }
 
+        $groupPage = $category === null ? 1 : $page;
+        $groupSize = $category === null ? 5 : $perPage;
+        $scoped = $eventId !== null && ! $allEvents;
+
         $groups = [];
         foreach ($categories as $key) {
-            $groups[] = $key === 'program'
-                ? $this->programGroup($events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage)
-                : $this->groupFor($key, $user, $events, $like, $category === null ? 1 : $page, $category === null ? 5 : $perPage, $eventId !== null && ! $allEvents);
+            $groups[] = match (true) {
+                $key === 'program' => $this->programGroup($events, $like, $groupPage, $groupSize),
+                $key === 'certificates' && $user->isAttendee() => $this->issuedGroup($user, $events, $term, $groupPage, $groupSize),
+                default => $this->groupFor($key, $user, $events, $term, $like, $groupPage, $groupSize, $scoped),
+            };
         }
 
         return ['groups' => $groups];
+    }
+
+    private function issuedGroup(User $user, Builder $events, string $term, int $page, int $perPage): array
+    {
+        $found = $this->certificates->issued($user, $events, $term, $page, $perPage);
+
+        return $this->group('certificates', $found['total'], $found['items'], $page, $perPage);
     }
 
     private function categories(User $user): array
@@ -82,7 +111,14 @@ class GlobalSearchController extends Controller
         if (! $user->isAttendee()) {
             $categories[] = 'attendees';
         }
-        array_push($categories, 'events', 'sessions', 'registrations', 'attendance', 'program');
+        array_push($categories, 'events', 'sessions', 'breakouts');
+        if ($user->isSuperAdmin() || $user->isOrgAdmin()) {
+            $categories[] = 'forms';
+        }
+        if (! $user->isChecker()) {
+            $categories[] = 'certificates';
+        }
+        array_push($categories, 'registrations', 'attendance', 'program');
         if (! $user->isChecker()) {
             $categories[] = 'speakers';
         }
@@ -109,7 +145,7 @@ class GlobalSearchController extends Controller
         return $events;
     }
 
-    private function groupFor(string $key, User $user, Builder $events, string $like, int $page, int $perPage, bool $scoped): array
+    private function groupFor(string $key, User $user, Builder $events, string $term, string $like, int $page, int $perPage, bool $scoped): array
     {
         [$query, $map] = match ($key) {
             'organizations' => [
@@ -144,13 +180,25 @@ class GlobalSearchController extends Controller
                 $this->matches(EventSession::query()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($query) => $query->withoutGlobalScopes()]), ['name', 'description'], $like),
                 fn (EventSession $record) => $this->item('session', $record->id, $record->name, $record->session_date?->toDateString(), $record->event?->name, $record->event_id),
             ],
+            'breakouts' => [
+                $this->breakouts->query($user, $events, $term, $like),
+                $this->breakouts->mapper($user),
+            ],
+            'forms' => [
+                $this->forms->query($events, $like),
+                fn (Form $record) => $this->item('form', $record->id, $record->title, $this->forms->subtitle($record), $record->event?->name, $record->event_id),
+            ],
+            'certificates' => [
+                $this->matches(Certificate::withoutGlobalScopes()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($event) => $event->withoutGlobalScopes()]), ['title'], $like),
+                fn (Certificate $record) => $this->item('certificate', $record->id, $record->title, $this->certificates->subtitle($record), $record->event?->name, $record->event_id),
+            ],
             'registrations' => [
                 $this->registrationQuery($user, $events, $like),
                 fn (Attendee $record) => $this->item('registration', $record->id, $record->full_name ?: 'Registration', $record->email_address, $record->event?->name, $record->event_id),
             ],
             'attendance' => [
-                $this->attendanceQuery($user, $events, $like),
-                fn (AttendanceRecord $record) => $this->item('attendance', $record->id, $record->attendee?->full_name ?: 'Attendance', $record->eventSession?->name, $record->attendee?->event?->name, $record->attendee?->event_id, ['session_id' => $record->event_session_id, 'registration_id' => $record->attendee_id]),
+                $this->attendance->query($user, $events, $like),
+                fn (AttendanceRecord $record) => $this->attendance->toItem($record),
             ],
             'speakers' => [
                 $this->matches(Speaker::query()->whereIn('event_id', (clone $events)->select('events.id'))->with(['event' => fn ($query) => $query->withoutGlobalScopes()]), ['name', 'designation', 'organization', 'bio'], $like),
@@ -176,29 +224,6 @@ class GlobalSearchController extends Controller
         return $this->matches($query, ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like);
     }
 
-    private function attendanceQuery(User $user, Builder $events, string $like): Builder
-    {
-        $query = AttendanceRecord::query()
-            ->counted()
-            ->whereNotNull('check_in_at')
-            ->whereHas('attendee', function (Builder $attendee) use ($user, $events) {
-                $attendee->withoutGlobalScopes()->whereIn('event_id', (clone $events)->select('events.id'));
-                if ($user->isAttendee()) {
-                    $attendee->where('user_id', $user->id);
-                }
-            })
-            ->with([
-                'attendee' => fn ($attendee) => $attendee->withoutGlobalScopes(),
-                'attendee.event' => fn ($event) => $event->withoutGlobalScopes(),
-                'eventSession',
-            ]);
-
-        return $query->where(function (Builder $match) use ($like) {
-            $match->whereHas('attendee', fn (Builder $attendee) => $this->matches($attendee->withoutGlobalScopes(), ['first_name', 'middle_name', 'last_name', 'normalized_name', 'email_address', 'mobile_no'], $like))
-                ->orWhereHas('eventSession', fn (Builder $session) => $this->matches($session, ['name', 'description'], $like));
-        });
-    }
-
     private function programGroup(Builder $events, string $like, int $page, int $perPage): array
     {
         $eventIds = fn () => (clone $events)->select('events.id');
@@ -221,27 +246,6 @@ class GlobalSearchController extends Controller
         }
 
         return $this->group('program', $total, $items->slice(($page - 1) * $perPage, $perPage)->values()->all(), $page, $perPage);
-    }
-
-    private function matches(Builder $query, array $columns, string $like): Builder
-    {
-        return $query->where(function (Builder $match) use ($columns, $like) {
-            foreach ($columns as $column) {
-                $match->orWhere($column, 'like', $like);
-            }
-        });
-    }
-
-    private function item(string $type, int $id, ?string $title, ?string $subtitle = null, ?string $context = null, ?int $eventId = null, array $extra = []): array
-    {
-        return array_merge([
-            'type' => $type,
-            'id' => $id,
-            'title' => $title ?: 'Untitled',
-            'subtitle' => $subtitle,
-            'context' => $context,
-            'event_id' => $eventId,
-        ], $extra);
     }
 
     private function group(string $key, int $total, array $items, int $page, int $perPage): array
